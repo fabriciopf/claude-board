@@ -2,7 +2,7 @@ import path from 'node:path';
 import { paths, protectedBranchList, type Config } from '../config.js';
 import { imageRefs } from '../shared/images.js';
 import { readList } from '../service/split.js';
-import { STATUS_LABELS, STATUS_SHORT_LABELS, type App, type CardDetail, type CardRef, type Label } from '../shared/domain.js';
+import { STATUS_LABELS, STATUS_SHORT_LABELS, type App, type CardDetail, type CardRef, type Label, type Repository } from '../shared/domain.js';
 
 export type PromptKind = 'first' | 'reply' | 'adjust' | 'comment' | 'retry' | 'requeue' | 'moved';
 
@@ -23,6 +23,8 @@ export interface PromptInput {
   detail: CardDetail;
   apps: App[];
   labels: Label[];
+  /** Registered repositories, to name the ones the card is about (D70). */
+  repositories?: Repository[];
   cwd: string;
   /** Folder Claude Code starts in (the VS Code workspace), when different from where the card's work happens. */
   startDir?: string;
@@ -113,7 +115,7 @@ function imagesContext(description: string, comments: CardDetail['comments']): s
 }
 
 function cardContext(input: PromptInput): string {
-  const { config, detail, apps, labels, cwd, branch } = input;
+  const { config, detail, apps, labels, repositories = [], cwd, branch } = input;
   const card = detail.card;
   const app = apps.find((a) => a.id === card.appId);
   const appLine = app ? `\n- Projeto: ${app.name}${app.path ? ` (pasta ${app.path})` : ''}` : '';
@@ -121,6 +123,11 @@ function cardContext(input: PromptInput): string {
     .map((id) => labels.find((l) => l.id === id)?.name)
     .filter(Boolean)
     .join(', ');
+  const repositoryNames = (card.repositoryIds ?? [])
+    .map((id) => repositories.find((x) => x.id === id)?.name)
+    .filter(Boolean)
+    .join(', ');
+  const repositoryLine = repositoryNames ? `\n- Repositórios: ${repositoryNames}` : '';
   const checklist = detail.checklist.length ? detail.checklist.map((i) => `- [${i.done ? 'x' : ' '}] ${i.text}`).join('\n') : '(vazio)';
   const links = card.links.length ? card.links.map((l) => `- ${l.kind}: ${l.title ? `${l.title} — ` : ''}${l.value}`).join('\n') : '(nenhum)';
   const comments = detail.comments
@@ -130,7 +137,7 @@ function cardContext(input: PromptInput): string {
     .join('\n');
   return `## Card #${card.id}: ${card.title}
 
-- Lista: ${STATUS_LABELS[card.status]}${labelNames ? ` · Labels: ${labelNames}` : ''}${appLine}
+- Lista: ${STATUS_LABELS[card.status]}${labelNames ? ` · Labels: ${labelNames}` : ''}${appLine}${repositoryLine}
 - Prioridade: ${card.priority}${card.dueDate ? ` · Prazo: ${card.dueDate}` : ''}
 - Diretório de trabalho: ${cwd}${branch ? ` (branch ${branch})` : ''}
 

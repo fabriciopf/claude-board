@@ -49,6 +49,16 @@ export interface Config {
   runnerEntrypoint: string;
   /** Minutes between reads of the calendar for the header (D62); 0 = off. */
   agendaRefreshMinutes: number;
+  /** Checkout of the Board's public copy (origin on GitHub); a concluded Board card pushes there and opens a draft PR (D66). '' = off. */
+  mirrorRepoPath: string;
+  /** Branch of the public repository the PRs target. */
+  mirrorBaseBranch: string;
+  /** Paths of the Board's repo left out of the public copy, comma-separated. */
+  mirrorExclude: string;
+  /** gh account that pushes and opens the PR, without switching the active one; '' = the machine's own git and gh login. */
+  mirrorGhUser: string;
+  /** Terms (comma-separated, case-insensitive) that stop the push when they appear in what would go public. */
+  mirrorBlockTerms: string;
 }
 
 export const DEFAULT_CONFIG: Config = {
@@ -83,6 +93,11 @@ export const DEFAULT_CONFIG: Config = {
   jiraBaseUrl: '',
   runnerEntrypoint: 'claude-vscode',
   agendaRefreshMinutes: 30,
+  mirrorRepoPath: '',
+  mirrorBaseBranch: 'main',
+  mirrorExclude: 'DECISIONS.md',
+  mirrorGhUser: '',
+  mirrorBlockTerms: '',
 };
 
 /** The protected branches as a list; an empty setting falls back to the default. */
@@ -176,6 +191,11 @@ export function saveConfig(current: Config, patch: Partial<Config>): Config {
   if (!['', 'window', 'background'].includes(next.publishRestartMode)) throw new Error('publishRestartMode: use "", "window" ou "background".');
   next.publishBranch = String(next.publishBranch ?? '').trim() || DEFAULT_CONFIG.publishBranch;
   next.runnerEntrypoint = String(next.runnerEntrypoint ?? '').trim();
+  next.mirrorRepoPath = String(next.mirrorRepoPath ?? '').trim();
+  if (next.mirrorRepoPath && !fs.existsSync(path.resolve(expandHome(next.mirrorRepoPath)))) throw new Error(`A pasta do repositório público ${next.mirrorRepoPath} não existe.`);
+  next.mirrorBaseBranch = String(next.mirrorBaseBranch ?? '').trim() || DEFAULT_CONFIG.mirrorBaseBranch;
+  next.mirrorGhUser = String(next.mirrorGhUser ?? '').trim();
+  if (next.mirrorGhUser && !/^[A-Za-z0-9-]+$/.test(next.mirrorGhUser)) throw new Error('mirrorGhUser: use o login do GitHub (letras, números e hífen).');
   next.protectedBranches = protectedBranchList(next.protectedBranches).join(', ');
   next.jiraBaseUrl = String(next.jiraBaseUrl ?? '').trim().replace(/\/+$/, '');
   if (next.jiraBaseUrl && !/^https?:\/\//.test(next.jiraBaseUrl)) throw new Error('jiraBaseUrl: use uma URL http(s), como https://empresa.atlassian.net.');

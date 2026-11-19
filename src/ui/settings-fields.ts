@@ -6,7 +6,7 @@ export type SettingsTab = 'runs' | 'organization' | 'git' | 'claude';
 
 export const SETTINGS_TABS: { id: SettingsTab; label: string }[] = [
   { id: 'runs', label: 'Execuções' },
-  { id: 'organization', label: 'Projetos e labels' },
+  { id: 'organization', label: 'Projetos, labels e repositórios' },
   { id: 'git', label: 'Workspace e Git' },
   { id: 'claude', label: 'Claude Code' },
 ];
@@ -74,6 +74,23 @@ export const FIELDS: Field[] = [
     label: 'Endereço do Jira',
     type: 'text',
     hint: 'ex.: https://empresa.atlassian.net; um link do tipo Jira com a chave (ABC-123) abre ali; vazio = a chave fica como texto',
+  },
+  {
+    key: 'mirrorRepoPath',
+    tab: 'git',
+    label: 'Repositório público do Board',
+    type: 'text',
+    hint: 'checkout da cópia pública (origin no GitHub); um card do Board que vai para "Concluída" leva a branch publicada para lá, numa branch cb/<id>-<título>, com PR em rascunho; vazio = desligado',
+  },
+  { key: 'mirrorBaseBranch', tab: 'git', label: 'Branch base do repositório público', type: 'text', hint: 'para onde os PRs apontam' },
+  { key: 'mirrorExclude', tab: 'git', label: 'Arquivos fora do repositório público', type: 'text', hint: 'separe por vírgula; pasta vale inteira' },
+  { key: 'mirrorGhUser', tab: 'git', label: 'Conta do GitHub do repositório público', type: 'text', hint: 'login já entrado no gh (gh auth login); o push e o PR saem por ela sem trocar a conta ativa; vazio = a conta ativa' },
+  {
+    key: 'mirrorBlockTerms',
+    tab: 'git',
+    label: 'Termos que barram o envio público',
+    type: 'text',
+    hint: 'separe por vírgula; se algum aparecer nas linhas novas ou no título, nada é enviado e o card recebe a lista',
   },
   { key: 'defaultBaseBranch', tab: 'git', label: 'Branch base padrão', type: 'text' },
   { key: 'worktreeRoot', tab: 'git', label: 'Pasta dos worktrees', type: 'text', emptyIsNull: true, hint: 'vazio = ao lado do repositório' },

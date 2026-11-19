@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
-import type { App, Label } from '../shared/domain';
+import type { App, Label, Repository } from '../shared/domain';
 import { api } from './api';
 import { AppsPanel } from './AppsPanel';
 import { HooksPanel } from './HooksPanel';
@@ -136,10 +136,12 @@ function ConfigFields({
 export function SettingsView({
   apps,
   labels,
+  repositories = [],
   notify,
 }: {
   apps: App[];
   labels: Label[];
+  repositories?: Repository[];
   notify: (msg: string, error?: boolean) => void;
 }) {
   const [tab, setTab] = useState<SettingsTab>(readTab);
@@ -147,6 +149,7 @@ export function SettingsView({
   const [draft, setDraft] = useState<Config>({});
   const [doctor, setDoctor] = useState<DoctorCheck[] | null>(null);
   const [newLabel, setNewLabel] = useState({ name: '', color: '#64748b' });
+  const [newRepository, setNewRepository] = useState('');
   const tabRefs = useRef<Record<string, HTMLButtonElement | null>>({});
 
   useEffect(() => {
@@ -272,6 +275,43 @@ export function SettingsView({
                     }
                   >
                     Criar label
+                  </button>
+                </div>
+              </div>
+
+              <div className="panel">
+                <h3>Repositórios</h3>
+                <p className="muted small">Os repositórios a que um card se refere. Um card pode ter vários. Não muda a pasta em que a execução trabalha.</p>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  {repositories.map((x) => (
+                    <span key={x.id} className="repo-chip">
+                      {x.name}
+                      <button
+                        className="btn link small"
+                        aria-label={'Apagar ' + x.name}
+                        onClick={() =>
+                          window.confirm(`Apagar o repositório "${x.name}"? Ele sai de todos os cards que o têm.`) &&
+                          void api.del(`/api/repositories/${x.id}`).catch((err) => notify(err.message, true))
+                        }
+                      >
+                        ✕
+                      </button>
+                    </span>
+                  ))}
+                </div>
+                <div className="actions">
+                  <input className="input" placeholder="Novo repositório" aria-label="Novo repositório" value={newRepository} onChange={(e) => setNewRepository(e.target.value)} />
+                  <button
+                    className="btn"
+                    disabled={!newRepository.trim()}
+                    onClick={() =>
+                      void api
+                        .post('/api/repositories', { name: newRepository })
+                        .then(() => setNewRepository(''))
+                        .catch((err) => notify(err.message, true))
+                    }
+                  >
+                    Adicionar repositório
                   </button>
                 </div>
               </div>

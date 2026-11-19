@@ -48,6 +48,7 @@ export async function registerApi(app: FastifyInstance, ctx: AppContext): Promis
       cards: s.listCards({ includeArchived: false, onlyArchived: q.archived === '1' }),
       apps: s.listApps(true),
       labels: s.listLabels(),
+      repositories: s.listRepositories(),
       runner: runnerState(ctx.db, isPaused(ctx), ctx.runner?.concurrency?.()),
       usage: ctx.usage?.get() ?? null,
       agenda: ctx.agenda?.get() ?? null,
@@ -104,6 +105,7 @@ export async function registerApi(app: FastifyInstance, ctx: AppContext): Promis
       repoPath: b.repoPath ?? null,
       baseBranch: b.baseBranch ?? null,
       labelIds: Array.isArray(b.labelIds) ? b.labelIds.map(Number) : [],
+      repositoryIds: Array.isArray(b.repositoryIds) ? b.repositoryIds.map(Number) : [],
     };
     const card = s.createCard(input, 'user', 'manual');
     if (card.status === 'ready') ctx.runner?.nudge();
@@ -127,6 +129,10 @@ export async function registerApi(app: FastifyInstance, ctx: AppContext): Promis
 
   app.put<{ Params: Params }>('/api/cards/:id/labels', async (req) =>
     s.setLabels(num(req.params.id), ((req.body as Body)?.labelIds ?? []).map(Number), 'user'),
+  );
+
+  app.put<{ Params: Params }>('/api/cards/:id/repositories', async (req) =>
+    s.setRepositories(num(req.params.id), ((req.body as Body)?.repositoryIds ?? []).map(Number), 'user'),
   );
 
   app.post<{ Params: Params }>('/api/cards/:id/comments', async (req) => {
@@ -208,6 +214,13 @@ export async function registerApi(app: FastifyInstance, ctx: AppContext): Promis
   app.patch<{ Params: Params }>('/api/labels/:id', async (req) => s.updateLabel(num(req.params.id), (req.body ?? {}) as Body));
   app.delete<{ Params: Params }>('/api/labels/:id', async (req) => {
     s.deleteLabel(num(req.params.id));
+    return { ok: true };
+  });
+  app.get('/api/repositories', async () => s.listRepositories());
+  app.post('/api/repositories', async (req) => s.createRepository((req.body ?? {}) as any));
+  app.patch<{ Params: Params }>('/api/repositories/:id', async (req) => s.updateRepository(num(req.params.id), (req.body ?? {}) as Body));
+  app.delete<{ Params: Params }>('/api/repositories/:id', async (req) => {
+    s.deleteRepository(num(req.params.id));
     return { ok: true };
   });
 

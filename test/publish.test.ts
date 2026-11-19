@@ -2,10 +2,10 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { paths } from '../src/config.js';
+import { boardHome, paths } from '../src/config.js';
 import { nowIso } from '../src/db/index.js';
 import { mergeDecisions } from '../src/publish/decisions.js';
-import { isScreenOnly, Publisher } from '../src/publish/publisher.js';
+import { DEFAULT_COMMANDS, isScreenOnly, Publisher } from '../src/publish/publisher.js';
 import { ensureWorkdir } from '../src/runner/worktree.js';
 import { runnerState } from '../src/service/runner-state.js';
 import { makeContext, tempDir } from './helpers.js';
@@ -279,7 +279,26 @@ describe('publication (D42)', () => {
     await publisher.whenIdle();
     expect(head()).toBe(before);
     expect(entry(card.id).status).toBe('failed');
-    expect(comments(card.id)).toMatch(/Rodando os testes[\s\S]*1 failed/);
+    expect(comments(card.id)).toMatch(/Rodando os testes[\s\S]*segunda rodada[\s\S]*1 failed/);
+  });
+
+  it('a test failure that does not repeat on the serial rerun still publishes (card #110)', async () => {
+    const { card } = cardWithBranch('Teste lento', { 'src/ui/App.tsx': 'export const title = "slow";\n', FLAKY_TESTS: '1' });
+    publisher.onDelivered(card.id);
+    await publisher.whenIdle();
+    expect(entry(card.id).status).toBe('published');
+    expect(fs.readFileSync(path.join(repo, 'src', 'ui', 'App.tsx'), 'utf8')).toMatch(/slow/);
+    expect(fs.readFileSync(path.join(boardHome(), 'publish.log'), 'utf8')).toMatch(/repetindo um arquivo por vez[\s\S]*Test timed out/);
+  });
+
+  it('the default test commands are tolerant to a loaded machine (card #110)', () => {
+    expect(DEFAULT_COMMANDS.test[1]).toEqual(expect.arrayContaining(['--maxWorkers=50%', '--testTimeout=60000']));
+    expect(DEFAULT_COMMANDS.testRetry[1]).toEqual(expect.arrayContaining(['--no-file-parallelism', '--testTimeout=120000']));
+    // A publisher older than #110 runs a bare `npm test`: the branch's own config must carry the tolerance.
+    const config = fs.readFileSync('vitest.config.ts', 'utf8');
+    expect(config).toMatch(/maxWorkers: '50%'/);
+    expect(config).toMatch(/testTimeout: 60000/);
+    expect(config).toMatch(/retry: 1/);
   });
 
   it('only the other branch fails: the good one goes back to the queue and is published alone', async () => {
@@ -297,6 +316,49 @@ describe('publication (D42)', () => {
     await publisher.whenIdle();
     expect(entry(bad.card.id).status).toBe('failed');
     expect(fs.readFileSync(path.join(repo, 'src', 'ui', 'App.tsx'), 'utf8')).toMatch(/good/);
+  });
+
+  it('a conflict hands the card back to Claude with the merge instruction, and the new delivery publishes (D68)', async () => {
+    const { card, branch, wt } = cardWithBranch('Conflito devolvido', { 'src/server.ts': 'export const port = 1111;\n' });
+    fs.writeFileSync(path.join(repo, 'src', 'server.ts'), 'export const port = 2222;\n');
+    git(repo, 'commit', '-q', '-am', 'master moves');
+    publisher.onDelivered(card.id);
+    await publisher.whenIdle();
+
+    const back = ctx.service.getCard(card.id);
+    expect(back.status).toBe('ready');
+    expect(back.owner).toBe('claude');
+    expect(back.nextPromptKind).toBe('adjust');
+    expect(back.nextPrompt).toContain('git merge master');
+    expect(back.nextPrompt).toContain(`\`${branch}\``);
+    expect(back.nextPrompt).toContain('`src/server.ts`');
+    expect(comments(card.id)).toMatch(/Devolvi o card ao Claude para integrar a `master`/);
+
+    // Claude merges master, resolves and delivers again: the same entry goes back to the queue and publishes.
+    git(wt, 'merge', '-q', 'master', '-X', 'theirs', '-m', 'merge master');
+    ctx.service.moveCard(card.id, { status: 'review' }, 'system');
+    publisher.onDelivered(card.id);
+    await publisher.whenIdle();
+    expect(entry(card.id).status).toBe('published');
+    expect(git(repo, 'merge-base', '--is-ancestor', branch, 'master')).toBe('');
+  });
+
+  it('a conflict that survives the hand-back at the same master stays failed, without looping (D68)', async () => {
+    const { card } = cardWithBranch('Conflito teimoso', { 'src/server.ts': 'export const port = 1111;\n' });
+    fs.writeFileSync(path.join(repo, 'src', 'server.ts'), 'export const port = 2222;\n');
+    git(repo, 'commit', '-q', '-am', 'master moves');
+    publisher.onDelivered(card.id);
+    await publisher.whenIdle();
+    expect(ctx.service.getCard(card.id).status).toBe('ready');
+
+    // Delivered again without solving it: master did not move, so it is not handed back a second time.
+    ctx.service.setNextPrompt(card.id, null, null);
+    ctx.service.moveCard(card.id, { status: 'review' }, 'system');
+    publisher.onDelivered(card.id);
+    await publisher.whenIdle();
+    expect(entry(card.id).status).toBe('failed');
+    expect(ctx.service.getCard(card.id).status).toBe('review');
+    expect(comments(card.id)).toMatch(/Não devolvi o card de novo/);
   });
 
   it('renumbers DECISIONS.md when its numbering is the only conflict', async () => {

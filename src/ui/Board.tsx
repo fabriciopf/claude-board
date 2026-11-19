@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState, type KeyboardEvent } from 'react';
 import {
   DndContext,
   DragOverlay,
-  PointerSensor,
+  MouseSensor,
+  TouchSensor,
   closestCorners,
   useDroppable,
   useSensor,
@@ -13,8 +14,10 @@ import {
 } from '@dnd-kit/core';
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { NEWEST_FIRST_STATUSES, STATUS_DESCRIPTIONS, STATUS_LABELS, STATUSES, type App, type CardSummary, type Label, type Status } from '../shared/domain';
+import { NEWEST_FIRST_STATUSES, STATUS_DESCRIPTIONS, STATUS_LABELS, STATUSES, type App, type CardSummary, type Label, type Repository, type Status } from '../shared/domain';
 import { CardTile } from './CardTile';
+import { columnCountText } from './board-filters';
+import { DEFAULT_SORT, compareCards, type CardSort } from './card-sort';
 
 /** Lists nobody drops a card into by hand: the runner and the importer own them. */
 const NO_DROP: Status[] = ['running', 'triage'];
@@ -42,9 +45,10 @@ export function readCollapsed(): Set<Status> {
 
 type Columns = Record<Status, number[]>;
 
-function group(cards: CardSummary[]): Columns {
+/** Ids per column in the chosen order (card #152); the board order is the default. */
+export function group(cards: CardSummary[], sort: CardSort = DEFAULT_SORT.board): Columns {
   const out = Object.fromEntries(STATUSES.map((s) => [s, [] as number[]])) as Columns;
-  for (const c of [...cards].sort((a, b) => a.position - b.position || a.id - b.id)) out[c.status].push(c.id);
+  for (const c of [...cards].sort((a, b) => compareCards(a, b, sort))) out[c.status].push(c.id);
   return out;
 }
 
@@ -65,6 +69,7 @@ interface BoardProps {
   cards: CardSummary[];
   apps: App[];
   labels: Label[];
+  repositories?: Repository[];
   focusId: number | null;
   onFocus: (id: number | null) => void;
   onOpen: (id: number) => void;
@@ -72,12 +77,17 @@ interface BoardProps {
   onQuickAdd: (status: Status, title: string) => Promise<void>;
   quickAddStatus: Status | null;
   setQuickAddStatus: (s: Status | null) => void;
+  /** Cards per status before the search and filters; set only while one is active (card #108). */
+  totals?: Record<string, number>;
+  /** Order inside each column (card #152). Any order but the board's own one makes dragging only change the column. */
+  sort?: CardSort;
 }
 
 function SortableCard(props: {
   card: CardSummary;
   apps: Map<number, App>;
   labels: Map<number, Label>;
+  repositories: Map<number, Repository>;
   focused: boolean;
   onOpen: (id: number) => void;
   onFocus: (id: number) => void;
@@ -99,6 +109,7 @@ function SortableCard(props: {
       card={card}
       apps={props.apps}
       labels={props.labels}
+      repositories={props.repositories}
       focused={props.focused}
       dragging={isDragging}
       style={{ transform: CSS.Transform.toString(transform), transition }}
@@ -119,6 +130,7 @@ function Column(props: {
   byId: Map<number, CardSummary>;
   apps: Map<number, App>;
   labels: Map<number, Label>;
+  repositories: Map<number, Repository>;
   focusId: number | null;
   collapsed: boolean;
   toggleCollapsed: () => void;
@@ -128,7 +140,10 @@ function Column(props: {
   quickAdd: boolean;
   setQuickAdd: (open: boolean) => void;
   onQuickAdd: (title: string) => Promise<void>;
+  total?: number;
 }) {
+  const count = columnCountText(props.ids.length, props.total);
+  const countTitle = props.total === undefined ? undefined : `${props.ids.length} de ${props.total} cards com a busca e os filtros atuais`;
   const { setNodeRef } = useDroppable({ id: colId(props.status), disabled: NO_DROP.includes(props.status) });
   const [draft, setDraft] = useState('');
   const [showInfo, setShowInfo] = useState(false);
@@ -146,7 +161,7 @@ function Column(props: {
           <span className="column-expand-arrow" aria-hidden="true">
             {side === 'right' ? '‹' : '›'}
           </span>
-          <span className="column-count">{props.ids.length}</span>
+          <span className="column-count" title={countTitle}>{count}</span>
           <span className="column-title">{STATUS_LABELS[props.status]}</span>
         </button>
       </section>
@@ -172,7 +187,7 @@ function Column(props: {
         >
           i
         </button>
-        <span className="column-count">{props.ids.length}</span>
+        <span className="column-count" title={countTitle}>{count}</span>
         {side && (
           <button
             className="btn link small"
@@ -195,6 +210,7 @@ function Column(props: {
                 card={card}
                 apps={props.apps}
                 labels={props.labels}
+                repositories={props.repositories}
                 focused={props.focusId === id}
                 onOpen={props.onOpen}
                 onFocus={props.onFocus}
@@ -247,15 +263,24 @@ export function Board(props: BoardProps) {
   const byId = useMemo(() => new Map(props.cards.map((c) => [c.id, c])), [props.cards]);
   const apps = useMemo(() => new Map(props.apps.map((a) => [a.id, a])), [props.apps]);
   const labels = useMemo(() => new Map(props.labels.map((l) => [l.id, l])), [props.labels]);
-  const [columns, setColumns] = useState<Columns>(() => group(props.cards));
+  const repositories = useMemo(() => new Map((props.repositories ?? []).map((x) => [x.id, x])), [props.repositories]);
+  const sort = props.sort ?? DEFAULT_SORT.board;
+  const manual = sort.key === 'manual';
+  const [columns, setColumns] = useState<Columns>(() => group(props.cards, sort));
   const [activeId, setActiveId] = useState<number | null>(null);
   const [overCol, setOverCol] = useState<Status | null>(null);
   const [collapsed, setCollapsed] = useState<Set<Status>>(readCollapsed);
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
+  // Mouse drags after 6px. A finger has to hold the card first (card #106): a plain swipe scrolls the
+  // board sideways and the columns up and down instead of picking the card up.
+  const sensors = useSensors(
+    useSensor(MouseSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 8 } }),
+  );
 
   useEffect(() => {
-    if (activeId === null) setColumns(group(props.cards));
-  }, [props.cards, activeId]);
+    if (activeId === null) setColumns(group(props.cards, sort));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.cards, activeId, sort.key, sort.dir]);
 
   const toggleCollapsed = (status: Status) => {
     const cfg = COLLAPSIBLE[status];
@@ -305,13 +330,29 @@ export function Board(props: BoardProps) {
       setActiveId(null);
       return;
     }
+    // With a sort other than the board order, the order inside a column is the sort's: a drop in the
+    // same column changes nothing, and the card goes back where the sort puts it.
+    if (!manual && container === card.status) {
+      setColumns(group(props.cards, sort));
+      setActiveId(null);
+      return;
+    }
+    if (!manual) {
+      // Into another column: the drop point means nothing in a sorted column, so the card takes the
+      // place it would have in the board order (top of a newest-first list, else the end).
+      const target = group(props.cards)[container].filter((id) => id !== moving);
+      const index = NEWEST_FIRST_STATUSES.includes(container) ? 0 : target.length;
+      setActiveId(null);
+      await props.onMove(moving, container, positionAt([...target.slice(0, index), moving, ...target.slice(index)], index, byId, moving));
+      return;
+    }
     let ids = columns[container];
     const overIndex = ids.indexOf(Number(over.id));
     const fromIndex = ids.indexOf(moving);
     if (overIndex >= 0 && overIndex !== fromIndex) ids = arrayMove(ids, fromIndex, overIndex);
     setColumns((prev) => ({ ...prev, [container]: ids }));
     const index = ids.indexOf(moving);
-    const unchanged = container === card.status && group(props.cards)[container].indexOf(moving) === index;
+    const unchanged = container === card.status && group(props.cards, sort)[container].indexOf(moving) === index;
     setActiveId(null);
     if (unchanged) return;
     await props.onMove(moving, container, positionAt(ids, index, byId, moving));
@@ -329,7 +370,7 @@ export function Board(props: BoardProps) {
       onDragCancel={() => {
         setActiveId(null);
         setOverCol(null);
-        setColumns(group(props.cards));
+        setColumns(group(props.cards, sort));
       }}
     >
       <div className="board">
@@ -341,6 +382,7 @@ export function Board(props: BoardProps) {
             byId={byId}
             apps={apps}
             labels={labels}
+            repositories={repositories}
             focusId={props.focusId}
             collapsed={collapsed.has(status)}
             toggleCollapsed={() => toggleCollapsed(status)}
@@ -350,16 +392,17 @@ export function Board(props: BoardProps) {
             quickAdd={props.quickAddStatus === status}
             setQuickAdd={(open) => props.setQuickAddStatus(open ? status : null)}
             onQuickAdd={(title) => props.onQuickAdd(status, title)}
+            total={props.totals ? (props.totals[status] ?? 0) : undefined}
           />
         ))}
       </div>
-      <DragOverlay>{active ? <CardTile card={active} apps={apps} labels={labels} overlay /> : null}</DragOverlay>
+      <DragOverlay>{active ? <CardTile card={active} apps={apps} labels={labels} repositories={repositories} overlay /> : null}</DragOverlay>
     </DndContext>
   );
 }
 
 /** Ids per visible column, in screen order, for arrow-key navigation. */
-export function navigationGrid(cards: CardSummary[], collapsed: ReadonlySet<Status>): number[][] {
-  const cols = group(cards);
+export function navigationGrid(cards: CardSummary[], collapsed: ReadonlySet<Status>, sort?: CardSort): number[][] {
+  const cols = group(cards, sort);
   return STATUSES.filter((s) => !collapsed.has(s)).map((s) => cols[s]);
 }

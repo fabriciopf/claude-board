@@ -49,6 +49,8 @@ function eventText(e: BoardEvent): string | null {
       return `editou ${((p.fields as string[]) ?? []).map((f) => FIELD_NAMES[f] ?? f).join(', ')}`;
     case 'labels':
       return 'mudou as labels';
+    case 'repositories':
+      return 'mudou os repositórios';
     case 'archived':
       return 'arquivou o card';
     case 'unarchived':
@@ -75,6 +77,8 @@ function eventText(e: BoardEvent): string | null {
       return null; // the answer itself is shown as a comment
     case 'reopened_by_comment':
       return null; // the comment and the move to the queue are shown on their own
+    case 'publish_conflict_returned':
+      return null; // the system comment and the move to the queue say it (D68)
     case 'execution_started':
       return null; // shown by the execution block
     case 'execution_finished':

@@ -66,6 +66,7 @@ export function createMcpServer(ctx: AppContext, session: McpSession): McpServer
   const compact = (c: Card) => {
     const apps = new Map(s.listApps(true).map((a) => [a.id, a.name]));
     const labels = new Map(s.listLabels().map((l) => [l.id, l.name]));
+    const repositories = new Map(s.listRepositories().map((x) => [x.id, x.name]));
     return {
       id: c.id,
       title: c.title,
@@ -74,6 +75,7 @@ export function createMcpServer(ctx: AppContext, session: McpSession): McpServer
       owner: c.owner,
       app: c.appId ? apps.get(c.appId) : null,
       labels: c.labelIds.map((id) => labels.get(id)).filter(Boolean),
+      repositories: c.repositoryIds.map((id) => repositories.get(id)).filter(Boolean),
       priority: c.priority,
       dueDate: c.dueDate,
       updatedAt: c.updatedAt,
@@ -114,11 +116,12 @@ export function createMcpServer(ctx: AppContext, session: McpSession): McpServer
   server.registerTool(
     'board_list_cards',
     {
-      description: 'Lista cards do quadro, com filtros opcionais por status, projeto, label, dono e texto.',
+      description: 'Lista cards do quadro, com filtros opcionais por status, projeto, label, repositório, dono e texto.',
       inputSchema: {
         status: z.union([statusEnum, z.array(statusEnum)]).optional().describe(`Status: ${STATUSES.join(', ')}`),
         app: z.string().optional().describe('Nome do projeto (ex.: "NFS-e") ou nome da pasta dele'),
         label: z.string().optional().describe('Nome da label'),
+        repository: z.string().optional().describe('Nome de um repositório cadastrado (ex.: hdb, ignite, sms)'),
         owner: z.enum(['user', 'claude']).optional(),
         text: z.string().optional().describe('Busca no título e na descrição'),
         includeArchived: z.boolean().optional(),
@@ -141,6 +144,7 @@ export function createMcpServer(ctx: AppContext, session: McpSession): McpServer
           if (!label) return ok([]);
           filter.labelId = label.id;
         }
+        if (args.repository) filter.repositoryId = s.resolveRepositories([args.repository])[0];
         return ok(s.listCards(filter).map(compact));
       }),
   );
@@ -184,6 +188,10 @@ export function createMcpServer(ctx: AppContext, session: McpSession): McpServer
         description: z.string().optional().describe('Markdown: o que deve ser feito, contexto e critério de pronto'),
         app: z.string().optional().describe('Nome de um projeto cadastrado (ex.: "Conciliação bancária") ou nome da pasta dele'),
         labels: z.array(z.string()).optional(),
+        repositories: z
+          .array(z.string())
+          .optional()
+          .describe('Repositórios a que o card se refere, um ou vários, entre os cadastrados (hdb, ignite, sms de início). Não é a pasta de trabalho (repoPath)'),
         owner: z.enum(['user', 'claude']).optional(),
         status: z.enum(['backlog', 'ready', 'waiting_third_party']).optional(),
         repoPath: z.string().optional().describe('Caminho local do repositório git, quando a tarefa mexe em código'),
@@ -202,6 +210,7 @@ export function createMcpServer(ctx: AppContext, session: McpSession): McpServer
             descriptionMd: args.description,
             appId: resolveApp(args.app) ?? null,
             labelIds: args.labels ? s.resolveLabels(args.labels) : [],
+            repositoryIds: args.repositories ? s.resolveRepositories(args.repositories) : [],
             owner,
             status: args.status === 'ready' ? 'backlog' : args.status,
             repoPath: args.repoPath,
@@ -223,7 +232,7 @@ export function createMcpServer(ctx: AppContext, session: McpSession): McpServer
   server.registerTool(
     'card_update',
     {
-      description: 'Edita título, descrição, prioridade, prazo, projeto, repositório, dono, modelo ou effort de um card.',
+      description: 'Edita título, descrição, prioridade, prazo, projeto, pasta do repositório (repoPath), repositórios relacionados, dono, modelo ou effort de um card.',
       inputSchema: {
         id: cardIdArg,
         title: z.string().optional(),
@@ -232,6 +241,10 @@ export function createMcpServer(ctx: AppContext, session: McpSession): McpServer
         dueDate: z.string().nullable().optional(),
         app: z.string().nullable().optional().describe('Nome de um projeto cadastrado ou da pasta dele; null tira o projeto'),
         repoPath: z.string().nullable().optional(),
+        repositories: z
+          .array(z.string())
+          .optional()
+          .describe('Substitui a lista de repositórios relacionados (nomes cadastrados, ex.: ["hdb", "sms"]); [] limpa'),
         owner: z.enum(['user', 'claude']).optional(),
         model: z.string().nullable().optional().describe('Modelo das execuções deste card (ex.: claude-opus-5-5, claude-sonnet-5-5, claude-haiku-5-5); vazio ou null = o padrão da configuração'),
         effort: z.enum(EFFORT_ENUM).nullable().optional().describe('Effort das execuções deste card; null = o padrão da configuração'),
@@ -239,8 +252,11 @@ export function createMcpServer(ctx: AppContext, session: McpSession): McpServer
     },
     (args) =>
       guard(() => {
-        const card = s.updateCard(
-          resolveCardId(args.id),
+        const cardId = resolveCardId(args.id);
+        // Resolved before any write, so an unknown name leaves the card untouched.
+        const repositoryIds = args.repositories ? s.resolveRepositories(args.repositories) : undefined;
+        let card = s.updateCard(
+          cardId,
           {
             title: args.title,
             descriptionMd: args.description,
@@ -254,6 +270,7 @@ export function createMcpServer(ctx: AppContext, session: McpSession): McpServer
           },
           'claude',
         );
+        if (repositoryIds) card = s.setRepositories(cardId, repositoryIds, 'claude');
         return ok({ updated: compact(card) });
       }),
   );

@@ -6,6 +6,7 @@ import type { AppContext } from '../context.js';
 import { nowIso } from '../db/index.js';
 import type { Card, PublishEntry, PublishKind, PublishPhase, PublishState, PublishStatus } from '../shared/domain.js';
 import { mergeDecisions } from './decisions.js';
+import { Mirror, type MirrorOptions } from './mirror.js';
 import { canonicalDir, git, gitShow, linkDir, runCommand, samePath, spawnDetached, syncDir, unlinkJunction, type CmdResult } from './git.js';
 
 /**
@@ -20,6 +21,14 @@ type Command = [string, string[]];
 export interface PublishCommands {
   install: Command;
   test: Command;
+  /**
+   * Second test run when the first fails (card #110): one file at a time, longer timeouts. The
+   * suite runs while the Board's own executions load the machine, and its timing tests then fail
+   * with no defect in the code (workers that take too long to start, tests over 20 s). Only a
+   * failure that survives this run aborts the publication. Defaults to `test` when only `test` is
+   * replaced.
+   */
+  testRetry: Command;
   /** Full build: dist/server and dist/ui. */
   build: Command;
   /** Screen only: dist/ui. */
@@ -28,7 +37,10 @@ export interface PublishCommands {
 
 export const DEFAULT_COMMANDS: PublishCommands = {
   install: ['npm', ['install']],
-  test: ['npm', ['test']],
+  // Half the cores and 60 s per test: the machine is shared with the running executions (card #110).
+  // vitest.config.ts says the same; repeated here so the publication keeps it if the config changes.
+  test: ['npm', ['test', '--', '--maxWorkers=50%', '--testTimeout=60000', '--hookTimeout=60000', '--teardownTimeout=60000']],
+  testRetry: ['npm', ['test', '--', '--no-file-parallelism', '--testTimeout=120000', '--hookTimeout=120000', '--teardownTimeout=120000']],
   build: ['npm', ['run', 'build']],
   buildUi: ['npm', ['run', 'build:ui']],
 };
@@ -39,6 +51,8 @@ export interface PublisherOptions {
   /** Replaces the detached restart (tests). */
   restart?: () => Promise<void> | void;
   pollMs?: number;
+  /** Options of the public mirror (tests). */
+  mirror?: MirrorOptions;
 }
 
 /** Files whose change does not need the server restarted: the screen, tests and docs. */
@@ -49,14 +63,43 @@ export function isScreenOnly(files: string[]): boolean {
 const PACKAGE_FILES = ['package.json', 'package-lock.json'];
 const ELIGIBLE: Card['status'][] = ['review', 'done'];
 
+/** A merge conflict of a card's branch with the publish branch (D68). */
+export interface MergeConflict {
+  files: string[];
+  target: string;
+  /** Commit of the publish branch the merge was tried on. */
+  targetHead: string;
+}
+
 class PublishError extends Error {
   constructor(
     message: string,
     /** Entry to blame; null = the whole batch. */
     public entryId: number | null = null,
+    public conflict: MergeConflict | null = null,
   ) {
     super(message);
   }
+}
+
+/** Event that marks a card handed back to Claude after a merge conflict (D68). */
+export const CONFLICT_HANDBACK_EVENT = 'publish_conflict_returned';
+
+const code = (s: string) => '`' + s + '`';
+
+/** Next prompt of a card handed back to Claude after a merge conflict (D68). */
+export function conflictPrompt(branch: string, c: MergeConflict): string {
+  const t = code(c.target);
+  return [
+    `A publicação deste card no Board falhou por conflito de merge da branch ${code(branch)} com a ${t} em: ${c.files.map(code).join(', ')}. Outro card entrou na ${t} depois que você terminou.`,
+    '',
+    `1. No worktree do card, rode ${code(`git merge ${c.target}`)}.`,
+    `2. Resolva os conflitos mantendo o que a ${t} trouxe e reaplicando a sua mudança sobre a estrutura nova: se o código mudou de lugar, leve a sua mudança para o lugar novo.`,
+    '3. Rode o typecheck e os testes dos arquivos afetados, e commite o merge.',
+    '4. Chame card_submit_for_review com um resumo curto do que o conflito exigiu. A publicação volta para a fila sozinha.',
+    '',
+    'Se as duas mudanças se contradizem e resolver pede uma decisão de produto, use card_ask_user em vez de escolher.',
+  ].join('\n');
 }
 
 const fence = (text: string) => `\n\n\`\`\`\n${text.trim().split('\n').slice(-40).join('\n').replace(/```/g, "'''")}\n\`\`\``;
@@ -84,18 +127,63 @@ export class Publisher {
   private commands: PublishCommands;
   private run: NonNullable<PublisherOptions['run']>;
   private pollMs: number;
+  readonly mirror: Mirror;
 
   constructor(
     private ctx: AppContext,
     private opts: PublisherOptions = {},
   ) {
-    this.commands = { ...DEFAULT_COMMANDS, ...opts.commands };
+    const sameRetry = opts.commands?.test && !opts.commands.testRetry ? { testRetry: opts.commands.test } : {};
+    this.commands = { ...DEFAULT_COMMANDS, ...sameRetry, ...opts.commands };
     this.run = opts.run ?? runCommand;
     this.pollMs = opts.pollMs ?? 2000;
+    this.mirror = new Mirror(ctx, () => this.selfRepo(), opts.mirror);
     // The card's worktree goes away when the card is approved (moved to "Concluída"), not when it is published.
     ctx.bus.subscribe((msg) => {
-      if (msg.type === 'card.changed' && msg.cardId && msg.data?.to === 'done' && msg.data?.from !== 'done') this.onCardDone(msg.cardId);
+      if (msg.type === 'card.changed' && msg.cardId && msg.data?.to === 'done' && msg.data?.from !== 'done') {
+        // Decided before the worktree goes: the removal clears the card's branch.
+        const mirror = this.mirrorDecision(msg.cardId);
+        this.onCardDone(msg.cardId);
+        if (mirror === 'now') void this.mirror.request(msg.cardId);
+      }
     });
+  }
+
+  /**
+   * A concluded card of the Board goes to the public mirror (D66) when its work reached the publish
+   * branch: 'now' when it was published, 'later' when its publication is still in the queue (the
+   * publication sends it), null when it has nothing to send or the mirror is off.
+   */
+  mirrorDecision(cardId: number): 'now' | 'later' | null {
+    try {
+      if (!this.mirror.enabled()) return null;
+      const card = this.adoptBranch(this.ctx.service.getCard(cardId));
+      if (!this.isBoardCard(card)) return null;
+      const entry = this.ctx.db.prepare('SELECT status FROM publish_queue WHERE card_id = ? ORDER BY id DESC LIMIT 1').get(cardId) as { status: string } | undefined;
+      if (entry && (entry.status === 'pending' || entry.status === 'publishing')) return 'later';
+      if (entry?.status === 'failed') {
+        this.ctx.service.addComment(cardId, {
+          author: 'system',
+          bodyMd: 'Não enviei ao repositório público: a publicação deste card no Board falhou. Depois que ela passar, o envio sai sozinho.',
+        });
+        return null;
+      }
+      if (entry?.status === 'published') return 'now';
+      // Merged by hand (no queue entry): the card's branch is in the publish branch.
+      const repo = this.selfRepo();
+      if (repo && card.branch && git(repo, ['merge-base', '--is-ancestor', card.branch, this.ctx.config.publishBranch]).ok) return 'now';
+      return null;
+    } catch (err) {
+      this.log(`espelho do card #${cardId}: ${(err as Error).message}`);
+      return null;
+    }
+  }
+
+  /** A card of the Board's project or repo (app = claude-board), with or without a branch. */
+  private isBoardCard(card: Card): boolean {
+    if (this.isSelfCard(card) || this.inSelfRepo(card.repoPath)) return true;
+    const projectPath = card.appId ? this.ctx.service.listApps(true).find((a) => a.id === card.appId)?.path : null;
+    return this.inSelfRepo(projectPath);
   }
 
   /** A card of the Board's repo reached "Concluída": its worktree is no longer needed. */
@@ -432,6 +520,7 @@ export class Publisher {
                 ? `Conflito de merge com \`${target}\` em: ${conflicts.split('\n').map((f) => `\`${f}\``).join(', ')}.`
                 : `O merge de \`${e.branch}\` falhou.${fence(m.out)}`,
               e.id,
+              conflicts ? { files: conflicts.split('\n').filter(Boolean), target, targetHead: origHead } : null,
             );
           }
           notes.set(e.id, [resolved]);
@@ -442,7 +531,7 @@ export class Publisher {
       const env = { ...process.env };
       for (const k of Object.keys(env)) if (k.startsWith('CLAUDE_BOARD_') || k.startsWith('FAKE_CLAUDE')) delete env[k];
       if (needsInstall) await this.step(tmp, 'Instalando dependências', this.commands.install, env);
-      await this.step(tmp, 'Rodando os testes', this.commands.test, env);
+      await this.testStep(tmp, env);
       await this.step(tmp, kind === 'ui' ? 'Compilando a tela' : 'Compilando', kind === 'ui' ? this.commands.buildUi : this.commands.build, env);
       const builtUi = path.join(tmp, 'dist', 'ui');
       if (!fs.existsSync(path.join(builtUi, 'index.html'))) throw new PublishError('O build não gerou `dist/ui/index.html`.');
@@ -473,6 +562,7 @@ export class Publisher {
       }
 
       // Done: record and tell each card. The worktree stays until the card goes to "Concluída".
+      const toMirror: number[] = [];
       for (const e of batch) {
         const extra = notes.get(e.id) ?? [];
         const card = this.ctx.service.getCard(e.cardId);
@@ -480,6 +570,7 @@ export class Publisher {
           // Approved before the publication: its worktree goes now, and a reopening starts from what was published.
           const wt = this.removeCardWorktree(e.cardId);
           if (wt) extra.push(wt);
+          if (this.mirror.enabled()) toMirror.push(e.cardId);
         } else if (card.worktreePath) {
           extra.push(`A worktree \`${card.worktreePath}\` fica até o card ir para "Concluída".`);
         }
@@ -500,6 +591,12 @@ export class Publisher {
       this.dropTmp(repo, tmp);
       tmp = null;
 
+      // Cards approved before their publication go to the public mirror now (D66), before any restart.
+      if (toMirror.length) {
+        this.setPhase('applying', 'Enviando ao repositório público');
+        for (const id of toMirror) await this.mirror.request(id);
+      }
+
       if (kind === 'server') {
         this.setPhase('restarting', 'Reiniciando o servidor');
         await (this.opts.restart ?? (() => this.restartDetached(repo)))();
@@ -517,6 +614,21 @@ export class Publisher {
     this.setPhase(this.phase === 'applying' ? 'applying' : 'preparing', label);
     const r = await this.run(cmd, args, cwd, env);
     if (!r.ok) throw new PublishError(`${label}: \`${[cmd, ...args].join(' ')}\` falhou.${fence(r.out)}`);
+  }
+
+  /** Tests, with one serial rerun before blaming the batch (card #110). */
+  private async testStep(cwd: string, env: NodeJS.ProcessEnv): Promise<void> {
+    this.setPhase('preparing', 'Rodando os testes');
+    const [cmd, args] = this.commands.test;
+    const first = await this.run(cmd, args, cwd, env);
+    if (first.ok) return;
+    this.log(`testes falharam na primeira rodada; repetindo um arquivo por vez.${fence(first.out)}`);
+    const [retryCmd, retryArgs] = this.commands.testRetry;
+    this.setPhase('preparing', 'Repetindo os testes, um arquivo por vez');
+    const second = await this.run(retryCmd, retryArgs, cwd, env);
+    if (second.ok) return;
+    const shown = [retryCmd, ...retryArgs].join(' ');
+    throw new PublishError(`Rodando os testes: \`${shown}\` falhou também na segunda rodada, um arquivo por vez.${fence(second.out)}`);
   }
 
   /** The only conflict is DECISIONS.md and the branch only appended entries: renumber them. */
@@ -568,9 +680,44 @@ export class Publisher {
         continue;
       }
       this.failEntry(e, err.message);
+      if (err.conflict) this.handBackConflict(e, err.conflict);
     }
     this.log(`abortado: ${err.message}`);
     this.changed();
+  }
+
+  /**
+   * A merge conflict does not go away by retrying: the branch stays the same. The card goes back to
+   * Claude with the instruction to bring the publish branch in (D68), and delivering it again requeues
+   * the publication. Once per commit of the publish branch: a conflict that survives Claude's merge
+   * stays failed instead of looping.
+   */
+  private handBackConflict(e: PublishEntry, conflict: MergeConflict): void {
+    const { service, db } = this.ctx;
+    try {
+      const card = service.getCard(e.cardId);
+      if (card.status !== 'review' || card.archived || service.hasRunningExecution(card.id)) return;
+      const last = db
+        .prepare('SELECT payload_json FROM events WHERE card_id = ? AND type = ? ORDER BY id DESC LIMIT 1')
+        .get(card.id, CONFLICT_HANDBACK_EVENT) as { payload_json: string } | undefined;
+      const lastHead = last ? (JSON.parse(last.payload_json) as { targetHead?: string }).targetHead : undefined;
+      if (lastHead === conflict.targetHead) {
+        service.addComment(card.id, {
+          author: 'system',
+          bodyMd: `O conflito continua depois de o Claude integrar a ${code(conflict.target)}. Não devolvi o card de novo, para não entrar em laço: resolva à mão ou peça ajustes.`,
+        });
+        return;
+      }
+      service.setNextPrompt(card.id, conflictPrompt(e.branch, conflict), 'adjust');
+      service.recordEvent(card.id, CONFLICT_HANDBACK_EVENT, { entryId: e.id, targetHead: conflict.targetHead, files: conflict.files }, 'system');
+      service.addComment(card.id, {
+        author: 'system',
+        bodyMd: `Devolvi o card ao Claude para integrar a ${code(conflict.target)} e resolver o conflito. Quando ele entregar de novo, a publicação volta para a fila sozinha.`,
+      });
+      service.moveCard(card.id, { status: 'ready', owner: 'claude', reason: 'conflito na publicação' }, 'system');
+    } catch (err) {
+      this.log(`devolução do card #${e.cardId} após conflito falhou: ${(err as Error).message}`);
+    }
   }
 
   private failEntry(e: PublishEntry, message: string): void {

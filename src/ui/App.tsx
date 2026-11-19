@@ -1,15 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { STATUS_LABELS, type Card, type CardSummary, type Status } from '../shared/domain';
-import { ApiError, api, isOverdue, useServerEvents, type BoardData } from './api';
+import { ApiError, api, useServerEvents, type BoardData } from './api';
 import { Board, navigationGrid, readCollapsed } from './Board';
 import { CardModal } from './CardModal';
 import { chimeFor, electRingerTab, playChime, ring, unlockOnFirstGesture } from './chime';
 import { MonitorIcon, MoonIcon, PauseIcon, PlayIcon, SoundOffIcon, SoundOnIcon, SunIcon } from './HeaderIcons';
 import { ImportView } from './ImportView';
-import { EMPTY_FILTERS, FILTERS_STORE_KEY, hasActiveFilter, parseFilters, pruneFilters, type BoardFilters } from './board-filters';
+import { FILTERS_STORE_KEY, countByStatus, filterCards, hasActiveFilter, parseFilters, pruneFilters, type BoardFilters } from './board-filters';
+import { FilterBar } from './FilterBar';
 import { nextInColumn } from './next-card';
 import { SettingsView } from './SettingsView';
-import { TodayView, todayItems } from './TodayView';
+import { PENDING_VIEW_NAME, TodayView, todayItems } from './TodayView';
+import { SORT_STORE_KEYS, parseSort, type CardSort } from './card-sort';
 import { PublishChip } from './PublishChip';
 import { concurrencySuffix, concurrencyTitle } from './runner-label';
 import { UsageChip } from './UsageChip';
@@ -49,6 +51,9 @@ export function App() {
   const [theme, setTheme] = useState<Theme>(() => (readStore('cb:theme') as Theme) || 'system');
   const [sound, setSound] = useState<boolean>(() => readStore('cb:sound') !== 'off');
   const [filters, setFilters] = useState<BoardFilters>(() => parseFilters(readStore(FILTERS_STORE_KEY)));
+  // Order of the cards, one per view (card #152).
+  const [boardSort, setBoardSort] = useState<CardSort>(() => parseSort('board', readStore(SORT_STORE_KEYS.board)));
+  const [todaySort, setTodaySort] = useState<CardSort>(() => parseSort('today', readStore(SORT_STORE_KEYS.today)));
   const searchRef = useRef<HTMLInputElement>(null);
   const toastTimer = useRef<number>(0);
 
@@ -134,30 +139,22 @@ export function App() {
     writeStore(FILTERS_STORE_KEY, JSON.stringify(filters));
   }, [filters]);
 
-  // A stored app or label that no longer exists would filter the board by an option the select cannot show.
+  useEffect(() => writeStore(SORT_STORE_KEYS.board, JSON.stringify(boardSort)), [boardSort]);
+  useEffect(() => writeStore(SORT_STORE_KEYS.today, JSON.stringify(todaySort)), [todaySort]);
+
+  // A stored app, label or repository that no longer exists would filter the board by an option the select cannot show.
   useEffect(() => {
     if (!data) return;
     const appIds = new Set(data.apps.filter((a) => !a.archived).map((a) => String(a.id)));
     const labelIds = new Set(data.labels.map((l) => String(l.id)));
-    setFilters((prev) => pruneFilters(prev, appIds, labelIds));
+    const repositoryIds = new Set((data.repositories ?? []).map((x) => String(x.id)));
+    setFilters((prev) => pruneFilters(prev, appIds, labelIds, repositoryIds));
   }, [data]);
 
-  const filtered = useMemo(() => {
-    const cards = data?.cards ?? [];
-    const text = filters.text.trim().toLowerCase();
-    const weekAhead = new Date();
-    weekAhead.setDate(weekAhead.getDate() + 7);
-    return cards.filter((c) => {
-      if (text && !(`#${c.id} ${c.title} ${c.descriptionMd}`.toLowerCase().includes(text))) return false;
-      if (filters.appId && String(c.appId ?? '') !== filters.appId) return false;
-      if (filters.labelId && !c.labelIds.includes(Number(filters.labelId))) return false;
-      if (filters.owner && c.owner !== filters.owner) return false;
-      if (filters.due === 'overdue' && !(c.status !== 'done' && isOverdue(c.dueDate))) return false;
-      if (filters.due === 'week' && !(c.dueDate && new Date(c.dueDate) <= weekAhead && c.status !== 'done')) return false;
-      if (filters.due === 'none' && c.dueDate) return false;
-      return true;
-    });
-  }, [data, filters]);
+  const filtered = useMemo(() => filterCards(data?.cards ?? [], filters), [data, filters]);
+
+  // Column counters read "shown/total" while a search or filter is on (card #108).
+  const totals = useMemo(() => (data && hasActiveFilter(filters) ? countByStatus(data.cards) : undefined), [data, filters]);
 
   const move = useCallback(
     async (card: Card | CardSummary, status: Status, position?: number) => {
@@ -204,7 +201,7 @@ export function App() {
         searchRef.current?.focus();
       } else if (view === 'board' && ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
         e.preventDefault();
-        const grid = navigationGrid(filtered, readCollapsed());
+        const grid = navigationGrid(filtered, readCollapsed(), boardSort);
         let col = grid.findIndex((ids) => focusId !== null && ids.includes(focusId));
         let row = col >= 0 ? grid[col].indexOf(focusId!) : 0;
         if (col < 0) {
@@ -230,7 +227,7 @@ export function App() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [openId, filtered, focusId, view]);
+  }, [openId, filtered, focusId, view, boardSort]);
 
   const runner = data?.runner;
   const readyCount = data ? data.cards.filter((c) => c.status === 'ready').length : 0;
@@ -252,13 +249,13 @@ export function App() {
             <rect x="12" y="4" width="8" height="16" rx="2" fill="#d97757" opacity=".7" />
             <rect x="22" y="4" width="8" height="10" rx="2" fill="#d97757" opacity=".45" />
           </svg>
-          Claude Board
+          <span className="brand-name">Claude Board</span>
         </div>
         <nav className="tabs" aria-label="Visões">
           {(
             [
               ['board', 'Quadro'],
-              ['today', `Hoje${data ? ` (${todayItems(data.cards).length})` : ''}`],
+              ['today', `${PENDING_VIEW_NAME}${data ? ` (${todayItems(data.cards).length})` : ''}`],
               ['import', 'Importação'],
               ['archived', 'Arquivados'],
               ['settings', 'Configurações'],
@@ -346,59 +343,28 @@ export function App() {
 
       {view === 'board' && data && (
         <>
-          <div className="toolbar">
-            <input
-              ref={searchRef}
-              type="search"
-              className="input"
-              placeholder="Buscar ( / )"
-              value={filters.text}
-              onChange={(e) => setFilters({ ...filters, text: e.target.value })}
-            />
-            {data.apps.some((a) => !a.archived) && (
-              <select className="input" aria-label="Projeto" value={filters.appId} onChange={(e) => setFilters({ ...filters, appId: e.target.value })}>
-                <option value="">Todos os projetos</option>
-                {data.apps
-                  .filter((a) => !a.archived)
-                  .map((a) => (
-                    <option key={a.id} value={a.id}>
-                      {a.name}
-                    </option>
-                  ))}
-              </select>
-            )}
-            <select className="input" aria-label="Label" value={filters.labelId} onChange={(e) => setFilters({ ...filters, labelId: e.target.value })}>
-              <option value="">Todas as labels</option>
-              {data.labels.map((l) => (
-                <option key={l.id} value={l.id}>
-                  {l.name}
-                </option>
-              ))}
-            </select>
-            <select className="input" aria-label="Dono" value={filters.owner} onChange={(e) => setFilters({ ...filters, owner: e.target.value })}>
-              <option value="">Qualquer dono</option>
-              <option value="user">Você</option>
-              <option value="claude">Claude</option>
-            </select>
-            <select className="input" aria-label="Prazo" value={filters.due} onChange={(e) => setFilters({ ...filters, due: e.target.value })}>
-              <option value="">Qualquer prazo</option>
-              <option value="overdue">Vencidos</option>
-              <option value="week">Próximos 7 dias</option>
-              <option value="none">Sem prazo</option>
-            </select>
-            {hasActiveFilter(filters) && (
-              <button className="btn link" onClick={() => setFilters({ ...EMPTY_FILTERS })}>
-                Limpar filtros
-              </button>
-            )}
+          <FilterBar
+            filters={filters}
+            setFilters={setFilters}
+            apps={data.apps}
+            labels={data.labels}
+            repositories={data.repositories}
+            searchRef={searchRef}
+            sortView="board"
+            sort={boardSort}
+            setSort={setBoardSort}
+          >
             <span className="muted small kbd-hints" style={{ marginLeft: 'auto' }}>
               <span className="kbd">n</span> novo · <span className="kbd">/</span> busca · <span className="kbd">←↑↓→</span> navegar · <span className="kbd">Enter</span> abrir
             </span>
-          </div>
+          </FilterBar>
           <Board
             cards={filtered}
+            totals={totals}
+            sort={boardSort}
             apps={data.apps}
             labels={data.labels}
+            repositories={data.repositories}
             focusId={focusId}
             onFocus={setFocusId}
             onOpen={setOpenId}
@@ -421,7 +387,28 @@ export function App() {
         </>
       )}
 
-      {view === 'today' && data && <TodayView cards={data.cards} apps={data.apps} onOpen={setOpenId} />}
+      {view === 'today' && data && (
+        <>
+          <FilterBar
+            filters={filters}
+            setFilters={setFilters}
+            apps={data.apps}
+            labels={data.labels}
+            repositories={data.repositories}
+            searchRef={searchRef}
+            sortView="today"
+            sort={todaySort}
+            setSort={setTodaySort}
+          />
+          <TodayView
+            cards={filtered}
+            total={hasActiveFilter(filters) ? todayItems(data.cards).length : undefined}
+            apps={data.apps}
+            sort={todaySort}
+            onOpen={setOpenId}
+          />
+        </>
+      )}
 
       {view === 'archived' && data && (
         <div className="page">
@@ -449,7 +436,7 @@ export function App() {
         <ImportView triage={data.cards.filter((c) => c.status === 'triage')} onOpen={setOpenId} notify={notify} />
       )}
 
-      {view === 'settings' && data && <SettingsView apps={data.apps} labels={data.labels} notify={notify} />}
+      {view === 'settings' && data && <SettingsView apps={data.apps} labels={data.labels} repositories={data.repositories} notify={notify} />}
 
       {openId !== null && data && (
         <CardModal
@@ -457,11 +444,12 @@ export function App() {
           cardId={openId}
           apps={data.apps}
           labels={data.labels}
+          repositories={data.repositories}
           onClose={() => setOpenId(null)}
           onOpenCard={setOpenId}
           notify={notify}
           move={(card, status) => move(card, status)}
-          onLeftColumn={(card) => setOpenId(nextInColumn(filtered, card.id, card.status))}
+          onLeftColumn={(card) => setOpenId(nextInColumn(filtered, card.id, card.status, boardSort))}
         />
       )}
 

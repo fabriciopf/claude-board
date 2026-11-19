@@ -1,16 +1,17 @@
 import type { CardSummary, Status } from '../shared/domain';
+import { compareCards, type CardSort } from './card-sort';
 
 /**
  * The card to show after approving or archiving `approvedId`: the one right below it in the same column,
- * as the board orders it (position, then id). When it was the last one, the top of the column.
+ * as the board orders it (the chosen sort, card #152; by default position, then id). When it was the last one, the top of the column.
  * Null when it was the only card there, so the modal just closes.
  *
  * `cards` is the list the board shows (with the filters applied), read before the card leaves the column.
  */
-export function nextInColumn(cards: CardSummary[], approvedId: number, status: Status): number | null {
+export function nextInColumn(cards: CardSummary[], approvedId: number, status: Status, sort?: CardSort): number | null {
   const ids = cards
     .filter((c) => c.status === status)
-    .sort((a, b) => a.position - b.position || a.id - b.id)
+    .sort((a, b) => (sort ? compareCards(a, b, sort) : a.position - b.position || a.id - b.id))
     .map((c) => c.id);
   const index = ids.indexOf(approvedId);
   const others = ids.filter((id) => id !== approvedId);

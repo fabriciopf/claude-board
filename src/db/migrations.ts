@@ -260,4 +260,21 @@ FROM (
 WHERE cards.id = ranked.id;
 `,
   },
+  {
+    // Repositories a card is about (D70), many per card. Not the card's working folder (repo_path): a
+    // tag the user picks from a list managed in the settings, seeded with the three repos of the squad.
+    version: 11,
+    sql: `
+CREATE TABLE repositories (
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE COLLATE NOCASE
+);
+CREATE TABLE card_repositories (
+  card_id INTEGER NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
+  repository_id INTEGER NOT NULL REFERENCES repositories(id) ON DELETE CASCADE,
+  PRIMARY KEY (card_id, repository_id)
+);
+INSERT INTO repositories (name) VALUES ('hdb'), ('ignite'), ('sms');
+`,
+  },
 ];
