@@ -1,6 +1,9 @@
 import { spawnSync, type ChildProcess } from 'node:child_process';
+import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
+import path from 'node:path';
 import spawn from 'cross-spawn';
+import { PolledProcess, startHidden } from './win-hidden.js';
 
 const isWindows = process.platform === 'win32';
 
@@ -28,12 +31,29 @@ export interface DetachedOptions extends SpawnOptions {
   stderrFile: string;
 }
 
+/** What the runner needs from a started run: its pid, 'exit' (code or null) and 'error'. */
+export interface RunProcess extends EventEmitter {
+  readonly pid?: number;
+}
+
 /**
  * Starts a process that outlives the Board (D45): no pipe ties it to this process, stdout and stderr
  * go straight to files, and it leaves the job object Node puts children in on Windows (which kills
  * them when the Board exits). Its tree can still be killed with killTree.
+ *
+ * On Windows it gets a console with no window (D63, card #99): with Node's `detached` it would have no
+ * console at all, and each console program it starts would open a terminal window of its own.
+ * If that launch fails, it falls back to the detached spawn and says so on stderr.
  */
-export function spawnDetached(command: string, args: string[], opts: DetachedOptions): ChildProcess {
+export function spawnDetached(command: string, args: string[], opts: DetachedOptions): RunProcess {
+  if (isWindows && process.env.CLAUDE_BOARD_NO_HIDDEN_CONSOLE !== '1') {
+    try {
+      const pid = startHidden(command, args, { ...opts, launchFile: path.join(path.dirname(opts.stdinFile), 'launch.json') });
+      return new PolledProcess(pid, isAlive).unref();
+    } catch (err) {
+      fs.appendFileSync(opts.stderrFile, `[claude-board] console oculto indisponível, abrindo sem console (as janelas podem aparecer): ${(err as Error).message}\n`);
+    }
+  }
   const fds = [fs.openSync(opts.stdinFile, 'r'), fs.openSync(opts.stdoutFile, 'a'), fs.openSync(opts.stderrFile, 'a')];
   try {
     const child = spawn(command, args, { cwd: opts.cwd, env: opts.env, stdio: fds, windowsHide: true, detached: true });

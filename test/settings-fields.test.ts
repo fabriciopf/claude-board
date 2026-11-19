@@ -5,6 +5,7 @@ describe('settings tabs', () => {
   it('keeps every config field the screen had before the tabs', () => {
     expect(FIELDS.map((f) => f.key).sort()).toEqual(
       [
+        'agendaRefreshMinutes',
         'autoSplit',
         'claudeBin',
         'claudeHome',

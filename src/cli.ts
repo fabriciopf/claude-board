@@ -10,6 +10,7 @@ import { Runner } from './runner/runner.js';
 import { hooksStatus, installHooks, uninstallHooks } from './hooks/install.js';
 import { Importer } from './importer/importer.js';
 import { UsageTracker } from './service/usage.js';
+import { AgendaWatcher } from './service/agenda.js';
 import { Publisher } from './publish/publisher.js';
 import { relaunch } from './publish/relaunch.js';
 import { claudeHomeDir } from './config.js';
@@ -107,12 +108,16 @@ async function start(args: string[]): Promise<void> {
   await app.listen({ port, host });
   runner.start();
   publisher.startup();
+  const agenda = new AgendaWatcher(ctx);
+  ctx.agenda = agenda;
+  agenda.start();
   console.log(`Claude Board em http://${host === '0.0.0.0' ? '127.0.0.1' : host}:${port}`);
   let stopping = false;
   const stop = async () => {
     if (stopping) return;
     stopping = true;
     console.log('Encerrando. As execuções em andamento continuam; o próximo "claude-board start" volta a acompanhá-las.');
+    agenda.close();
     await runner.close();
     await app.close();
     ctx.db.close();

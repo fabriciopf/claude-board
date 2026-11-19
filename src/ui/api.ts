@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import type { App, CardDetail, CardSummary, Comment, Label, PublishState, RunnerState, UsageSnapshot } from '../shared/domain';
+import type { AgendaState } from '../shared/agenda';
 
 export class ApiError extends Error {
   constructor(
@@ -37,6 +38,7 @@ export interface BoardData {
   labels: Label[];
   runner: RunnerState;
   usage: UsageSnapshot | null;
+  agenda: AgendaState | null;
   publish: PublishState | null;
 }
 

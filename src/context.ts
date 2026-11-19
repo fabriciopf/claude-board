@@ -4,6 +4,7 @@ import type { Db } from './db/index.js';
 import type { EventBus } from './server/bus.js';
 import type { BoardService } from './service/board.js';
 import type { UsageTracker } from './service/usage.js';
+import type { AgendaWatcher } from './service/agenda.js';
 import type { PublishState } from './shared/domain.js';
 
 /** What the runner exposes to the API and the MCP server. Filled in by M3. */
@@ -32,6 +33,8 @@ export interface AppContext {
   runner?: RunnerControl;
   importer?: ImporterControl;
   usage?: UsageTracker;
+  /** Next calendar commitments for the header (D62). */
+  agenda?: AgendaWatcher;
   /** Publication of the Board's own improvements (D42). */
   publisher?: PublisherControl;
   /** Arguments of the running `claude-board start`, reused by the restart after a publication. */

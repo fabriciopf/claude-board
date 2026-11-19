@@ -105,7 +105,14 @@ export const FIELDS: Field[] = [
   },
   { key: 'claudeBin', tab: 'claude', label: 'Executável do Claude Code', type: 'text' },
   { key: 'claudeHome', tab: 'claude', label: 'Pasta do Claude Code', type: 'text' },
-  { key: 'classificationModel', tab: 'claude', label: 'Modelo da classificação', type: 'text' },
+  { key: 'classificationModel', tab: 'claude', label: 'Modelo da classificação', type: 'text', hint: 'também lê a agenda do cabeçalho' },
+  {
+    key: 'agendaRefreshMinutes',
+    tab: 'claude',
+    label: 'Leitura da agenda (min)',
+    type: 'number',
+    hint: 'próximo compromisso no cabeçalho, pelo conector Google Calendar do Claude Code; 0 = desligado',
+  },
   { key: 'heartbeatSeconds', tab: 'claude', label: 'Heartbeat do runner (s)', type: 'number' },
   { key: 'transcriptRetentionDays', tab: 'claude', label: 'Retenção dos transcripts (dias)', type: 'number' },
 ];

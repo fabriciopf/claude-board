@@ -47,6 +47,8 @@ export interface Config {
   jiraBaseUrl: string;
   /** CLAUDE_CODE_ENTRYPOINT of every run; 'claude-vscode' unlocks the Artifact tool (D60); '' = inherit the Board's own. */
   runnerEntrypoint: string;
+  /** Minutes between reads of the calendar for the header (D62); 0 = off. */
+  agendaRefreshMinutes: number;
 }
 
 export const DEFAULT_CONFIG: Config = {
@@ -80,6 +82,7 @@ export const DEFAULT_CONFIG: Config = {
   protectedBranches: 'main, master, production, preproduction*',
   jiraBaseUrl: '',
   runnerEntrypoint: 'claude-vscode',
+  agendaRefreshMinutes: 30,
 };
 
 /** The protected branches as a list; an empty setting falls back to the default. */
@@ -146,6 +149,7 @@ const NUMBER_KEYS: (keyof Config)[] = [
   'defaultMaxTurns',
   'transcriptRetentionDays',
   'recentCommentsInPrompt',
+  'agendaRefreshMinutes',
 ];
 
 /** Validates a partial update coming from the settings screen and persists it. */
