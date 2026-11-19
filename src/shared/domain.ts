@@ -1,0 +1,367 @@
+// Domain vocabulary shared by the server and the UI. Identifiers are English;
+// the labels shown to the user are pt-BR.
+
+export const STATUSES = [
+  'triage',
+  'backlog',
+  'ready',
+  'running',
+  'waiting_user',
+  'waiting_third_party',
+  'review',
+  'done',
+] as const;
+export type Status = (typeof STATUSES)[number];
+
+/**
+ * Lists where a card that arrives goes to the top, so they read from the most recent arrival to the
+ * oldest (D58; "Não iniciada" joined in D59). The other lists keep the arrival at the bottom, a queue order.
+ */
+export const NEWEST_FIRST_STATUSES: readonly Status[] = ['backlog', 'waiting_user', 'waiting_third_party', 'review', 'done'];
+
+export const STATUS_LABELS: Record<Status, string> = {
+  triage: 'Triagem',
+  backlog: 'Não iniciada',
+  ready: 'Pronta para o Claude',
+  running: 'Em andamento (Claude)',
+  waiting_user: 'Aguardando você',
+  waiting_third_party: 'Aguardando terceiro',
+  review: 'Em revisão',
+  done: 'Concluída',
+};
+
+/** What each list is for, shown in the column's info button. */
+export const STATUS_DESCRIPTIONS: Record<Status, string> = {
+  triage: 'Sugestões vindas da importação do histórico e das sessões do VS Code, ainda não aceitas. Abra o card para aceitar, ajustar ou ignorar.',
+  backlog: 'Tarefas aceitas que ainda não estão com o Claude. Use "Mandar pro Claude" ou arraste para a fila quando quiser que ele comece.',
+  ready: 'A fila do Claude. O runner pega daqui o próximo card, pela prioridade e depois pela posição na lista.',
+  running: 'O Claude está trabalhando nestes cards agora. Só o runner põe cards aqui; para interromper, use "Parar" dentro do card.',
+  waiting_user: 'O Claude fez uma pergunta ou a execução parou. Responda ou use "Tentar de novo" dentro do card; o card volta para a fila.',
+  waiting_third_party:
+    'Depende de outra pessoa, de deploy ou de acesso; o motivo fica registrado no card. Um card que o Claude dividiu em tarefas espera aqui até você aprovar todas.',
+  review: 'O Claude terminou e entregou um resumo. Confira e aprove, ou peça ajustes, que voltam para o Claude na mesma sessão. Um comentário seu também devolve o card para a fila do Claude.',
+  done: 'Trabalho aprovado por você. Só você move um card para cá. Um comentário seu devolve o card para a fila do Claude.',
+};
+
+/** A user comment on a card in one of these lists sends it back to Claude's queue (D39). */
+export const REOPEN_ON_COMMENT: readonly Status[] = ['review', 'done'];
+
+/** Lists whose tiles leave the checklist off the cover: the work is delivered, the steps are noise (D49). The card modal still shows it. */
+export const HIDE_CHECKLIST_ON_TILE: readonly Status[] = ['review', 'done'];
+
+/** Whether a tile on the board shows the card's checklist. */
+export function showsChecklistOnTile(card: { status: Status; checklist: readonly unknown[] }): boolean {
+  return card.checklist.length > 0 && !HIDE_CHECKLIST_ON_TILE.includes(card.status);
+}
+
+/** Short status, for the list of a split card's tasks. */
+export const STATUS_SHORT_LABELS: Record<Status, string> = {
+  triage: 'triagem',
+  backlog: 'não iniciada',
+  ready: 'na fila',
+  running: 'rodando',
+  waiting_user: 'aguardando você',
+  waiting_third_party: 'aguardando terceiro',
+  review: 'em revisão',
+  done: 'concluída',
+};
+
+export type Owner = 'user' | 'claude';
+export type Actor = 'user' | 'claude' | 'system';
+/** `split`: a task Claude carved out of another card (see `Card.parentId`). */
+export type Origin = 'manual' | 'mcp' | 'import' | 'hook' | 'split';
+
+export type CommentKind = 'comment' | 'question' | 'answer' | 'run_summary' | 'adjustment';
+
+export type ExecutionStatus =
+  | 'running'
+  | 'success'
+  | 'waiting_user'
+  | 'error'
+  | 'cancelled'
+  | 'timeout';
+
+export const EXECUTION_STATUS_LABELS: Record<ExecutionStatus, string> = {
+  running: 'rodando',
+  success: 'sucesso',
+  waiting_user: 'aguardando você',
+  error: 'erro',
+  cancelled: 'cancelada',
+  timeout: 'tempo esgotado',
+};
+
+export type PermissionMode = 'acceptEdits' | 'auto' | 'manual' | 'dontAsk' | 'plan' | 'bypassPermissions';
+export const PERMISSION_MODES: PermissionMode[] = ['acceptEdits', 'auto', 'manual', 'dontAsk', 'plan', 'bypassPermissions'];
+
+/** Highest number of runs the Board keeps going at the same time (settings screen and config.json). */
+export const MAX_CONCURRENCY = 20;
+
+/** `maxConcurrency` value that lets the Board pace runs by the 5-hour usage (D47). */
+export const AUTO_CONCURRENCY = 'auto';
+export type ConcurrencySetting = number | typeof AUTO_CONCURRENCY;
+
+/** How many runs the Board allows right now, and why (shown in the header). */
+export interface ConcurrencyInfo {
+  mode: 'auto' | 'fixed';
+  limit: number;
+  /** One line in pt-BR; in fixed mode, empty. */
+  reason: string;
+}
+
+/** Reasoning effort levels Claude Code accepts in `--effort`. */
+export type EffortLevel = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+export const EFFORT_LEVELS: EffortLevel[] = ['low', 'medium', 'high', 'xhigh', 'max'];
+export const EFFORT_LABELS: Record<EffortLevel, string> = {
+  low: 'Low',
+  medium: 'Medium',
+  high: 'High',
+  xhigh: 'Extra high',
+  max: 'Max',
+};
+
+/** Models offered on the settings screen and on the card; config.json also takes any other id or alias. */
+export const MODEL_OPTIONS: { id: string; label: string }[] = [
+  { id: 'claude-opus-5-5', label: 'Opus 5.5' },
+  { id: 'claude-sonnet-5-5', label: 'Sonnet 5.5' },
+  { id: 'claude-haiku-5-5', label: 'Haiku 5.5' },
+  { id: 'claude-fable-5-2', label: 'Fable 5.2' },
+];
+
+/** What a run uses when neither the card nor the settings choose. */
+export const DEFAULT_RUN_MODEL = 'claude-opus-5-5';
+export const DEFAULT_RUN_EFFORT: EffortLevel = 'high';
+
+export function modelLabel(id: string | null | undefined): string {
+  if (!id) return 'padrão do Claude Code';
+  return MODEL_OPTIONS.find((m) => m.id === id)?.label ?? id;
+}
+
+export function effortLabel(level: string | null | undefined): string {
+  if (!level) return 'padrão do Claude Code';
+  return EFFORT_LABELS[level as EffortLevel] ?? level;
+}
+
+export function isEffortLevel(v: unknown): v is EffortLevel {
+  return typeof v === 'string' && (EFFORT_LEVELS as string[]).includes(v);
+}
+
+/** Model ids and aliases are one token (`claude-opus-5-5`, `opus`, `claude-sonnet-5-5[1m]`). */
+export function isValidModelId(v: unknown): v is string {
+  return typeof v === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:\-[\]/@]{0,99}$/.test(v);
+}
+
+export type LinkKind = 'pr' | 'jira' | 'file' | 'url';
+export interface CardLink {
+  kind: LinkKind;
+  value: string;
+  title?: string;
+}
+
+/** A product or project the task is about (e.g. "Conciliação bancária", "NFS-e", "Claude Board"). */
+export interface App {
+  id: number;
+  name: string;
+  /** Folder of the app, usually a repo or a monorepo app under the workspace; null when it has none. */
+  path: string | null;
+  color: string;
+  description: string;
+  archived: boolean;
+}
+
+/** A folder of the workspace that looks like an app and is not registered yet. */
+export interface AppCandidate {
+  name: string;
+  path: string;
+  kind: 'repo' | 'app';
+}
+
+export interface Label {
+  id: number;
+  name: string;
+  color: string;
+}
+
+export interface ChecklistItem {
+  id: number;
+  cardId: number;
+  text: string;
+  done: boolean;
+  position: number;
+  createdBy: Actor;
+}
+
+export interface Card {
+  id: number;
+  title: string;
+  descriptionMd: string;
+  status: Status;
+  position: number;
+  owner: Owner;
+  appId: number | null;
+  priority: number;
+  dueDate: string | null;
+  origin: Origin;
+  repoPath: string | null;
+  baseBranch: string | null;
+  branch: string | null;
+  worktreePath: string | null;
+  permissionMode: PermissionMode | null;
+  maxTurns: number | null;
+  /** Model for this card's runs; null = the default in the settings. */
+  model: string | null;
+  /** Effort for this card's runs; null = the default in the settings. */
+  effort: EffortLevel | null;
+  dangerousAllowed: boolean;
+  claudeSessionId: string | null;
+  /** Short name Claude gave the task on its first run; also the Claude Code session name. */
+  sessionName: string | null;
+  /** Title and description as they were before the first run (null until a run starts). */
+  originalTitle: string | null;
+  originalDescriptionMd: string | null;
+  /** The card this one was split from (null for a card the user created). */
+  parentId: number | null;
+  nextPrompt: string | null;
+  nextPromptKind: string | null;
+  links: CardLink[];
+  suggestedStatus: Status | null;
+  suggestionConfidence: number | null;
+  suggestionEvidence: string | null;
+  createdAt: string;
+  updatedAt: string;
+  completedAt: string | null;
+  archived: boolean;
+  labelIds: number[];
+}
+
+/** Another card, as a split card lists its tasks and a task points to its origin. */
+export interface CardRef {
+  id: number;
+  title: string;
+  status: Status;
+}
+
+/** Card as shown on the board: the card plus the counters its cover needs. */
+export interface CardSummary extends Card {
+  checklistDone: number;
+  checklistTotal: number;
+  /** Items in order, shown on the card cover. */
+  checklist: { text: string; done: boolean }[];
+  commentCount: number;
+  running: boolean;
+  hasOpenQuestion: boolean;
+  /** Title of the card this one was split from. */
+  parentTitle: string | null;
+  /** Tasks this card was split into (archived ones left out). */
+  subtasks: CardRef[];
+}
+
+export interface Comment {
+  id: number;
+  cardId: number;
+  author: Actor;
+  bodyMd: string;
+  kind: CommentKind;
+  executionId: number | null;
+  options: string[] | null;
+  createdAt: string;
+}
+
+export interface Execution {
+  id: number;
+  cardId: number;
+  claudeSessionId: string | null;
+  startedAt: string;
+  endedAt: string | null;
+  status: ExecutionStatus;
+  turns: number;
+  tokensIn: number;
+  tokensOut: number;
+  transcriptPath: string | null;
+  summaryMd: string | null;
+  errorMd: string | null;
+  pid: number | null;
+  outcome: 'review' | 'question' | 'third_party' | 'split' | null;
+  promptKind: string | null;
+  cwd: string | null;
+  /** Model and effort the run was started with (null = Claude Code's own default, or a run from before migration 6). */
+  model: string | null;
+  effort: string | null;
+}
+
+export interface BoardEvent {
+  id: number;
+  cardId: number;
+  type: string;
+  payload: Record<string, unknown>;
+  author: Actor;
+  createdAt: string;
+}
+
+export interface CardDetail {
+  card: Card;
+  checklist: ChecklistItem[];
+  comments: Comment[];
+  executions: Execution[];
+  events: BoardEvent[];
+  /** The card this one was split from. */
+  parent: CardRef | null;
+  /** Tasks this card was split into (archived ones left out). */
+  subtasks: CardRef[];
+}
+
+export interface RunnerState {
+  paused: boolean;
+  running: number;
+  /** A publication of the Board holds new runs until the running ones end (D42). */
+  held?: boolean;
+  /** Absent when the runner is not active in this process. */
+  concurrency?: ConcurrencyInfo;
+}
+
+/** Publication of the Board's own improvements (D42). */
+export type PublishStatus = 'pending' | 'publishing' | 'published' | 'failed';
+/** ui = only the screen changed (no restart); server = everything else. */
+export type PublishKind = 'ui' | 'server';
+export type PublishPhase = 'idle' | 'preparing' | 'waiting' | 'applying' | 'restarting';
+
+export interface PublishEntry {
+  id: number;
+  cardId: number;
+  cardTitle: string;
+  branch: string;
+  worktreePath: string | null;
+  status: PublishStatus;
+  kind: PublishKind | null;
+  queuedAt: string;
+  finishedAt: string | null;
+  commit: string | null;
+  errorMd: string | null;
+}
+
+export interface PublishState {
+  enabled: boolean;
+  phase: PublishPhase;
+  /** Entries waiting to be published. */
+  pending: number;
+  /** Pending, in progress and failed entries, oldest first. */
+  entries: PublishEntry[];
+  /** What the publication is doing now, in words. */
+  detail: string | null;
+}
+
+/** One plan usage window as Claude Code reports it. */
+export interface UsageWindow {
+  /** 0..1 */
+  utilization: number;
+  /** Unix seconds. */
+  resetsAt: number;
+  status: string | null;
+}
+
+/** Latest plan usage the Board saw, from the `rate_limit_event` of its own runs. */
+export interface UsageSnapshot {
+  fiveHour: UsageWindow | null;
+  sevenDay: UsageWindow | null;
+  /** When the Board read it (ISO). */
+  observedAt: string;
+}

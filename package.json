@@ -1,0 +1,63 @@
+{
+  "name": "claude-board",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local Trello-style task board that Claude Code works through on its own",
+  "license": "MIT",
+  "author": "Fabrício Figueiredo",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/fabriciopf/claude-board.git"
+  },
+  "homepage": "https://github.com/fabriciopf/claude-board#readme",
+  "bugs": {
+    "url": "https://github.com/fabriciopf/claude-board/issues"
+  },
+  "keywords": [
+    "claude",
+    "claude-code",
+    "kanban",
+    "mcp",
+    "agent"
+  ],
+  "type": "module",
+  "bin": {
+    "claude-board": "bin/claude-board.mjs"
+  },
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "build": "npm run build:server && npm run build:ui",
+    "build:server": "tsc -p tsconfig.json",
+    "build:ui": "vite build",
+    "dev:ui": "vite",
+    "start": "node bin/claude-board.mjs start",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.ui.json --noEmit"
+  },
+  "dependencies": {
+    "@fastify/static": "^10.1.11",
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "cross-spawn": "^7.0.6",
+    "fastify": "^5.12.8",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@dnd-kit/core": "^6.3.1",
+    "@dnd-kit/sortable": "^10.0.0",
+    "@dnd-kit/utilities": "^3.2.2",
+    "@types/cross-spawn": "^6.0.6",
+    "@types/node": "^26.6.6",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.3.0",
+    "dompurify": "^3.4.18",
+    "marked": "^18.2.1",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.8",
+    "vitest": "^5.1.0"
+  }
+}

@@ -1,0 +1,2 @@
+{"type":"user","sessionId":"s-trivial","cwd":"C:/work/proj-b","gitBranch":"main","version":"2.1.325","isSidechain":false,"timestamp":"2026-11-01T12:22:00.000Z","message":{"role":"user","content":"trivial: que horas são?"}}
+{"type":"assistant","sessionId":"s-trivial","cwd":"C:/work/proj-b","gitBranch":"main","version":"2.1.325","isSidechain":false,"timestamp":"2026-11-01T12:23:00.000Z","message":{"id":"msg_9","role":"assistant","content":[{"type":"text","text":"Não tenho relógio, mas posso rodar `date`."}],"usage":{"input_tokens":10,"output_tokens":5}}}

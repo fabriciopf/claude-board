@@ -1,0 +1,677 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { boardHome, expandHome, paths } from '../config.js';
+import type { AppContext } from '../context.js';
+import { nowIso } from '../db/index.js';
+import type { Card, PublishEntry, PublishKind, PublishPhase, PublishState, PublishStatus } from '../shared/domain.js';
+import { mergeDecisions } from './decisions.js';
+import { canonicalDir, git, gitShow, linkDir, runCommand, samePath, spawnDetached, syncDir, unlinkJunction, type CmdResult } from './git.js';
+
+/**
+ * Publication of the Board's own improvements (D42). A delivered card of the Board's repo enters the
+ * queue; the batch is merged, tested and built in a throwaway worktree, so a failure never touches
+ * the main checkout. Only a batch that passed reaches it, by fast-forward. Screen-only batches stop
+ * there (the static server reads dist/ui from disk); the rest wait for the running executions to
+ * end, back up the database and restart the server from a detached process.
+ */
+
+type Command = [string, string[]];
+export interface PublishCommands {
+  install: Command;
+  test: Command;
+  /** Full build: dist/server and dist/ui. */
+  build: Command;
+  /** Screen only: dist/ui. */
+  buildUi: Command;
+}
+
+export const DEFAULT_COMMANDS: PublishCommands = {
+  install: ['npm', ['install']],
+  test: ['npm', ['test']],
+  build: ['npm', ['run', 'build']],
+  buildUi: ['npm', ['run', 'build:ui']],
+};
+
+export interface PublisherOptions {
+  commands?: Partial<PublishCommands>;
+  run?: (cmd: string, args: string[], cwd: string, env?: NodeJS.ProcessEnv) => Promise<CmdResult>;
+  /** Replaces the detached restart (tests). */
+  restart?: () => Promise<void> | void;
+  pollMs?: number;
+}
+
+/** Files whose change does not need the server restarted: the screen, tests and docs. */
+export function isScreenOnly(files: string[]): boolean {
+  return files.every((f) => /^src\/ui\//.test(f) || /^test\//.test(f) || /^docs\//.test(f) || /^[^/]+\.md$/i.test(f));
+}
+
+const PACKAGE_FILES = ['package.json', 'package-lock.json'];
+const ELIGIBLE: Card['status'][] = ['review', 'done'];
+
+class PublishError extends Error {
+  constructor(
+    message: string,
+    /** Entry to blame; null = the whole batch. */
+    public entryId: number | null = null,
+  ) {
+    super(message);
+  }
+}
+
+const fence = (text: string) => `\n\n\`\`\`\n${text.trim().split('\n').slice(-40).join('\n').replace(/```/g, "'''")}\n\`\`\``;
+
+/** Directory of the running code (bin/claude-board.mjs → dist/server/...): the repo the Board comes from. */
+function codeRoot(): string {
+  let dir = path.dirname(fileURLToPath(import.meta.url));
+  for (let i = 0; i < 6; i++) {
+    if (fs.existsSync(path.join(dir, 'package.json'))) return dir;
+    dir = path.dirname(dir);
+  }
+  return process.cwd();
+}
+
+function commonDir(dir: string): string | null {
+  if (!fs.existsSync(dir)) return null;
+  const r = git(dir, ['rev-parse', '--path-format=absolute', '--git-common-dir']);
+  return r.ok ? path.resolve(r.out) : null;
+}
+
+export class Publisher {
+  private phase: PublishPhase = 'idle';
+  private detail: string | null = null;
+  private busy: Promise<void> | null = null;
+  private commands: PublishCommands;
+  private run: NonNullable<PublisherOptions['run']>;
+  private pollMs: number;
+
+  constructor(
+    private ctx: AppContext,
+    private opts: PublisherOptions = {},
+  ) {
+    this.commands = { ...DEFAULT_COMMANDS, ...opts.commands };
+    this.run = opts.run ?? runCommand;
+    this.pollMs = opts.pollMs ?? 2000;
+    // The card's worktree goes away when the card is approved (moved to "Concluída"), not when it is published.
+    ctx.bus.subscribe((msg) => {
+      if (msg.type === 'card.changed' && msg.cardId && msg.data?.to === 'done' && msg.data?.from !== 'done') this.onCardDone(msg.cardId);
+    });
+  }
+
+  /** A card of the Board's repo reached "Concluída": its worktree is no longer needed. */
+  private onCardDone(cardId: number): void {
+    try {
+      if (!this.ctx.config.autoPublish) return;
+      const card = this.adoptBranch(this.ctx.service.getCard(cardId));
+      if (!card.worktreePath || !this.isSelfCard(card) || this.ctx.service.hasRunningExecution(cardId)) return;
+      const note = this.removeCardWorktree(cardId);
+      if (note) this.ctx.service.addComment(cardId, { author: 'system', bodyMd: note });
+    } catch (err) {
+      this.log(`remoção da worktree do card #${cardId} falhou: ${(err as Error).message}`);
+    }
+  }
+
+  // ---------- identity ----------
+
+  /** Main checkout of the Board's repository, or null when it cannot be found. */
+  selfRepo(): string | null {
+    const configured = this.ctx.config.selfRepoPath;
+    const dir = configured ? path.resolve(expandHome(configured)) : codeRoot();
+    if (!fs.existsSync(dir)) return null;
+    const r = git(dir, ['rev-parse', '--show-toplevel']);
+    return r.ok ? canonicalDir(r.out) : null;
+  }
+
+  /** True when the directory is inside the Board's own repository (main checkout or a worktree of it). */
+  private inSelfRepo(dir: string | null | undefined): boolean {
+    if (!dir) return false;
+    const self = this.selfRepo();
+    if (!self) return false;
+    const a = commonDir(path.resolve(expandHome(dir)));
+    const b = commonDir(self);
+    return !!a && !!b && samePath(a, b);
+  }
+
+  /**
+   * A card that reaches the Board's repo only through its project (no repoPath): the run works in a
+   * worktree and branch it created itself (card #66). Find its `cb/<id>-*` branch with commits not
+   * published yet, and record repo, branch and worktree on the card, so the rest of the flow
+   * (publication, removal on "Concluída", reopening) treats it like a card the runner prepared.
+   */
+  adoptBranch(card: Card): Card {
+    if (card.repoPath && card.branch) return card;
+    const projectPath = card.appId ? this.ctx.service.listApps(true).find((a) => a.id === card.appId)?.path : null;
+    if (!this.inSelfRepo(card.repoPath) && !this.inSelfRepo(projectPath)) return card;
+    const repo = this.selfRepo() as string;
+    const target = this.ctx.config.publishBranch;
+    const refs = git(repo, ['for-each-ref', '--sort=-committerdate', '--format=%(refname:short)', `refs/heads/cb/${card.id}-*`]);
+    if (!refs.ok) return card;
+    const branch = refs.out
+      .split('\n')
+      .filter(Boolean)
+      .find((b) => Number(git(repo, ['rev-list', '--count', `${target}..${b}`]).out) > 0);
+    if (!branch) return card;
+    // The worktree checked out on that branch, if any.
+    let worktree: string | null = null;
+    let current: string | null = null;
+    for (const line of git(repo, ['worktree', 'list', '--porcelain']).out.split('\n')) {
+      if (line.startsWith('worktree ')) current = line.slice('worktree '.length).trim();
+      else if (line.trim() === `branch refs/heads/${branch}` && current && !samePath(current, repo)) worktree = path.resolve(current);
+    }
+    this.ctx.db.prepare('UPDATE cards SET repo_path = COALESCE(repo_path, ?) WHERE id = ?').run(repo, card.id);
+    this.ctx.service.setRunFields(card.id, { branch, worktreePath: card.worktreePath ?? worktree });
+    this.log(`card #${card.id}: branch ${branch} adotada (sem repoPath no card)${worktree ? `, worktree ${worktree}` : ''}`);
+    return this.ctx.service.getCard(card.id);
+  }
+
+  /** A card of the Board's own repo, on a branch the Board created (cb/*). */
+  isSelfCard(card: Card): boolean {
+    if (!card.repoPath || !card.branch?.startsWith('cb/')) return false;
+    const self = this.selfRepo();
+    if (!self) return false;
+    const a = commonDir(path.resolve(expandHome(card.repoPath)));
+    const b = commonDir(self);
+    return !!a && !!b && samePath(a, b);
+  }
+
+  // ---------- queue ----------
+
+  private rowToEntry(r: Record<string, any>): PublishEntry {
+    return {
+      id: r.id,
+      cardId: r.card_id,
+      cardTitle: r.title ?? '',
+      branch: r.branch,
+      status: r.status as PublishStatus,
+      kind: (r.kind as PublishKind | null) ?? null,
+      queuedAt: r.queued_at,
+      finishedAt: r.finished_at ?? null,
+      worktreePath: r.worktree_path ?? null,
+      commit: r.commit_sha ?? null,
+      errorMd: r.error_md ?? null,
+    };
+  }
+
+  entries(statuses: PublishStatus[]): PublishEntry[] {
+    const rows = this.ctx.db
+      .prepare(
+        `SELECT q.*, c.title FROM publish_queue q JOIN cards c ON c.id = q.card_id
+         WHERE q.status IN (${statuses.map(() => '?').join(',')}) ORDER BY q.queued_at, q.id`,
+      )
+      .all(...statuses) as Record<string, any>[];
+    return rows.map((r) => this.rowToEntry(r));
+  }
+
+  state(): PublishState {
+    const entries = this.entries(['pending', 'publishing', 'failed']);
+    return {
+      enabled: this.ctx.config.autoPublish,
+      phase: this.phase,
+      pending: entries.filter((e) => e.status === 'pending').length,
+      entries,
+      detail: this.detail,
+    };
+  }
+
+  private changed(): void {
+    this.ctx.bus.publish({ type: 'publish.changed' });
+  }
+
+  /**
+   * Called when a card enters "Em revisão" (card_submit_for_review). Only the Board's own repo, a
+   * cb/* branch and commits that are not in the publish branch yet. Returns the entry, or null.
+   */
+  onDelivered(cardId: number): PublishEntry | null {
+    if (!this.ctx.config.autoPublish) return null;
+    let card: Card;
+    try {
+      card = this.ctx.service.getCard(cardId);
+    } catch {
+      return null;
+    }
+    card = this.adoptBranch(card);
+    if (!this.isSelfCard(card)) return null;
+    const repo = this.selfRepo() as string;
+    const target = this.ctx.config.publishBranch;
+    const ahead = git(repo, ['rev-list', '--count', `${target}..${card.branch}`]);
+    if (!ahead.ok || Number(ahead.out) === 0) return null;
+    const { db, service } = this.ctx;
+    const existing = db.prepare("SELECT id FROM publish_queue WHERE card_id = ? AND status IN ('pending','failed')").get(cardId) as { id: number } | undefined;
+    let id: number;
+    if (existing) {
+      db.prepare("UPDATE publish_queue SET status = 'pending', branch = ?, worktree_path = ?, queued_at = ?, error_md = NULL, kind = NULL WHERE id = ?").run(
+        card.branch,
+        card.worktreePath,
+        nowIso(),
+        existing.id,
+      );
+      id = existing.id;
+    } else if (db.prepare("SELECT 1 FROM publish_queue WHERE card_id = ? AND status = 'publishing'").get(cardId)) {
+      // Delivered again while its previous delivery is being published: queue the new commits after it.
+      id = Number(
+        db
+          .prepare("INSERT INTO publish_queue (card_id, branch, worktree_path, status, queued_at) VALUES (?, ?, ?, 'pending', ?)")
+          .run(cardId, card.branch, card.worktreePath, nowIso()).lastInsertRowid,
+      );
+    } else {
+      id = Number(
+        db
+          .prepare("INSERT INTO publish_queue (card_id, branch, worktree_path, status, queued_at) VALUES (?, ?, ?, 'pending', ?)")
+          .run(cardId, card.branch, card.worktreePath, nowIso()).lastInsertRowid,
+      );
+    }
+    service.recordEvent(cardId, 'publish_queued', { entryId: id, branch: card.branch }, 'system');
+    service.addComment(cardId, {
+      author: 'system',
+      bodyMd: `A branch \`${card.branch}\` entrou na fila de publicação do Board (\`${target}\` do repositório \`${repo}\`).`,
+    });
+    this.changed();
+    this.kick();
+    // The batch may already have taken it (kick runs synchronously up to its first await).
+    return this.entries(['pending', 'publishing']).find((e) => e.id === id) ?? null;
+  }
+
+  /** A failed entry back to the queue. */
+  retry(entryId: number): void {
+    this.ctx.db.prepare("UPDATE publish_queue SET status = 'pending', error_md = NULL, queued_at = ? WHERE id = ? AND status = 'failed'").run(nowIso(), entryId);
+    this.changed();
+    this.kick();
+  }
+
+  /** "Publicar agora": starts the queue now. Runs in progress are never stopped: they survive the restart (D45). */
+  publishNow(): void {
+    this.kick();
+  }
+
+  isHolding(): boolean {
+    return this.ctx.service.getSetting('publishHold', false);
+  }
+
+  private setHold(on: boolean): void {
+    this.ctx.service.setSetting('publishHold', on);
+    this.ctx.bus.publish({ type: 'runner.changed' });
+    if (!on) this.ctx.runner?.nudge();
+  }
+
+  /** On server start: nothing from a previous process can still be publishing. */
+  startup(): void {
+    if (this.isHolding()) this.setHold(false);
+    const stuck = this.entries(['publishing']);
+    for (const e of stuck) {
+      this.failEntry(e, 'O Board foi encerrado durante a publicação. Confira a `master` antes de tentar de novo.');
+    }
+    this.removeLeftoverWorktrees();
+    this.catchUp();
+    this.kick();
+  }
+
+  /**
+   * Deliveries the Board missed (a version without the rule, or a card it could not recognize, like
+   * #66): cards in "Em revisão" with a Board branch that has commits not published yet and no entry
+   * in the queue. Each one goes through the normal delivery, comment included.
+   */
+  private catchUp(): void {
+    if (!this.ctx.config.autoPublish) return;
+    for (const c of this.ctx.service.listCards({ status: 'review' })) {
+      try {
+        const queued = this.ctx.db.prepare("SELECT 1 FROM publish_queue WHERE card_id = ? AND status IN ('pending','publishing','failed')").get(c.id);
+        if (queued) continue;
+        this.onDelivered(c.id);
+      } catch (err) {
+        this.log(`recuperação do card #${c.id} falhou: ${(err as Error).message}`);
+      }
+    }
+  }
+
+  /** Starts a batch when idle; a batch in progress picks the queue up again when it ends. */
+  kick(): void {
+    if (this.busy || !this.ctx.config.autoPublish) return;
+    if (!this.eligible().length) return;
+    const p = this.publishBatch()
+      .catch((err) => this.log(`erro interno: ${(err as Error).stack ?? err}`))
+      .finally(() => {
+        this.busy = null;
+        if (this.phase !== 'restarting') {
+          this.phase = 'idle';
+          this.detail = null;
+          this.changed();
+          // More deliveries may have arrived meanwhile.
+          if (this.eligible().length) setTimeout(() => this.kick(), 50).unref?.();
+        }
+      });
+    this.busy = p;
+  }
+
+  /** Waits for the batch in progress (tests). */
+  async whenIdle(): Promise<void> {
+    while (this.busy) await this.busy;
+  }
+
+  private eligible(): PublishEntry[] {
+    return this.entries(['pending']).filter((e) => {
+      try {
+        return ELIGIBLE.includes(this.ctx.service.getCard(e.cardId).status);
+      } catch {
+        return false;
+      }
+    });
+  }
+
+  // ---------- the batch ----------
+
+  private setPhase(phase: PublishPhase, detail: string | null): void {
+    this.phase = phase;
+    this.detail = detail;
+    this.log(`${phase}: ${detail ?? ''}`);
+    this.changed();
+  }
+
+  private log(line: string): void {
+    try {
+      fs.appendFileSync(path.join(boardHome(), 'publish.log'), `${nowIso()} ${line}\n`);
+    } catch {
+      /* logging must never break a publication */
+    }
+  }
+
+  private async publishBatch(): Promise<void> {
+    const batch = this.eligible();
+    if (!batch.length) return;
+    const { db } = this.ctx;
+    const repo = this.selfRepo();
+    const target = this.ctx.config.publishBranch;
+    this.setPhase('preparing', `Preparando ${batch.length} branch(es)`);
+    for (const e of batch) db.prepare("UPDATE publish_queue SET status = 'publishing', started_at = ? WHERE id = ?").run(nowIso(), e.id);
+    this.changed();
+
+    let tmp: string | null = null;
+    let held = false;
+    let applied = false;
+    try {
+      if (!repo) throw new PublishError('Não achei o repositório do Board (configure `selfRepoPath`).');
+      const head = git(repo, ['rev-parse', '--abbrev-ref', 'HEAD']);
+      if (!head.ok || head.out !== target) throw new PublishError(`O checkout principal \`${repo}\` está em \`${head.out}\`, não em \`${target}\`.`);
+      const origHead = git(repo, ['rev-parse', target]).out;
+
+      // Classify each branch by what it changes relative to the publish branch.
+      let kind: PublishKind = 'ui';
+      let needsInstall = false;
+      for (const e of batch) {
+        if (!git(repo, ['rev-parse', '--verify', '--quiet', `refs/heads/${e.branch}`]).ok) throw new PublishError(`A branch \`${e.branch}\` não existe.`, e.id);
+        const diff = git(repo, ['diff', '--name-only', `${target}...${e.branch}`]);
+        if (!diff.ok) throw new PublishError(`Não consegui comparar \`${e.branch}\` com \`${target}\`: ${diff.out}`, e.id);
+        const files = diff.out.split('\n').filter(Boolean);
+        const k: PublishKind = isScreenOnly(files) ? 'ui' : 'server';
+        if (k === 'server') kind = 'server';
+        if (files.some((f) => PACKAGE_FILES.includes(f))) needsInstall = true;
+        db.prepare('UPDATE publish_queue SET kind = ? WHERE id = ?').run(k, e.id);
+      }
+
+      // Merge, test and build in a throwaway worktree: the main checkout stays as it is until the end.
+      tmp = path.join(boardHome(), 'publish', `wt-${Date.now()}`);
+      fs.mkdirSync(path.dirname(tmp), { recursive: true });
+      const add = git(repo, ['worktree', 'add', '--detach', tmp, target]);
+      if (!add.ok) throw new PublishError(`Não consegui criar a worktree temporária: ${add.out}`);
+      const mainModules = path.join(repo, 'node_modules');
+      if (!needsInstall && fs.existsSync(mainModules)) linkDir(path.join(tmp, 'node_modules'), mainModules);
+
+      const notes = new Map<number, string[]>();
+      const commits = new Map<number, string>();
+      for (const e of batch) {
+        const card = this.ctx.service.getCard(e.cardId);
+        this.setPhase('preparing', `Merge de \`${e.branch}\``);
+        const msg = `merge: card #${e.cardId}, ${card.title}`;
+        const m = git(tmp, ['merge', '--no-ff', '-m', msg, e.branch]);
+        if (!m.ok) {
+          const resolved = this.resolveDecisions(tmp);
+          if (!resolved) {
+            const conflicts = git(tmp, ['diff', '--name-only', '--diff-filter=U']).out;
+            git(tmp, ['merge', '--abort']);
+            throw new PublishError(
+              conflicts
+                ? `Conflito de merge com \`${target}\` em: ${conflicts.split('\n').map((f) => `\`${f}\``).join(', ')}.`
+                : `O merge de \`${e.branch}\` falhou.${fence(m.out)}`,
+              e.id,
+            );
+          }
+          notes.set(e.id, [resolved]);
+        }
+        commits.set(e.id, git(tmp, ['rev-parse', 'HEAD']).out);
+      }
+
+      const env = { ...process.env };
+      for (const k of Object.keys(env)) if (k.startsWith('CLAUDE_BOARD_') || k.startsWith('FAKE_CLAUDE')) delete env[k];
+      if (needsInstall) await this.step(tmp, 'Instalando dependências', this.commands.install, env);
+      await this.step(tmp, 'Rodando os testes', this.commands.test, env);
+      await this.step(tmp, kind === 'ui' ? 'Compilando a tela' : 'Compilando', kind === 'ui' ? this.commands.buildUi : this.commands.build, env);
+      const builtUi = path.join(tmp, 'dist', 'ui');
+      if (!fs.existsSync(path.join(builtUi, 'index.html'))) throw new PublishError('O build não gerou `dist/ui/index.html`.');
+      if (kind === 'server' && !fs.existsSync(path.join(tmp, 'dist', 'server', 'cli.js'))) throw new PublishError('O build não gerou `dist/server/cli.js`.');
+
+      if (kind === 'server') {
+        held = true;
+        this.setHold(true);
+        await this.waitIdleRunner();
+      }
+
+      // Apply: fast-forward the main checkout and copy the build.
+      this.setPhase('applying', 'Aplicando na master');
+      const nowHead = git(repo, ['rev-parse', target]).out;
+      if (nowHead !== origHead) throw new PublishError(`A \`${target}\` andou durante a publicação (${origHead.slice(0, 7)} → ${nowHead.slice(0, 7)}).`);
+      const dirty = git(repo, ['status', '--porcelain', '--untracked-files=no']);
+      if (!dirty.ok || dirty.out) throw new PublishError(`O checkout principal tem alterações não commitadas:${fence(dirty.out)}`);
+      let backup: string | null = null;
+      if (kind === 'server') backup = this.backupDb();
+      const newHead = git(tmp, ['rev-parse', 'HEAD']).out;
+      const ff = git(repo, ['merge', '--ff-only', newHead]);
+      if (!ff.ok) throw new PublishError(`O fast-forward da \`${target}\` falhou.${fence(ff.out)}`);
+      applied = true;
+      syncDir(builtUi, path.join(repo, 'dist', 'ui'));
+      if (kind === 'server') {
+        syncDir(path.join(tmp, 'dist', 'server'), path.join(repo, 'dist', 'server'));
+        if (needsInstall) await this.step(repo, 'Instalando dependências no checkout principal', this.commands.install, env);
+      }
+
+      // Done: record and tell each card. The worktree stays until the card goes to "Concluída".
+      for (const e of batch) {
+        const extra = notes.get(e.id) ?? [];
+        const card = this.ctx.service.getCard(e.cardId);
+        if (card.status === 'done') {
+          // Approved before the publication: its worktree goes now, and a reopening starts from what was published.
+          const wt = this.removeCardWorktree(e.cardId);
+          if (wt) extra.push(wt);
+        } else if (card.worktreePath) {
+          extra.push(`A worktree \`${card.worktreePath}\` fica até o card ir para "Concluída".`);
+        }
+        db.prepare("UPDATE publish_queue SET status = 'published', finished_at = ?, commit_sha = ? WHERE id = ?").run(nowIso(), commits.get(e.id) ?? newHead, e.id);
+        this.ctx.service.recordEvent(e.cardId, 'published', { entryId: e.id, commit: commits.get(e.id), kind }, 'system');
+        const how =
+          kind === 'ui'
+            ? 'Só a tela mudou: a versão nova aparece ao recarregar a página, sem reiniciar o Board.'
+            : `O servidor reinicia agora${this.restartMode() === 'window' ? ', numa janela nova do PowerShell' : ''}.${backup ? ` Backup do banco: \`${backup}\`.` : ''}`;
+        this.ctx.service.addComment(e.cardId, {
+          author: 'system',
+          bodyMd: [`Publicado no Board em uso: \`${e.branch}\` entrou na \`${target}\` (\`${(commits.get(e.id) ?? newHead).slice(0, 7)}\`). ${how}`, ...extra].join('\n\n'),
+        });
+      }
+      this.changed();
+      // Open pages compare their screen with dist/ui and offer a reload (D51).
+      this.ctx.bus.publish({ type: 'ui.updated' });
+      this.dropTmp(repo, tmp);
+      tmp = null;
+
+      if (kind === 'server') {
+        this.setPhase('restarting', 'Reiniciando o servidor');
+        await (this.opts.restart ?? (() => this.restartDetached(repo)))();
+      }
+    } catch (err) {
+      const e = err instanceof PublishError ? err : new PublishError(`Falha interna: ${(err as Error).message}`);
+      if (applied) e.message = `Atenção: a \`${target}\` já tinha avançado quando isto falhou; confira o checkout principal e o \`dist/\`.\n\n${e.message}`;
+      this.abortBatch(batch, e);
+      if (tmp && repo) this.dropTmp(repo, tmp);
+      if (held) this.setHold(false);
+    }
+  }
+
+  private async step(cwd: string, label: string, [cmd, args]: Command, env: NodeJS.ProcessEnv): Promise<void> {
+    this.setPhase(this.phase === 'applying' ? 'applying' : 'preparing', label);
+    const r = await this.run(cmd, args, cwd, env);
+    if (!r.ok) throw new PublishError(`${label}: \`${[cmd, ...args].join(' ')}\` falhou.${fence(r.out)}`);
+  }
+
+  /** The only conflict is DECISIONS.md and the branch only appended entries: renumber them. */
+  private resolveDecisions(tmp: string): string | null {
+    const conflicts = git(tmp, ['diff', '--name-only', '--diff-filter=U']).out.split('\n').filter(Boolean);
+    if (conflicts.length !== 1 || conflicts[0] !== 'DECISIONS.md') return null;
+    const base = gitShow(tmp, ':1:DECISIONS.md') ?? '';
+    const ours = gitShow(tmp, ':2:DECISIONS.md');
+    const theirs = gitShow(tmp, ':3:DECISIONS.md');
+    if (ours == null || theirs == null) return null;
+    const merged = mergeDecisions(base, ours, theirs);
+    if (!merged) return null;
+    fs.writeFileSync(path.join(tmp, 'DECISIONS.md'), merged.content);
+    if (!git(tmp, ['add', 'DECISIONS.md']).ok) return null;
+    if (!git(tmp, ['commit', '--no-edit']).ok) return null;
+    const list = merged.renumbered.map((r) => `D${r.from} → D${r.to}`).join(', ');
+    return list
+      ? `O único conflito era a numeração do DECISIONS.md: renumerei ${list}. Referências a esse número no texto da entrada não mudaram.`
+      : 'O único conflito era o fim do DECISIONS.md: as entradas novas entraram depois das da master.';
+  }
+
+  /**
+   * Runs with a process survive the restart (D45): the new server follows them again. Only a run
+   * still being prepared (registered, process not started yet) is waited for, a few seconds at most.
+   */
+  private async waitIdleRunner(): Promise<void> {
+    for (;;) {
+      const starting = (this.ctx.db.prepare("SELECT COUNT(*) AS n FROM executions WHERE status = 'running' AND pid IS NULL").get() as { n: number }).n;
+      if (!starting) return;
+      this.setPhase('waiting', `Esperando ${starting} execução(ões) começar(em); as que já estão rodando continuam depois do reinício`);
+      await new Promise((r) => setTimeout(r, this.pollMs));
+    }
+  }
+
+  /** Copy of the database before the server restart (the new code may migrate it). */
+  private backupDb(): string {
+    const file = path.join(paths.backups(), `board-before-publish-${nowIso().replace(/[:.]/g, '-')}.db`);
+    fs.mkdirSync(paths.backups(), { recursive: true });
+    this.ctx.db.exec(`VACUUM INTO '${file.replace(/'/g, "''")}'`);
+    return file;
+  }
+
+  private abortBatch(batch: PublishEntry[], err: PublishError): void {
+    const { db } = this.ctx;
+    for (const e of batch) {
+      if (err.entryId !== null && err.entryId !== e.id) {
+        // Another branch of the batch failed: this one goes back to the queue, alone next time.
+        db.prepare("UPDATE publish_queue SET status = 'pending', started_at = NULL WHERE id = ?").run(e.id);
+        continue;
+      }
+      this.failEntry(e, err.message);
+    }
+    this.log(`abortado: ${err.message}`);
+    this.changed();
+  }
+
+  private failEntry(e: PublishEntry, message: string): void {
+    const target = this.ctx.config.publishBranch;
+    this.ctx.db.prepare("UPDATE publish_queue SET status = 'failed', finished_at = ?, error_md = ? WHERE id = ?").run(nowIso(), message, e.id);
+    this.ctx.service.recordEvent(e.cardId, 'publish_failed', { entryId: e.id }, 'system');
+    try {
+      this.ctx.service.addComment(e.cardId, {
+        author: 'system',
+        bodyMd: message.startsWith('Atenção')
+          ? `A publicação de \`${e.branch}\` no Board falhou no meio.\n\n${message}`
+          : `A publicação de \`${e.branch}\` no Board falhou e nada foi publicado: a \`${target}\` ficou como estava e o runner voltou ao normal.\n\n${message}`,
+      });
+    } catch {
+      /* the card may have been deleted */
+    }
+  }
+
+  /**
+   * Removes the card's worktree (only when it has no uncommitted work). When its branch is already in
+   * the publish branch, the card also points at a new branch from it: a comment reopening it (D39)
+   * starts from what is published. A branch not published yet stays the card's branch.
+   */
+  private removeCardWorktree(cardId: number): string | null {
+    const repo = this.selfRepo();
+    if (!repo) return null;
+    const target = this.ctx.config.publishBranch;
+    const card = this.ctx.service.getCard(cardId);
+    const wt = card.worktreePath;
+    const merged = !!card.branch && git(repo, ['merge-base', '--is-ancestor', card.branch, target]).ok;
+    const reset = () => {
+      if (merged) {
+        this.ctx.service.setRunFields(card.id, { worktreePath: null, branch: null });
+        this.ctx.db.prepare('UPDATE cards SET base_branch = ? WHERE id = ?').run(target, card.id);
+      } else {
+        this.ctx.service.setRunFields(card.id, { worktreePath: null });
+      }
+    };
+    if (!wt || !fs.existsSync(wt)) {
+      reset();
+      return null;
+    }
+    if (samePath(wt, repo)) return null;
+    const status = git(wt, ['status', '--porcelain']);
+    if (!status.ok || status.out) return `A worktree \`${wt}\` ficou: tem alterações não commitadas.${status.out ? fence(status.out) : ''}`;
+    const modules = path.join(wt, 'node_modules');
+    const wasLink = fs.existsSync(modules) && fs.lstatSync(modules).isSymbolicLink();
+    const target0 = wasLink ? fs.readlinkSync(modules) : null;
+    unlinkJunction(modules);
+    const r = git(repo, ['worktree', 'remove', wt]);
+    if (!r.ok) {
+      if (target0) {
+        try {
+          linkDir(modules, target0);
+        } catch {
+          /* leave it */
+        }
+      }
+      return `Não consegui remover a worktree \`${wt}\`: ${r.out}`;
+    }
+    reset();
+    return `Card concluído: worktree \`${wt}\` removida; a branch \`${card.branch}\` ficou.${merged ? '' : ` Ela ainda tem commits fora da \`${target}\`.`}`;
+  }
+
+  private dropTmp(repo: string, tmp: string): void {
+    unlinkJunction(path.join(tmp, 'node_modules'));
+    const r = git(repo, ['worktree', 'remove', '--force', tmp]);
+    if (!r.ok) {
+      try {
+        fs.rmSync(tmp, { recursive: true, force: true });
+        git(repo, ['worktree', 'prune']);
+      } catch (err) {
+        this.log(`não consegui remover ${tmp}: ${(err as Error).message}`);
+      }
+    }
+  }
+
+  private removeLeftoverWorktrees(): void {
+    const dir = path.join(boardHome(), 'publish');
+    const repo = this.selfRepo();
+    if (!repo || !fs.existsSync(dir)) return;
+    for (const name of fs.readdirSync(dir)) if (name.startsWith('wt-')) this.dropTmp(repo, path.join(dir, name));
+  }
+
+  /**
+   * The server cannot restart itself: a detached process waits for this one to exit and starts the
+   * new server (lesson of card #32: anything in the server's tree dies with it).
+   */
+  private restartMode(): 'window' | 'background' {
+    return this.ctx.config.publishRestartMode || (process.platform === 'win32' ? 'window' : 'background');
+  }
+
+  private async restartDetached(repo: string): Promise<void> {
+    const bin = path.join(repo, 'bin', 'claude-board.mjs');
+    const startArgs = this.ctx.startArgs ?? ['start'];
+    const mode = this.restartMode();
+    spawnDetached(process.execPath, [bin, 'relaunch', '--wait-pid', String(process.pid), '--mode', mode, '--', ...startArgs], {
+      cwd: repo,
+      logFile: path.join(boardHome(), 'publish.log'),
+    });
+    this.log(`restart: relaunch destacado, modo ${mode}, args ${startArgs.join(' ')}`);
+    if (this.ctx.shutdown) await this.ctx.shutdown();
+  }
+}
