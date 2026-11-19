@@ -13,6 +13,7 @@ import { TodayView, todayItems } from './TodayView';
 import { PublishChip } from './PublishChip';
 import { concurrencySuffix, concurrencyTitle } from './runner-label';
 import { UsageChip } from './UsageChip';
+import { AgendaChip } from './AgendaChip';
 import { UpdateBanner, useUiUpdate } from './UpdateBanner';
 
 type View = 'board' | 'today' | 'import' | 'archived' | 'settings';
@@ -277,6 +278,7 @@ export function App() {
             <button className={'counter' + (waiting > 0 ? ' attention' : '')} onClick={() => setView('today')}>
               aguardando você <strong>{waiting}</strong>
             </button>
+            <AgendaChip agenda={data?.agenda ?? null} />
             <UsageChip usage={data?.usage ?? null} />
             <PublishChip publish={data?.publish ?? null} running={runner.running} onOpen={(id) => setOpenId(id)} notify={notify} />
             <button

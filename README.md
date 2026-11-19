@@ -177,7 +177,8 @@ Stored in `~/.claude-board/config.json` and editable in Settings.
 | `jiraBaseUrl` | empty | Jira site (e.g. `https://acme.atlassian.net`); a Jira link holding an issue key opens there |
 | `defaultModel` | `claude-opus-5-5` | Model of runs (`--model`) when the card does not choose; empty = Claude Code's default |
 | `defaultEffort` | `high` | Effort of runs (`--effort`) when the card does not choose; empty = Claude Code's default |
-| `classificationModel` | `haiku` | Model used by the import |
+| `classificationModel` | `haiku` | Model used by the import and by the agenda reading |
+| `agendaRefreshMinutes` | 30 | Interval of the agenda reading shown in the header; 0 = off |
 | `transcriptRetentionDays` | 90 | Retention of the Board's transcripts |
 | `userProfile` | empty | A line about you that goes into every run's prompt (language, tone, conventions) |
 | `runnerEntrypoint` | `claude-vscode` | `CLAUDE_CODE_ENTRYPOINT` of every run, so headless runs get the same tools as an editor session; empty = inherit the Board's own |

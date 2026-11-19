@@ -50,6 +50,7 @@ export async function registerApi(app: FastifyInstance, ctx: AppContext): Promis
       labels: s.listLabels(),
       runner: runnerState(ctx.db, isPaused(ctx), ctx.runner?.concurrency?.()),
       usage: ctx.usage?.get() ?? null,
+      agenda: ctx.agenda?.get() ?? null,
       publish: ctx.publisher?.state() ?? null,
     };
   });
