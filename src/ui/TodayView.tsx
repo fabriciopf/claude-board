@@ -1,5 +1,9 @@
 import { STATUS_LABELS, type App, type CardSummary } from '../shared/domain';
 import { fmtDate, isOverdue } from './api';
+import { DEFAULT_SORT, compareCards, type CardSort } from './card-sort';
+
+/** Name of the view (card #152; it was "Hoje"). The code keeps the 'today' id, also stored in cb:view. */
+export const PENDING_VIEW_NAME = 'Minhas pendências';
 
 interface Item {
   card: CardSummary;
@@ -8,8 +12,11 @@ interface Item {
   rank: number;
 }
 
-/** Everything that needs the user now, in the order it should be handled. */
-export function todayItems(cards: CardSummary[]): Item[] {
+/**
+ * Everything that needs the user now. The default order ("Prioridade e ação") is the order it should
+ * be handled; any other sort the user picks (card #152) keeps the kind of action as the tie-breaker.
+ */
+export function todayItems(cards: CardSummary[], sort: CardSort = DEFAULT_SORT.today): Item[] {
   const items: Item[] = [];
   for (const card of cards) {
     if (card.status === 'waiting_user') {
@@ -21,6 +28,7 @@ export function todayItems(cards: CardSummary[]): Item[] {
       items.push({ card, reason: `Prazo vencido (${fmtDate(card.dueDate, false)})`, tone: 'danger', rank: 3 });
     }
   }
+  if (sort.key !== 'smart') return items.sort((a, b) => compareCards(a.card, b.card, sort) || a.rank - b.rank);
   // Priority first (1 = highest), then the kind of action, then the most recently updated.
   return items.sort(
     (a, b) => a.card.priority - b.card.priority || a.rank - b.rank || (a.card.updatedAt < b.card.updatedAt ? 1 : -1),
@@ -36,15 +44,49 @@ function priorityTone(priority: number): string {
   return '';
 }
 
-export function TodayView({ cards, apps, onOpen }: { cards: CardSummary[]; apps: App[]; onOpen: (id: number) => void }) {
-  const items = todayItems(cards);
+/**
+ * Heading of the "Minhas pendências" view. With a search or filter on (card #148), it says how many
+ * of the items it shows, so a short list is not read as "nothing else needs me".
+ */
+export function todayHeading(shown: number, total: number | undefined): string {
+  return total === undefined ? PENDING_VIEW_NAME : `${PENDING_VIEW_NAME} · ${shown} de ${total}`;
+}
+
+/** Date shown under each item: the one the chosen sort reads, so the order can be checked at a glance. */
+export function rowDate(card: CardSummary, sort: CardSort | undefined): string {
+  if (sort?.key === 'entered') return `na lista desde ${fmtDate(card.enteredStatusAt)}`;
+  if (sort?.key === 'created') return `criado ${fmtDate(card.createdAt)}`;
+  if (sort?.key === 'due') return card.dueDate ? `prazo ${fmtDate(card.dueDate, false)}` : 'sem prazo';
+  return `atualizado ${fmtDate(card.updatedAt)}`;
+}
+
+export function TodayView({
+  cards,
+  total,
+  apps,
+  sort,
+  onOpen,
+}: {
+  /** Cards already narrowed by the search and filters. */
+  cards: CardSummary[];
+  /** Items before the search and filters; undefined when none is on. */
+  total?: number;
+  apps: App[];
+  sort?: CardSort;
+  onOpen: (id: number) => void;
+}) {
+  const items = todayItems(cards, sort);
   const appById = new Map(apps.map((a) => [a.id, a]));
   return (
     <div className="page">
       <div className="page-inner">
-        <h2 style={{ margin: '8px 0 12px' }}>Hoje</h2>
+        <h2 style={{ margin: '8px 0 12px' }}>{todayHeading(items.length, total)}</h2>
         {items.length === 0 ? (
-          <p className="muted">Nada precisa de você agora. O Claude segue com a fila.</p>
+          <p className="muted">
+            {total
+              ? 'Nenhuma pendência bate com a busca e os filtros.'
+              : 'Nada precisa de você agora. O Claude segue com a fila.'}
+          </p>
         ) : (
           <div className="list today-list">
             {items.map(({ card, reason, tone }) => {
@@ -61,7 +103,7 @@ export function TodayView({ cards, apps, onOpen }: { cards: CardSummary[]; apps:
                     </div>
                     <div className="muted small">
                       {STATUS_LABELS[card.status]}
-                      {app ? ` · ${app.name}` : ''} · atualizado {fmtDate(card.updatedAt)}
+                      {app ? ` · ${app.name}` : ''} · {rowDate(card, sort)}
                     </div>
                   </div>
                 </div>

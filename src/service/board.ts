@@ -23,6 +23,7 @@ import {
   type CommentKind,
   type Execution,
   type Label,
+  type Repository,
   type Origin,
   type Owner,
   type PermissionMode,
@@ -54,7 +55,7 @@ const json = <T>(v: unknown, fallback: T): T => {
   }
 };
 
-export function rowToCard(r: Row, labelIds: number[] = []): Card {
+export function rowToCard(r: Row, labelIds: number[] = [], repositoryIds: number[] = []): Card {
   return {
     id: r.id,
     title: r.title,
@@ -91,6 +92,7 @@ export function rowToCard(r: Row, labelIds: number[] = []): Card {
     completedAt: r.completed_at ?? null,
     archived: bool(r.archived),
     labelIds,
+    repositoryIds,
   };
 }
 
@@ -168,6 +170,7 @@ export interface CardInput {
   model?: string | null;
   effort?: EffortLevel | null;
   labelIds?: number[];
+  repositoryIds?: number[];
   links?: CardLink[];
   suggestedStatus?: Status | null;
   suggestionConfidence?: number | null;
@@ -216,6 +219,7 @@ export interface CardFilter {
   status?: Status | Status[];
   appId?: number;
   labelId?: number;
+  repositoryId?: number;
   owner?: Owner;
   text?: string;
   includeArchived?: boolean;
@@ -384,6 +388,52 @@ export class BoardService {
     });
   }
 
+  // ---------- repositories (D70) ----------
+
+  listRepositories(): Repository[] {
+    return (this.db.prepare('SELECT * FROM repositories ORDER BY name COLLATE NOCASE').all() as Row[]).map((r) => ({ id: r.id, name: r.name }));
+  }
+
+  createRepository(input: { name: string }): Repository {
+    const name = input.name?.trim();
+    if (!name) throw new RuleError('invalid_repository', 'O repositório precisa de um nome.', 400);
+    if (this.listRepositories().some((x) => x.name.toLowerCase() === name.toLowerCase())) {
+      throw new RuleError('duplicate_repository', `O repositório "${name}" já existe.`, 400);
+    }
+    const r = this.db.prepare('INSERT INTO repositories (name) VALUES (?)').run(name);
+    this.bus.publish({ type: 'repositories.changed' });
+    return { id: Number(r.lastInsertRowid), name };
+  }
+
+  updateRepository(id: number, patch: { name?: string }): Repository {
+    const current = this.listRepositories().find((x) => x.id === id);
+    if (!current) throw new RuleError('not_found', `Repositório ${id} não existe.`, 404);
+    const name = patch.name?.trim() || current.name;
+    if (this.listRepositories().some((x) => x.id !== id && x.name.toLowerCase() === name.toLowerCase())) {
+      throw new RuleError('duplicate_repository', `O repositório "${name}" já existe.`, 400);
+    }
+    this.db.prepare('UPDATE repositories SET name = ? WHERE id = ?').run(name, id);
+    this.bus.publish({ type: 'repositories.changed' });
+    return { id, name };
+  }
+
+  deleteRepository(id: number): void {
+    this.db.prepare('DELETE FROM repositories WHERE id = ?').run(id);
+    this.bus.publish({ type: 'repositories.changed' });
+  }
+
+  /** Accepts repository names (case-insensitive) or ids. Unlike labels, an unknown name is an error: the list is curated. */
+  resolveRepositories(values: (string | number)[]): number[] {
+    const repos = this.listRepositories();
+    return values.map((v) => {
+      const found = typeof v === 'number' ? repos.find((x) => x.id === v) : repos.find((x) => x.name.toLowerCase() === v.trim().toLowerCase());
+      if (!found) {
+        throw new RuleError('unknown_repository', `Repositório "${v}" não está cadastrado. Disponíveis: ${repos.map((x) => x.name).join(', ') || 'nenhum'}.`, 400);
+      }
+      return found.id;
+    });
+  }
+
   // ---------- events ----------
 
   recordEvent(cardId: number, type: string, payload: Record<string, unknown>, author: Actor): void {
@@ -402,10 +452,14 @@ export class BoardService {
     return (this.db.prepare('SELECT label_id FROM card_labels WHERE card_id = ?').all(cardId) as Row[]).map((r) => r.label_id);
   }
 
+  private repositoryIdsOf(cardId: number): number[] {
+    return (this.db.prepare('SELECT repository_id FROM card_repositories WHERE card_id = ?').all(cardId) as Row[]).map((r) => r.repository_id);
+  }
+
   getCard(id: number): Card {
     const r = this.db.prepare('SELECT * FROM cards WHERE id = ?').get(id) as Row | undefined;
     if (!r) throw new RuleError('not_found', `Card ${id} não existe.`, 404);
-    return rowToCard(r, this.labelIdsOf(id));
+    return rowToCard(r, this.labelIdsOf(id), this.repositoryIdsOf(id));
   }
 
   hasRunningExecution(cardId: number): boolean {
@@ -434,6 +488,10 @@ export class BoardService {
       where.push('EXISTS (SELECT 1 FROM card_labels cl WHERE cl.card_id = c.id AND cl.label_id = ?)');
       params.push(filter.labelId);
     }
+    if (filter.repositoryId) {
+      where.push('EXISTS (SELECT 1 FROM card_repositories cr WHERE cr.card_id = c.id AND cr.repository_id = ?)');
+      params.push(filter.repositoryId);
+    }
     if (filter.text?.trim()) {
       where.push("(c.title LIKE ? ESCAPE '\\' OR c.description_md LIKE ? ESCAPE '\\' OR CAST(c.id AS TEXT) = ?)");
       const like = `%${filter.text.trim().replace(/[\\%_]/g, (m) => '\\' + m)}%`;
@@ -445,7 +503,13 @@ export class BoardService {
         (SELECT COUNT(*) FROM checklist_items i WHERE i.card_id = c.id) AS checklist_total,
         (SELECT COUNT(*) FROM comments m WHERE m.card_id = c.id AND m.author != 'system') AS comment_count,
         (SELECT COUNT(*) FROM executions e WHERE e.card_id = c.id AND e.status = 'running') AS running_count,
-        (SELECT GROUP_CONCAT(cl.label_id) FROM card_labels cl WHERE cl.card_id = c.id) AS label_ids
+        (SELECT GROUP_CONCAT(cl.label_id) FROM card_labels cl WHERE cl.card_id = c.id) AS label_ids,
+        (SELECT GROUP_CONCAT(cr.repository_id) FROM card_repositories cr WHERE cr.card_id = c.id) AS repository_ids,
+        COALESCE(
+          (SELECT MAX(e.created_at) FROM events e
+            WHERE e.card_id = c.id AND e.type = 'moved' AND json_extract(e.payload_json, '$.to') = c.status),
+          c.created_at
+        ) AS entered_status_at
       FROM cards c
       ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
       ORDER BY c.position ASC, c.id ASC
@@ -463,7 +527,8 @@ export class BoardService {
     const { subtasks, titles } = this.relatives(rows);
     return rows.map((r) => {
       const labelIds = r.label_ids ? String(r.label_ids).split(',').map(Number) : [];
-      const card = rowToCard(r, labelIds);
+      const repositoryIds = r.repository_ids ? String(r.repository_ids).split(',').map(Number) : [];
+      const card = rowToCard(r, labelIds, repositoryIds);
       return {
         ...card,
         checklist: items.get(card.id) ?? [],
@@ -474,6 +539,7 @@ export class BoardService {
         hasOpenQuestion: card.status === 'waiting_user' && this.lastQuestion(card.id) !== null,
         parentTitle: card.parentId ? (titles.get(card.parentId) ?? null) : null,
         subtasks: subtasks.get(card.id) ?? [],
+        enteredStatusAt: r.entered_status_at,
       };
     });
   }
@@ -594,6 +660,9 @@ export class BoardService {
     for (const labelId of input.labelIds ?? []) {
       this.db.prepare('INSERT OR IGNORE INTO card_labels (card_id, label_id) VALUES (?, ?)').run(cardId, labelId);
     }
+    for (const repositoryId of input.repositoryIds ?? []) {
+      this.db.prepare('INSERT OR IGNORE INTO card_repositories (card_id, repository_id) VALUES (?, ?)').run(cardId, repositoryId);
+    }
     this.recordEvent(cardId, 'created', { status, origin, ...(extra.parentId ? { parentId: extra.parentId } : {}) }, actor);
     return cardId;
   }
@@ -632,6 +701,7 @@ export class BoardService {
             model: parent.model,
             effort: parent.effort,
             labelIds: parent.labelIds,
+            repositoryIds: parent.repositoryIds,
             links: parent.links,
           },
           actor,
@@ -706,6 +776,21 @@ export class BoardService {
     tx(this.db, () => {
       this.db.prepare(`UPDATE cards SET ${sets.join(', ')} WHERE id = ?`).run(...params);
       this.recordEvent(id, 'updated', { fields: changedFields }, actor);
+    });
+    this.changed(id);
+    return this.getCard(id);
+  }
+
+  setRepositories(id: number, repositoryIds: number[], actor: Actor): Card {
+    this.getCard(id);
+    const known = new Set(this.listRepositories().map((x) => x.id));
+    const unknown = repositoryIds.filter((x) => !known.has(x));
+    if (unknown.length) throw new RuleError('unknown_repository', `Repositório ${unknown.join(', ')} não existe.`, 400);
+    tx(this.db, () => {
+      this.db.prepare('DELETE FROM card_repositories WHERE card_id = ?').run(id);
+      for (const x of repositoryIds) this.db.prepare('INSERT OR IGNORE INTO card_repositories (card_id, repository_id) VALUES (?, ?)').run(id, x);
+      this.db.prepare('UPDATE cards SET updated_at = ? WHERE id = ?').run(nowIso(), id);
+      this.recordEvent(id, 'repositories', { repositoryIds }, actor);
     });
     this.changed(id);
     return this.getCard(id);
@@ -976,7 +1061,7 @@ export class BoardService {
          ORDER BY c.priority ASC, c.position ASC, c.id ASC LIMIT 1`,
       )
       .get() as Row | undefined;
-    return r ? rowToCard(r, this.labelIdsOf(r.id)) : null;
+    return r ? rowToCard(r, this.labelIdsOf(r.id), this.repositoryIdsOf(r.id)) : null;
   }
 
   setRunFields(id: number, fields: { worktreePath?: string | null; branch?: string | null; claudeSessionId?: string | null }): void {

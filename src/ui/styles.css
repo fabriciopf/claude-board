@@ -123,6 +123,8 @@ pre {
   display: flex;
   flex-direction: column;
   height: 100%;
+  /* On phones 100% includes the area under the browser bar; dvh is the part actually visible. */
+  height: 100dvh;
 }
 
 /* ---------- header ---------- */
@@ -247,6 +249,14 @@ pre {
 
 .toolbar input[type='search'] {
   width: 220px;
+}
+
+/* Sort select and its direction button stay together when the toolbar wraps (card #152). */
+.sort-control {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  flex: none;
 }
 
 .input,
@@ -686,6 +696,35 @@ textarea.input {
 
 .badge.question {
   color: var(--warn);
+  font-weight: 600;
+}
+
+/* Repository the card is about (D70): outlined monospace tag, so it does not read as a label or an app. */
+.repo-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0 6px;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 11.5px;
+  color: var(--text);
+  background: transparent;
+  white-space: nowrap;
+}
+
+.repo-chip.toggle {
+  cursor: pointer;
+  padding: 2px 10px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.repo-chip.toggle.on {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: var(--accent);
   font-weight: 600;
 }
 
@@ -1525,25 +1564,196 @@ textarea.input {
   padding: 0 4px;
 }
 
+/* ---------- phone (card #106) ---------- */
+
+/* iOS zooms the page into any field under 16px when it gets focus. */
+@media (pointer: coarse) {
+  .input,
+  select.input,
+  textarea.input,
+  .title-input {
+    font-size: 16px;
+  }
+
+  /* Holding a card to drag it must not open the text selection or the link menu. */
+  .card {
+    -webkit-touch-callout: none;
+    user-select: none;
+  }
+
+  /* No hover on touch: the remove button of a checklist item is always there. */
+  .checklist-item .btn.link {
+    visibility: visible;
+  }
+}
+
 @media (max-width: 640px) {
-  .header,
-  .toolbar,
-  .board,
-  .page {
-    padding-left: 16px;
-    padding-right: 16px;
+  /* Header: two single-line strips that scroll sideways (views, then counters and buttons)
+     instead of four wrapped lines over the board. */
+  .header {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    gap: 6px 0;
+    padding: 6px 0 8px;
+  }
+
+  .header > .tabs,
+  .header > .counters {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    padding: 0 12px;
+  }
+
+  .header > .tabs::-webkit-scrollbar,
+  .header > .counters::-webkit-scrollbar {
+    display: none;
+  }
+
+  .brand {
+    padding-left: 12px;
+  }
+
+  .brand-name {
+    display: none;
+  }
+
+  .header > .tabs {
+    padding-left: 8px;
+  }
+
+  .header > .counters {
+    grid-column: 1 / -1;
+    margin-left: 0;
+  }
+
+  .counter,
+  .counters > .btn {
+    flex: none;
+  }
+
+  /* The counters strip scrolls, so the publication pop-over cannot hang from it. */
+  .publish-pop {
+    position: fixed;
+    top: 96px;
+    left: 8px;
+    right: 8px;
+    width: auto;
+  }
+
+  .banner {
+    margin: 6px 12px 0;
+    padding: 6px 10px;
+    font-size: 13px;
+  }
+
+  /* Filters: search on top, the four selects side by side in one strip. */
+  .toolbar {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    padding: 8px 12px;
+  }
+
+  .toolbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .toolbar > * {
+    flex: none;
   }
 
   .toolbar input[type='search'] {
-    width: 100%;
+    width: 150px;
   }
 
   .kbd-hints {
     display: none;
   }
 
-  .counters {
-    margin-left: 0;
+  /* Board: one column per screen, with the next one peeking, snapping as you swipe. */
+  .board {
+    min-height: 0;
+    padding: 4px 12px 12px;
+    gap: 8px;
+    scroll-snap-type: x mandatory;
+    scroll-padding: 0 12px;
+  }
+
+  .column {
+    flex-basis: calc(100vw - 48px);
+    scroll-snap-align: start;
+  }
+
+  .column.collapsed {
+    flex-basis: 40px;
+  }
+
+  .page {
+    padding: 8px 12px 24px;
+  }
+
+  /* Hoje: priority and reason on one line, the card text below them at full width. */
+  .list.today-list {
+    display: flex;
+  }
+
+  .today-list .list-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 8px;
+  }
+
+  .today-list .list-row .grow {
+    flex-basis: 100%;
+  }
+
+  /* Card: full screen, the close button always in reach. */
+  .modal-backdrop {
+    padding: 0;
+  }
+
+  .modal {
+    border-radius: 0;
+    min-height: 100%;
+    padding: 12px 14px 24px;
+  }
+
+  .modal-close {
+    position: sticky;
+    top: 8px;
+    float: right;
+    margin: -4px -6px 0 8px;
+    background: var(--bg);
+    font-size: 18px;
+  }
+
+  /* The sidebar comes after the text on a phone, so a docked comment field would float in the
+     middle of the card; it stays where it is in the reading order instead. */
+  .comment-dock {
+    position: static;
+    margin-bottom: 0;
+    box-shadow: none;
+    padding-bottom: 8px;
+  }
+
+  .transcript {
+    max-height: 60vh;
+  }
+
+  .app-suggest {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+
+  .app-suggest .app-path {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    font-size: 12px;
+  }
+
+  .app-row .app-name {
+    flex-basis: 120px;
   }
 }
 

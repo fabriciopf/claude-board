@@ -352,6 +352,7 @@ export class Runner implements RunnerControl {
       detail,
       apps: service.listApps(true),
       labels: service.listLabels(),
+      repositories: service.listRepositories(),
       cwd: workdir.workArea,
       startDir: workdir.cwd,
       branch: workdir.branch,

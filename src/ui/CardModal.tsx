@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { EFFORT_LABELS, EFFORT_LEVELS, MODEL_OPTIONS, PERMISSION_MODES, REOPEN_ON_COMMENT, STATUS_LABELS, STATUS_SHORT_LABELS, effortLabel, modelLabel, type App, type Card, type Label, type LinkKind } from '../shared/domain';
+import { EFFORT_LABELS, EFFORT_LEVELS, MODEL_OPTIONS, PERMISSION_MODES, REOPEN_ON_COMMENT, STATUS_LABELS, STATUS_SHORT_LABELS, effortLabel, modelLabel, type App, type Card, type Label, type LinkKind, type Repository } from '../shared/domain';
 import { ApiError, api, fmtDate, useServerEvents, type CardDetailResponse } from './api';
 import { latestDelivery } from './delivery';
 import { renderMarkdown } from './markdown';
@@ -10,6 +10,7 @@ interface Props {
   cardId: number;
   apps: App[];
   labels: Label[];
+  repositories?: Repository[];
   onClose: () => void;
   /** Opens another card in the modal (a task of this card, or the card it came from). */
   onOpenCard: (id: number) => void;
@@ -33,7 +34,7 @@ function linkHref(kind: LinkKind, value: string, jiraBaseUrl?: string): string |
   return undefined;
 }
 
-export function CardModal({ cardId, apps, labels, onClose, onOpenCard, notify, move, onLeftColumn }: Props) {
+export function CardModal({ cardId, apps, labels, repositories = [], onClose, onOpenCard, notify, move, onLeftColumn }: Props) {
   const [detail, setDetail] = useState<CardDetailResponse | null>(null);
   const [editingDesc, setEditingDesc] = useState(false);
   const [desc, setDesc] = useState('');
@@ -635,6 +636,32 @@ export function CardModal({ cardId, apps, labels, onClose, onOpenCard, notify, m
                   );
                 })}
               </div>
+            </div>
+            <div className="field">
+              <label id="f-repositories">Repositórios</label>
+              <div role="group" aria-labelledby="f-repositories" style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                {repositories.map((x) => {
+                  const ids = card.repositoryIds ?? [];
+                  const on = ids.includes(x.id);
+                  return (
+                    <button
+                      key={x.id}
+                      className={'repo-chip toggle' + (on ? ' on' : '')}
+                      aria-pressed={on}
+                      onClick={() =>
+                        void run(() =>
+                          api.put(`/api/cards/${cardId}/repositories`, {
+                            repositoryIds: on ? ids.filter((y) => y !== x.id) : [...ids, x.id],
+                          }),
+                        )
+                      }
+                    >
+                      {x.name}
+                    </button>
+                  );
+                })}
+              </div>
+              {repositories.length === 0 && <span className="muted small">Cadastre os repositórios em Configurações.</span>}
             </div>
             <div className="field">
               <label htmlFor="f-priority">Prioridade</label>

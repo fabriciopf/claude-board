@@ -1,5 +1,5 @@
 import { forwardRef, type HTMLAttributes } from 'react';
-import { STATUS_LABELS, STATUS_SHORT_LABELS, showsChecklistOnTile, type App, type CardSummary, type Label } from '../shared/domain';
+import { STATUS_LABELS, STATUS_SHORT_LABELS, showsChecklistOnTile, type App, type CardSummary, type Label, type Repository } from '../shared/domain';
 import { fmtDate, isOverdue } from './api';
 
 /** Checklist items shown on the cover; the rest is summed up as "+N itens". */
@@ -9,17 +9,19 @@ interface Props extends HTMLAttributes<HTMLDivElement> {
   card: CardSummary;
   apps: Map<number, App>;
   labels: Map<number, Label>;
+  repositories?: Map<number, Repository>;
   focused?: boolean;
   dragging?: boolean;
   overlay?: boolean;
 }
 
 export const CardTile = forwardRef<HTMLDivElement, Props>(function CardTile(
-  { card, apps, labels, focused, dragging, overlay, className, ...rest },
+  { card, apps, labels, repositories, focused, dragging, overlay, className, ...rest },
   ref,
 ) {
   const app = card.appId ? apps.get(card.appId) : undefined;
   const cardLabels = card.labelIds.map((id) => labels.get(id)).filter((l): l is Label => !!l);
+  const cardRepos = (card.repositoryIds ?? []).map((id) => repositories?.get(id)).filter((x): x is Repository => !!x);
   const pr = card.links.find((l) => l.kind === 'pr');
   const overdue = card.status !== 'done' && isOverdue(card.dueDate);
   const classes = [
@@ -94,6 +96,11 @@ export const CardTile = forwardRef<HTMLDivElement, Props>(function CardTile(
             {app.name}
           </span>
         )}
+        {cardRepos.map((x) => (
+          <span key={x.id} className="repo-chip" title={`Repositório: ${x.name}`}>
+            {x.name}
+          </span>
+        ))}
         {card.commentCount > 0 && <span className="badge">💬 {card.commentCount}</span>}
         {card.dueDate && <span className={'badge' + (overdue ? ' overdue' : '')}>⏱ {fmtDate(card.dueDate, false).slice(0, 5)}</span>}
         {pr && <span className="badge">PR</span>}

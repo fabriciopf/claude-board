@@ -8,8 +8,8 @@ export interface CmdResult {
   out: string;
 }
 
-export function git(cwd: string, args: string[]): CmdResult {
-  const r = spawnSync('git', args, { cwd, encoding: 'utf8', windowsHide: true, maxBuffer: 32 * 1024 * 1024 });
+export function git(cwd: string, args: string[], env?: NodeJS.ProcessEnv): CmdResult {
+  const r = spawnSync('git', args, { cwd, env: env ?? process.env, encoding: 'utf8', windowsHide: true, maxBuffer: 32 * 1024 * 1024 });
   if (r.error) return { ok: false, out: r.error.message };
   return { ok: r.status === 0, out: `${r.stdout ?? ''}${r.stderr ?? ''}`.trim() };
 }

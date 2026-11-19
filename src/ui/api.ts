@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import type { App, CardDetail, CardSummary, Comment, Label, PublishState, RunnerState, UsageSnapshot } from '../shared/domain';
+import type { App, CardDetail, CardSummary, Comment, Label, PublishState, Repository, RunnerState, UsageSnapshot } from '../shared/domain';
 import type { AgendaState } from '../shared/agenda';
 
 export class ApiError extends Error {
@@ -36,6 +36,7 @@ export interface BoardData {
   cards: CardSummary[];
   apps: App[];
   labels: Label[];
+  repositories: Repository[];
   runner: RunnerState;
   usage: UsageSnapshot | null;
   agenda: AgendaState | null;

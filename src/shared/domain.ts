@@ -181,6 +181,12 @@ export interface Label {
   color: string;
 }
 
+/** A repository a card is about (e.g. hdb, ignite, sms); a card can have several (D70). */
+export interface Repository {
+  id: number;
+  name: string;
+}
+
 export interface ChecklistItem {
   id: number;
   cardId: number;
@@ -231,6 +237,8 @@ export interface Card {
   completedAt: string | null;
   archived: boolean;
   labelIds: number[];
+  /** Repositories the card is about (D70); not the folder it runs in (repoPath). */
+  repositoryIds: number[];
 }
 
 /** Another card, as a split card lists its tasks and a task points to its origin. */
@@ -253,6 +261,8 @@ export interface CardSummary extends Card {
   parentTitle: string | null;
   /** Tasks this card was split into (archived ones left out). */
   subtasks: CardRef[];
+  /** When the card last entered its current list: the last "moved" event into it, else its creation (card #152). */
+  enteredStatusAt: string;
 }
 
 export interface Comment {

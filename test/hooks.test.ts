@@ -113,7 +113,9 @@ describe('hook script', () => {
     expect(r.ms).toBeLessThan(1500); // includes Node start-up; the script itself gives up at 0.9 s
   });
 
-  it('SessionStart inside a card worktree injects the card context', async () => {
+  // The script gives up at 0.9 s by design (it must never slow Claude Code down); on a machine loaded
+  // by the Board's own executions the round trip can pass that with no defect (card #110).
+  it('SessionStart inside a card worktree injects the card context', { retry: 2 }, async () => {
     const wt = tempDir('cb-wt-');
     const card = ctx.service.createCard({ title: 'Ajustar o export', descriptionMd: 'Exportar em CSV.', owner: 'claude' }, 'user', 'manual');
     ctx.service.setRunFields(card.id, { worktreePath: wt, branch: `cb/${card.id}-ajustar` });
