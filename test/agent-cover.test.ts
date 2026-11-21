@@ -1,7 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { coverAgent } from '../src/shared/domain';
-import { CLAUDE_PATH, GEMINI_PATH, isGoogleAgent } from '../src/ui/AgentIcon';
+import { isGoogleAgent } from '../src/ui/AgentIcon';
+import { CLAUDE_PATH } from '../src/ui/OwnerAvatar';
 import { makeContext } from './helpers.js';
 
 // Card #197 / D98: the card cover shows the agent the card runs in, not its owner.
@@ -41,19 +42,31 @@ describe('agent on the card cover', () => {
     expect(tile).not.toMatch(/<OwnerAvatar/);
   });
 
-  it('Antigravity CLI and the old Gemini CLI runs show the Gemini mark; Claude Code the Claude mark', () => {
+  it('Antigravity CLI and the old Gemini CLI runs show the Antigravity icon; Claude Code the Claude one', () => {
     expect(isGoogleAgent('antigravity')).toBe(true);
     expect(isGoogleAgent('gemini')).toBe(true);
     expect(isGoogleAgent('claude')).toBe(false);
   });
 
-  it('uses the official marks (Simple Icons), not hand-drawn shapes', () => {
-    // First and last commands of each official path: a redrawn icon would not keep them.
+  it('Claude Code shows the very avatar of the card activity (revision of card #197)', () => {
+    const agent = readFileSync(new URL('../src/ui/AgentIcon.tsx', import.meta.url), 'utf8');
+    expect(agent.includes('return <OwnerAvatar owner="claude" label={text} />')).toBe(true);
+    const timeline = readFileSync(new URL('../src/ui/Timeline.tsx', import.meta.url), 'utf8');
+    expect(timeline.includes('<OwnerAvatar owner={c.author}')).toBe(true);
+    // The official Claude mark, not the hand-drawn spark of D86.
     expect(CLAUDE_PATH.startsWith('m4.7144 15.9555 4.7174-2.6471')).toBe(true);
     expect(CLAUDE_PATH.endsWith('1.9064-1.3114Z')).toBe(true);
-    expect(GEMINI_PATH.startsWith('M11.04 19.32Q12 21.51 12 24')).toBe(true);
     const owner = readFileSync(new URL('../src/ui/OwnerAvatar.tsx', import.meta.url), 'utf8');
     expect(owner).not.toMatch(/RAYS/);
-    expect(owner).toMatch(/<ClaudeMark size=\{size\} \/>/);
+  });
+
+  it('Antigravity uses its official full-colour icon, not the Gemini sparkle', () => {
+    const agent = readFileSync(new URL('../src/ui/AgentIcon.tsx', import.meta.url), 'utf8');
+    expect(agent.includes("import antigravityIcon from './assets/antigravity-icon.png'")).toBe(true);
+    expect(agent).not.toMatch(/GeminiMark|GEMINI_PATH|linearGradient/);
+    const png = readFileSync(new URL('../src/ui/assets/antigravity-icon.png', import.meta.url));
+    expect(png.subarray(1, 4).toString('latin1')).toBe('PNG');
+    expect(png.readUInt32BE(16)).toBe(96); // width
+    expect(png.readUInt32BE(20)).toBe(96); // height
   });
 });

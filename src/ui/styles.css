@@ -1397,10 +1397,16 @@ textarea.input {
   color: #ffffff;
 }
 
-/* The agent a card runs in, in its own brand colours on a neutral disc (card #197, D98). */
+/* Antigravity CLI on the card cover: its full-colour icon on a neutral disc (card #197, D98).
+   Claude Code runs use the Claude avatar of the activity (.avatar.claude). */
 .avatar.agent {
   background: var(--column);
   box-shadow: inset 0 0 0 1px var(--border);
+}
+
+.avatar.agent img {
+  display: block;
+  pointer-events: none;
 }
 
 .avatar.user {
