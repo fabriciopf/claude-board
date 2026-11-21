@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { AUTO_CONCURRENCY, UNLIMITED_CONCURRENCY, DEFAULT_RUN_EFFORT, DEFAULT_RUN_MODEL, MAX_CONCURRENCY, isEffortLevel, isValidModelId, type ConcurrencySetting } from './shared/domain.js';
+import { AUTO_CONCURRENCY, SELF_UPDATE_MODES, UNLIMITED_CONCURRENCY, DEFAULT_RUN_EFFORT, DEFAULT_RUN_MODEL, MAX_CONCURRENCY, isEffortLevel, isValidModelId, type ConcurrencySetting, type SelfUpdateMode } from './shared/domain.js';
 
 export interface Config {
   port: number;
@@ -59,6 +59,10 @@ export interface Config {
   mirrorGhUser: string;
   /** Terms (comma-separated, case-insensitive) that stop the push when they appear in what would go public. */
   mirrorBlockTerms: string;
+  /** Update of the Board from the remote it was cloned from (D89): off, notify (strip with a button) or auto. */
+  selfUpdate: SelfUpdateMode;
+  /** Remote branch to follow, as remote/branch; '' = the upstream of the publish branch, else origin's default branch. */
+  selfUpdateSource: string;
 }
 
 export const DEFAULT_CONFIG: Config = {
@@ -98,6 +102,8 @@ export const DEFAULT_CONFIG: Config = {
   mirrorExclude: 'DECISIONS.md',
   mirrorGhUser: '',
   mirrorBlockTerms: '',
+  selfUpdate: 'notify',
+  selfUpdateSource: '',
 };
 
 /** The protected branches as a list; an empty setting falls back to the default. */
@@ -196,6 +202,9 @@ export function saveConfig(current: Config, patch: Partial<Config>): Config {
   next.mirrorBaseBranch = String(next.mirrorBaseBranch ?? '').trim() || DEFAULT_CONFIG.mirrorBaseBranch;
   next.mirrorGhUser = String(next.mirrorGhUser ?? '').trim();
   if (next.mirrorGhUser && !/^[A-Za-z0-9-]+$/.test(next.mirrorGhUser)) throw new Error('mirrorGhUser: use o login do GitHub (letras, números e hífen).');
+  if (!SELF_UPDATE_MODES.includes(next.selfUpdate)) throw new Error('selfUpdate: use "off", "notify" ou "auto".');
+  next.selfUpdateSource = String(next.selfUpdateSource ?? '').trim();
+  if (next.selfUpdateSource && !/^[^\s/]+\/\S+$/.test(next.selfUpdateSource)) throw new Error('selfUpdateSource: use remoto/branch, como origin/main.');
   next.protectedBranches = protectedBranchList(next.protectedBranches).join(', ');
   next.jiraBaseUrl = String(next.jiraBaseUrl ?? '').trim().replace(/\/+$/, '');
   if (next.jiraBaseUrl && !/^https?:\/\//.test(next.jiraBaseUrl)) throw new Error('jiraBaseUrl: use uma URL http(s), como https://empresa.atlassian.net.');

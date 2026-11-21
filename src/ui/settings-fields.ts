@@ -1,4 +1,4 @@
-import { AUTO_CONCURRENCY, CONCURRENCY_PRESETS, EFFORT_LABELS, EFFORT_LEVELS, MODEL_OPTIONS, UNLIMITED_CONCURRENCY } from '../shared/domain';
+import { AUTO_CONCURRENCY, CONCURRENCY_PRESETS, SELF_UPDATE_MODES, EFFORT_LABELS, EFFORT_LEVELS, MODEL_OPTIONS, UNLIMITED_CONCURRENCY } from '../shared/domain';
 
 export type Config = Record<string, any>;
 
@@ -92,6 +92,22 @@ export const FIELDS: Field[] = [
     label: 'Termos que barram o envio público',
     type: 'text',
     hint: 'separe por vírgula; se algum aparecer nas linhas novas ou no título, nada é enviado e o card recebe a lista',
+  },
+  {
+    key: 'selfUpdate',
+    tab: 'git',
+    label: 'Atualização pelo GitHub',
+    type: 'select',
+    options: SELF_UPDATE_MODES,
+    optionLabels: { off: 'Desligada', notify: 'Avisar, com botão Atualizar', auto: 'Automática' },
+    hint: 'cada commit novo na branch do remoto de onde o Board foi clonado conta como versão nova; Avisar: faixa no rodapé com Atualizar; Automática: aplica sozinha; o status fica abaixo',
+  },
+  {
+    key: 'selfUpdateSource',
+    tab: 'git',
+    label: 'Branch das versões novas',
+    type: 'text',
+    hint: 'remoto/branch, como origin/main; vazio = a branch que o checkout do Board segue',
   },
   { key: 'defaultBaseBranch', tab: 'git', label: 'Branch base padrão', type: 'text' },
   { key: 'worktreeRoot', tab: 'git', label: 'Pasta dos worktrees', type: 'text', emptyIsNull: true, hint: 'vazio = ao lado do repositório' },

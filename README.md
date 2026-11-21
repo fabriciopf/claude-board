@@ -15,6 +15,8 @@ Everything runs on `127.0.0.1`, with no login and no cloud: one process serves t
 ## Install
 
 ```bash
+git clone https://github.com/fabriciopf/claude-board.git
+cd claude-board
 npm install
 npm run build
 npm link          # puts the claude-board command on the PATH
@@ -169,6 +171,20 @@ There are two transports: HTTP at `http://127.0.0.1:4317/mcp`, which the runner 
 
 In Triage you accept, adjust or ignore suggestions, one by one or in bulk by minimum confidence.
 
+## Updates
+
+A Board installed with `git clone` keeps itself up to date: every new commit on the branch it was cloned from (`origin/main`) counts as a new version. The Board checks 30 seconds after it starts and every 6 hours.
+
+- **Notify** (default): a strip at the foot of the window shows how many changes are new, with **Novidades** (the commits), **Atualizar** and **Depois** (hide until the next version).
+- **Automatic**: the update starts on its own as soon as a check finds a new version.
+- **Off**: the Board never checks.
+
+Updating takes the same path as a publication of the Board's own cards: the new version is merged and built in a throwaway worktree, `npm install` runs when the lockfile changed, the database is backed up, and the server restarts only when its code changed. Runs in progress keep going through the restart. If anything fails, nothing changes and the strip turns red with the reason.
+
+Changes you made to your own Board stay: when your branch has commits the remote does not, the update merges the two and runs the tests first. A conflict stops the update and names the files.
+
+Settings › Workspace e Git has the mode, the branch to follow and a **Verificar agora** button. The update is off in a Board that has `mirrorRepoPath` set, because that Board is the source of the public copy.
+
 ## Configuration
 
 Stored in `~/.claude-board/config.json` and editable in Settings.
@@ -199,6 +215,8 @@ Stored in `~/.claude-board/config.json` and editable in Settings.
 | `runnerEntrypoint` | `claude-vscode` | `CLAUDE_CODE_ENTRYPOINT` of every run, so headless runs get the same tools as an editor session; empty = inherit the Board's own |
 | `autoPublish` | `false` | Merge, test, build and restart the Board's own cards (see "Working on the Board itself") |
 | `publishBranch` | `main` | Branch of the Board's repository that receives those cards |
+| `selfUpdate` | `notify` | Update from the remote the Board was cloned from: `off`, `notify` (strip with a button) or `auto` (see "Updates") |
+| `selfUpdateSource` | empty | Remote branch to follow, as `remote/branch`; empty = the branch the checkout tracks |
 
 The Board's folder is `~/.claude-board`; `CLAUDE_BOARD_HOME` changes it.
 

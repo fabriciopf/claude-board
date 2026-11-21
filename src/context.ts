@@ -6,7 +6,7 @@ import type { BoardService } from './service/board.js';
 import type { UsageTracker } from './service/usage.js';
 import type { AgendaWatcher } from './service/agenda.js';
 import type { AutomationEngine, AutomationService } from './service/automations.js';
-import type { PublishState } from './shared/domain.js';
+import type { PublishState, SelfUpdateState } from './shared/domain.js';
 
 /** What the runner exposes to the API and the MCP server. Filled in by M3. */
 export interface RunnerControl {
@@ -41,6 +41,8 @@ export interface AppContext {
   automationEngine?: AutomationEngine;
   /** Publication of the Board's own improvements (D42). */
   publisher?: PublisherControl;
+  /** Update of the Board from the remote it was cloned from (D89). */
+  selfUpdate?: SelfUpdateControl;
   /** Arguments of the running `claude-board start`, reused by the restart after a publication. */
   startArgs?: string[];
   /** Graceful stop of the running server (same as Ctrl+C). */
@@ -53,4 +55,13 @@ export interface PublisherControl {
   publishNow(): void;
   retry(entryId: number): void;
   isHolding(): boolean;
+}
+
+export interface SelfUpdateControl {
+  state(): SelfUpdateState;
+  /** Fetches the remote and recomputes what is new; "Verificar agora". */
+  check(): Promise<SelfUpdateState>;
+  /** Starts the update in the background; "Atualizar". */
+  begin(): void;
+  isBusy(): boolean;
 }
