@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import type { CardSummary } from '../src/shared/domain';
-import { PENDING_TAB_LABEL, showPendingTab, todayHeading, todayItems } from '../src/ui/TodayView';
+import { pendingTabLabel, showPendingTab, todayHeading, todayItems } from '../src/ui/TodayView';
 
 describe('aba Pendências do cabeçalho (card #170)', () => {
-  it('says just "Pendências"', () => expect(PENDING_TAB_LABEL).toBe('Pendências'));
+  it('says just "Pendências"', () => expect(pendingTabLabel()).toBe('Pendências'));
   it('shows with at least one item', () => {
     expect(showPendingTab(1)).toBe(true);
     expect(showPendingTab(12)).toBe(true);

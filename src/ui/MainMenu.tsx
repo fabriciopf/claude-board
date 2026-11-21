@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
 import { ArchiveIcon, AutomationIcon, ImportIcon, MenuIcon, SettingsIcon } from './HeaderIcons';
-import { MENU_LABELS, MENU_VIEWS, isMenuView, menuButtonLabel, nextMenuIndex, type MenuView, type View } from './main-menu';
+import { t } from './i18n';
+import { MENU_VIEWS, menuLabel, isMenuView, menuButtonLabel, nextMenuIndex, type MenuView, type View } from './main-menu';
 
 const ICONS: Record<MenuView, ReactNode> = {
   automations: <AutomationIcon />,
@@ -83,14 +84,14 @@ export function MainMenu({ view, onSelect }: { view: View; onSelect: (view: Menu
         aria-expanded={open}
         aria-controls="main-menu-list"
         aria-label={menuButtonLabel(view)}
-        title={here ? `${MENU_LABELS[view]} · Importação, Arquivados e Configurações` : 'Importação, Arquivados e Configurações'}
+        title={here ? `${menuLabel(view)} · ${t('app.menu.title')}` : t('app.menu.title')}
         onClick={() => (open ? close(false) : openAt(0))}
         onKeyDown={onButtonKey}
       >
         <MenuIcon />
       </button>
       {open && (
-        <div className="main-menu-list" id="main-menu-list" role="menu" aria-label="Menu" onKeyDown={onMenuKey}>
+        <div className="main-menu-list" id="main-menu-list" role="menu" aria-label={t('app.menu.label')} onKeyDown={onMenuKey}>
           {MENU_VIEWS.map((v, i) => (
             <button
               key={v}
@@ -107,7 +108,7 @@ export function MainMenu({ view, onSelect }: { view: View; onSelect: (view: Menu
               }}
             >
               {ICONS[v]}
-              <span>{MENU_LABELS[v]}</span>
+              <span>{menuLabel(v)}</span>
             </button>
           ))}
         </div>

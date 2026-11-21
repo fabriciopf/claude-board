@@ -1,6 +1,7 @@
 // Who a card belongs to, as a round icon: a person for the user, the Claude spark for Claude (D86).
 import type { CSSProperties } from 'react';
 import type { Owner } from '../shared/domain';
+import { t } from './i18n';
 
 /** Head and shoulders, drawn in currentColor. */
 export function PersonIcon({ size = 14 }: { size?: number }) {
@@ -36,11 +37,12 @@ export function ClaudeIcon({ size = 14 }: { size?: number }) {
   );
 }
 
-export const OWNER_NAMES: Record<Owner, string> = { user: 'você', claude: 'Claude' };
+/** Name of the owner in the current language. */
+export const ownerName = (owner: Owner) => t(owner === 'user' ? 'board.owner.user' : 'board.owner.claude');
 
 /** The round avatar on the card cover and next to comments. */
 export function OwnerAvatar({ owner, label, style }: { owner: Owner; label?: string; style?: CSSProperties }) {
-  const text = label ?? `Dono: ${OWNER_NAMES[owner]}`;
+  const text = label ?? t('board.owner.label', { name: ownerName(owner) });
   return (
     <span className={'avatar ' + owner} role="img" aria-label={text} title={text} style={style}>
       {owner === 'claude' ? <ClaudeIcon /> : <PersonIcon />}

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { ConcurrencyInfo } from '../shared/domain';
 import { api } from './api';
+import { t } from './i18n';
 import { concurrencyOptions, concurrencyValue } from './runner-label';
 
 /**
@@ -24,11 +25,11 @@ export function ConcurrencySelect(props: { concurrency: ConcurrencyInfo; onChang
   };
   return (
     <label className="concurrency-select">
-      <span>de</span>
+      <span>{t('settings.conc.of')}</span>
       <select
         value={value}
         disabled={saving}
-        aria-label="Execuções simultâneas"
+        aria-label={t('settings.f.maxConcurrency')}
         aria-busy={saving}
         onChange={(e) => void choose(e.target.value)}
       >

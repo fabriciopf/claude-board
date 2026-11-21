@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react';
-import { nextEvent, untilLabel, type AgendaEvent, type AgendaState } from '../shared/agenda';
+import { nextEvent, type AgendaEvent, type AgendaState } from '../shared/agenda';
 import { CalendarIcon } from './HeaderIcons';
+import { locale, t } from './i18n';
+import { untilText } from './until';
 
-const clock = (iso: string) => new Date(iso).toLocaleString('pt-BR', { weekday: 'short', hour: '2-digit', minute: '2-digit' });
-const hour = (iso: string) => new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+const clock = (iso: string) => new Date(iso).toLocaleString(locale(), { weekday: 'short', hour: '2-digit', minute: '2-digit' });
+const hour = (iso: string) => new Date(iso).toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' });
 
 /** Current time, refreshed every `ms`, so the agenda countdown and the "now" warning move on their own. */
 export function useNow(ms: number): number {
@@ -33,11 +35,11 @@ export function AgendaChip({ agenda }: { agenda: AgendaState | null }) {
       href={next.link}
       target="_blank"
       rel="noreferrer"
-      title={`Próximo compromisso: ${next.title}, ${clock(next.start)}. Abre no Google Calendar.`}
+      title={t('app.agenda.next', { title: next.title, when: clock(next.start) })}
     >
       <CalendarIcon />
       <span className="agenda-title">{next.title}</span>
-      <strong>{untilLabel(ms)}</strong>
+      <strong>{untilText(ms)}</strong>
     </a>
   );
 }
@@ -52,16 +54,21 @@ export function AgendaBanner({ events, now }: { events: AgendaEvent[]; now: numb
       {events.map((e) => (
         <span key={`${e.start}|${e.title}`} className="agenda-now">
           <span className="agenda-now-text">
-            <strong>Agora:</strong> <CalendarIcon /> {e.title} ({hour(e.start)}–{hour(e.end as string)}), termina{' '}
-            {untilLabel(Date.parse(e.end as string) - now)}.
+            <strong>{t('app.agenda.now')}</strong> <CalendarIcon />{' '}
+            {t('app.agenda.ongoing', {
+              title: e.title,
+              start: hour(e.start),
+              end: hour(e.end as string),
+              until: untilText(Date.parse(e.end as string) - now),
+            })}
           </span>
           {e.meetLink && (
             <a className="btn small primary" href={e.meetLink} target="_blank" rel="noreferrer">
-              Entrar na reunião
+              {t('app.agenda.join')}
             </a>
           )}
           <a className="btn small" href={e.link} target="_blank" rel="noreferrer">
-            Abrir na agenda
+            {t('app.agenda.open')}
           </a>
         </span>
       ))}

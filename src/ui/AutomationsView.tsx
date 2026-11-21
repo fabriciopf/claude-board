@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { FIRE_REASON_LABELS, describeTrigger, type Automation, type AutomationRun } from '../shared/automation';
-import { STATUS_LABELS } from '../shared/domain';
+import type { Automation, AutomationRun } from '../shared/automation';
 import { ActionButton } from './ActionButton';
 import { api, fmtDate } from './api';
+import { fireReasonLabel, triggerText } from './automation-labels';
+import { statusLabel, t } from './i18n';
 
 // Automations (D72): one text box in plain words creates one; the list shows what was understood.
 
@@ -20,21 +21,21 @@ const RETRY_MS = 5000;
 export function runOutcome(run: Pick<AutomationRun, 'outcome' | 'repeatCount'>): { label: string; tone: 'ok' | 'warn' | 'danger' | '' } {
   switch (run.outcome) {
     case 'card':
-      return { label: 'Card criado', tone: 'ok' };
+      return { label: t('automations.run.card'), tone: 'ok' };
     case 'skipped':
-      return { label: 'Pulada', tone: 'warn' };
+      return { label: t('automations.run.skipped'), tone: 'warn' };
     case 'failed':
-      return { label: 'Falhou', tone: 'danger' };
+      return { label: t('automations.run.failed'), tone: 'danger' };
     default:
-      return { label: run.repeatCount > 1 ? `Nada novo (${run.repeatCount} verificações)` : 'Nada novo', tone: '' };
+      return { label: run.repeatCount > 1 ? t('automations.run.nothingRepeat', { count: run.repeatCount }) : t('automations.run.nothing'), tone: '' };
   }
 }
 
 /** The card of a run and where it is now. */
 export function runCardState(run: Pick<AutomationRun, 'cardId' | 'cardStatus' | 'cardArchived' | 'outcome'>): string {
-  if (!run.cardId) return run.outcome === 'card' ? 'card apagado' : '';
-  if (!run.cardStatus) return 'card apagado';
-  return run.cardArchived ? 'arquivado' : STATUS_LABELS[run.cardStatus];
+  if (!run.cardId) return run.outcome === 'card' ? t('automations.cardState.deleted') : '';
+  if (!run.cardStatus) return t('automations.cardState.deleted');
+  return run.cardArchived ? t('automations.cardState.archived') : statusLabel(run.cardStatus);
 }
 
 interface SaveResponse {
@@ -42,20 +43,20 @@ interface SaveResponse {
   by: 'claude' | 'local' | 'given' | null;
 }
 
-export const AUTOMATION_EXAMPLES = [
-  'Toda segunda às 9h, liste os PRs abertos do hdb que estão parados há mais de 3 dias e me diga quem precisa agir.',
-  'Quando chegar e-mail do Omar, resuma o pedido e crie as pendências como checklist.',
-  'Dias úteis às 18h, revise os cards em "Aguardando terceiro" e diga quais já podem andar.',
-];
+/** Sample requests under the text box, in the current language (the interpreter reads any language). */
+export function automationExamples(): string[] {
+  return [t('automations.example.1'), t('automations.example.2'), t('automations.example.3')];
+}
 
 export function webhookUrl(a: Pick<Automation, 'token'>, origin = window.location.origin): string {
   return `${origin}/api/automations/hook/${a.token}`;
 }
 
 /** The toast after saving: what was understood, and a warning when Claude did not read it. */
-export function savedMessage(r: SaveResponse, verb: 'criada' | 'atualizada'): string {
-  const head = `Automação ${verb}: ${describeTrigger(r.automation.trigger)}.`;
-  return r.by === 'local' ? `${head} O Claude Code não respondeu; usei a leitura local, confira.` : head;
+export function savedMessage(r: SaveResponse, kind: 'created' | 'updated'): string {
+  const trigger = triggerText(r.automation.trigger);
+  const head = kind === 'created' ? t('automations.saved.created', { trigger }) : t('automations.saved.updated', { trigger });
+  return r.by === 'local' ? t('automations.saved.local', { head }) : head;
 }
 
 export function AutomationsView({ tick, onOpen, notify }: { tick: number; onOpen: (cardId: number) => void; notify: (msg: string, error?: boolean) => void }) {
@@ -90,7 +91,7 @@ export function AutomationsView({ tick, onOpen, notify }: { tick: number; onOpen
     try {
       const r = await api.post<SaveResponse>('/api/automations', { request: text });
       setText('');
-      notify(savedMessage(r, 'criada'));
+      notify(savedMessage(r, 'created'));
       await load();
     } catch (err) {
       notify((err as Error).message, true);
@@ -105,14 +106,14 @@ export function AutomationsView({ tick, onOpen, notify }: { tick: number; onOpen
     <div className="page">
       <div className="page-inner automations-page">
         <div className="automations-main">
-          <h2 style={{ margin: '8px 0 12px' }}>Automações</h2>
+          <h2 style={{ margin: '8px 0 12px' }}>{t('automations.title')}</h2>
           <div className="panel automation-composer">
             <textarea
               className="input"
               rows={3}
               value={text}
-              placeholder="Diga quando e o que o Claude deve fazer. Ex.: toda segunda às 9h, revise os PRs abertos do hdb."
-              aria-label="Nova automação"
+              placeholder={t('automations.composer.placeholder')}
+              aria-label={t('automations.composer.aria')}
               onChange={(e) => setText(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) void create();
@@ -121,28 +122,28 @@ export function AutomationsView({ tick, onOpen, notify }: { tick: number; onOpen
             />
             <div className="automation-composer-foot">
               <div className="automation-examples">
-                {AUTOMATION_EXAMPLES.map((ex) => (
+                {automationExamples().map((ex) => (
                   <button key={ex} type="button" className="btn link small" onClick={() => setText(ex)} disabled={busy} title={ex}>
                     {ex.split(',')[0]}…
                   </button>
                 ))}
               </div>
-              <ActionButton className="btn primary" onAction={create} busy={busy} disabled={!text.trim()} busyLabel="Interpretando…">
-                Criar automação
+              <ActionButton className="btn primary" onAction={create} busy={busy} disabled={!text.trim()} busyLabel={t('automations.busy.interpreting')}>
+                {t('automations.create')}
               </ActionButton>
             </div>
           </div>
 
           {loadError && (
             <div className="banner" role="status">
-              Não consegui carregar as automações ({loadError}). Tentando de novo…{' '}
+              {t('automations.load.error', { error: loadError })}{' '}
               <button className="btn link inline small" onClick={() => void load()}>
-                tentar agora
+                {t('automations.load.retryNow')}
               </button>
             </div>
           )}
-          {!data && !loadError && <p className="muted">Carregando…</p>}
-          {data && list.length === 0 && <p className="muted">Nenhuma automação ainda. Cada disparo cria um card na fila do Claude.</p>}
+          {!data && !loadError && <p className="muted">{t('automations.loading')}</p>}
+          {data && list.length === 0 && <p className="muted">{t('automations.empty')}</p>}
           <div className="automation-grid">
             {list.map((a) => (
               <AutomationRow key={a.id} automation={a} checking={data?.checkingId === a.id} onChanged={load} onOpen={onOpen} notify={notify} />
@@ -193,37 +194,38 @@ function AutomationRow({
     act('save', async () => {
       const r = await api.patch<SaveResponse>(`/api/automations/${a.id}`, { request: draft });
       setEditing(false);
-      notify(savedMessage(r, 'atualizada'));
+      notify(savedMessage(r, 'updated'));
     });
 
   const run = () =>
     act('run', async () => {
       const r = await api.post<{ cardIds: number[]; error: string | null }>(`/api/automations/${a.id}/run`);
-      if (r.cardIds.length) notify(r.cardIds.length === 1 ? `Card #${r.cardIds[0]} criado na fila do Claude.` : `${r.cardIds.length} cards criados na fila do Claude.`);
-      else notify(r.error ?? 'Nada novo.', !!r.error);
+      if (r.cardIds.length)
+        notify(r.cardIds.length === 1 ? t('automations.fired.one', { id: r.cardIds[0] }) : t('automations.fired.many', { count: r.cardIds.length }));
+      else notify(r.error ?? t('automations.fired.nothing'), !!r.error);
     });
 
   const toggle = () => act('toggle', async () => void (await api.patch(`/api/automations/${a.id}`, { enabled: !a.enabled })));
 
   const remove = () => {
-    if (!window.confirm(`Excluir a automação "${a.name}"? Os cards que ela já criou ficam no quadro.`)) return;
+    if (!window.confirm(t('automations.confirm.delete', { name: a.name }))) return;
     return act('delete', async () => void (await api.del(`/api/automations/${a.id}`)));
   };
 
   const copyUrl = async () => {
     try {
       await navigator.clipboard.writeText(webhookUrl(a));
-      notify('URL copiada.');
+      notify(t('automations.url.copied'));
     } catch {
-      notify('Não consegui copiar; selecione a URL e copie.', true);
+      notify(t('automations.url.copyFailed'), true);
     }
   };
 
   return (
     <div className={'panel automation-row' + (a.enabled ? '' : ' off')} data-automation={a.id}>
       <div className="automation-head">
-        <label className="switch" title={a.enabled ? 'Ligada. Clique para desligar.' : 'Desligada. Clique para ligar.'}>
-          <input type="checkbox" checked={a.enabled} onChange={() => void toggle()} disabled={busy !== null} aria-label={`Ligar ou desligar ${a.name}`} />
+        <label className="switch" title={a.enabled ? t('automations.switch.on') : t('automations.switch.off')}>
+          <input type="checkbox" checked={a.enabled} onChange={() => void toggle()} disabled={busy !== null} aria-label={t('automations.switch.aria', { name: a.name })} />
           <span aria-hidden="true" />
         </label>
         <strong className="grow automation-name">{a.name}</strong>
@@ -232,9 +234,9 @@ function AutomationRow({
           onAction={run}
           busy={busy === 'run' || checking}
           disabled={busy !== null}
-          busyLabel={a.trigger.kind === 'watch' ? 'Verificando…' : 'Criando…'}
+          busyLabel={a.trigger.kind === 'watch' ? t('automations.busy.checking') : t('automations.busy.creating')}
         >
-          {a.trigger.kind === 'watch' ? 'Verificar agora' : 'Rodar agora'}
+          {a.trigger.kind === 'watch' ? t('automations.checkNow') : t('automations.runNow')}
         </ActionButton>
         <button
           className="btn small"
@@ -244,10 +246,10 @@ function AutomationRow({
           }}
           disabled={busy !== null || editing}
         >
-          Editar
+          {t('automations.edit')}
         </button>
-        <ActionButton className="btn small danger" onAction={remove} busy={busy === 'delete'} disabled={busy !== null} busyLabel="Excluindo…">
-          Excluir
+        <ActionButton className="btn small danger" onAction={remove} busy={busy === 'delete'} disabled={busy !== null} busyLabel={t('automations.busy.deleting')}>
+          {t('automations.delete')}
         </ActionButton>
       </div>
 
@@ -258,24 +260,24 @@ function AutomationRow({
             rows={3}
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
-            aria-label="Reescreva a automação"
+            aria-label={t('automations.edit.aria')}
             disabled={busy === 'save'}
             autoFocus
           />
           <div className="automation-edit-foot">
             <button className="btn" onClick={() => setEditing(false)} disabled={busy === 'save'}>
-              Cancelar
+              {t('automations.cancel')}
             </button>
-            <ActionButton className="btn primary" onAction={save} busy={busy === 'save'} disabled={!draft.trim()} busyLabel="Interpretando…">
-              Salvar
+            <ActionButton className="btn primary" onAction={save} busy={busy === 'save'} disabled={!draft.trim()} busyLabel={t('automations.busy.interpreting')}>
+              {t('automations.save')}
             </ActionButton>
           </div>
         </div>
       ) : (
         <>
           <div className="automation-when">
-            {describeTrigger(a.trigger)}
-            {a.enabled && a.nextRunAt && <span className="muted"> · próxima {fmtDate(a.nextRunAt)}</span>}
+            {triggerText(a.trigger)}
+            {a.enabled && a.nextRunAt && <span className="muted"> · {t('automations.nextRun', { date: fmtDate(a.nextRunAt) })}</span>}
           </div>
           <div className="automation-what">{a.instruction}</div>
         </>
@@ -283,9 +285,9 @@ function AutomationRow({
 
       {a.trigger.kind === 'webhook' && (
         <div className="automation-url">
-          <code title="Um POST nesta URL cria o card; o corpo da chamada vai junto.">{webhookUrl(a)}</code>
+          <code title={t('automations.url.title')}>{webhookUrl(a)}</code>
           <button className="btn small" onClick={() => void copyUrl()}>
-            Copiar
+            {t('automations.copy')}
           </button>
         </div>
       )}
@@ -297,7 +299,7 @@ function AutomationRow({
             <>
               {' · '}
               <button className="btn link inline small" onClick={() => onOpen(a.lastCardId!)}>
-                abrir #{a.lastCardId}
+                {t('automations.openCard', { id: a.lastCardId })}
               </button>
             </>
           )}
@@ -310,10 +312,10 @@ function AutomationRow({
 /** Latest runs of all automations: when, which, why, how it ended and the card it made (card #160). */
 function RunHistory({ runs, onOpen }: { runs: AutomationRun[]; onOpen: (cardId: number) => void }) {
   return (
-    <section className="automation-runs" aria-label="Últimas execuções">
-      <h3>Últimas execuções</h3>
+    <section className="automation-runs" aria-label={t('automations.history.title')}>
+      <h3>{t('automations.history.title')}</h3>
       {runs.length === 0 ? (
-        <p className="muted small">Nenhuma execução ainda. Cada disparo, vez pulada ou falha aparece aqui.</p>
+        <p className="muted small">{t('automations.history.empty')}</p>
       ) : (
         <div className="list runs-list">
           {runs.map((r) => {
@@ -321,12 +323,12 @@ function RunHistory({ runs, onOpen }: { runs: AutomationRun[]; onOpen: (cardId: 
             const state = runCardState(r);
             return (
               <div key={r.id} className="list-row run-row" data-run={r.id}>
-                <span className="muted small run-time" title={r.repeatCount > 1 ? `De ${fmtDate(r.at)} a ${fmtDate(r.lastAt)}` : undefined}>
+                <span className="muted small run-time" title={r.repeatCount > 1 ? t('automations.history.range', { from: fmtDate(r.at), to: fmtDate(r.lastAt) }) : undefined}>
                   {fmtDate(r.lastAt)}
                 </span>
                 <div className="run-what">
                   <strong>{r.automationName}</strong>
-                  <span className="muted small"> · {FIRE_REASON_LABELS[r.reason] ?? r.reason}</span>
+                  <span className="muted small"> · {fireReasonLabel(r.reason)}</span>
                   {r.detail && <div className="muted small run-detail">{r.detail}</div>}
                 </div>
                 <span className={'pill' + (outcome.tone ? ` ${outcome.tone}` : '')}>{outcome.label}</span>

@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import type { App, CardDetail, CardSummary, Comment, Label, PublishState, Repository, RunnerState, SelfUpdateState, UsageSnapshot } from '../shared/domain';
 import type { AgendaState } from '../shared/agenda';
+import { locale } from './i18n';
 import { requests } from './pending';
 
 export class ApiError extends Error {
@@ -90,8 +91,8 @@ export function fmtDate(iso: string | null | undefined, withTime = true): string
   // A bare date (due date) is a local calendar day, not UTC midnight.
   const d = /^\d{4}-\d{2}-\d{2}$/.test(iso) ? new Date(iso + 'T00:00:00') : new Date(iso);
   return withTime
-    ? d.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
-    : d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    ? d.toLocaleString(locale(), { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+    : d.toLocaleDateString(locale(), { day: '2-digit', month: '2-digit', year: 'numeric' });
 }
 
 export function isOverdue(due: string | null): boolean {
