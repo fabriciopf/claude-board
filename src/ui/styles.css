@@ -139,13 +139,99 @@ pre {
   flex-wrap: wrap;
 }
 
+.header-start {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* The logo is a button that goes to the board (D71): no button chrome. */
 .brand {
+  font: inherit;
   font-weight: 700;
   font-size: 16px;
+  color: inherit;
   display: flex;
   align-items: center;
   gap: 8px;
   white-space: nowrap;
+  border: 0;
+  background: transparent;
+  padding: 4px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.brand:hover {
+  background: var(--surface-2);
+}
+
+/* ---------- menu button (card #161, D71) ---------- */
+
+.main-menu {
+  position: relative;
+}
+
+.btn.icon-btn.main-menu-button {
+  padding: 5px 6px;
+}
+
+/* The current view is behind the menu: the button carries the "you are here" mark the tabs lost. */
+.main-menu-button.active,
+.main-menu-button[aria-expanded='true'] {
+  background: var(--surface-2);
+  border-color: var(--text-muted);
+}
+
+.main-menu-list {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 6px);
+  z-index: 60;
+  min-width: 200px;
+  padding: 4px;
+  border-radius: 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: 0 8px 24px rgba(9, 30, 66, 0.18), var(--shadow);
+  display: flex;
+  flex-direction: column;
+}
+
+.main-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.main-menu-item svg {
+  color: var(--text-muted);
+  flex: none;
+}
+
+.main-menu-item:hover,
+.main-menu-item:focus-visible {
+  background: var(--surface-2);
+  outline: none;
+}
+
+.main-menu-item.current {
+  font-weight: 600;
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.main-menu-item.current svg {
+  color: var(--accent);
 }
 
 .brand-mark {
@@ -174,6 +260,26 @@ pre {
   background: var(--surface-2);
   color: var(--text);
   font-weight: 600;
+}
+
+/* Count of the pending tab (card #170): white number in an orange ball, same in both themes
+   (#c2410c with white is 5.2:1). */
+.tab-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  margin-left: 6px;
+  border-radius: 9px;
+  background: #c2410c;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  vertical-align: 1px;
+  box-sizing: border-box;
 }
 
 .counters {
@@ -249,6 +355,17 @@ pre {
 
 .toolbar input[type='search'] {
   width: 220px;
+}
+
+/* A filter with an option chosen shows its text in orange (card #172); the open list keeps the normal color. */
+.toolbar select.filter-on {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.toolbar select.filter-on option {
+  color: var(--text);
+  font-weight: normal;
 }
 
 /* Sort select and its direction button stay together when the toolbar wraps (card #152). */
@@ -331,6 +448,23 @@ textarea.input {
   padding: 2px 4px;
 }
 
+/* Board-wide warnings: last row of .app, so the scroll of the board or page above never moves them (card #173). */
+.banner-dock {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 16px;
+  border-top: 1px solid var(--border);
+  background: var(--bg);
+  max-height: 40vh;
+  overflow-y: auto;
+}
+
+.banner-dock .banner {
+  margin: 0;
+}
+
 .banner {
   margin: 8px 16px 0;
   padding: 8px 12px;
@@ -369,6 +503,7 @@ textarea.input {
 
 .board {
   flex: 1;
+  min-height: 0;
   display: flex;
   gap: 10px;
   padding: 4px 16px 16px;
@@ -444,6 +579,19 @@ textarea.input {
 .column-title {
   font-weight: 600;
   flex: 1;
+}
+
+/* "Aguardando você" with at least one card (card #164): the title itself turns yellow, in place of the old header counter. */
+.column-title.attention .column-title-text {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 6px;
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.column.collapsed .column-title.attention .column-title-text {
+  padding: 8px 1px;
 }
 
 .info-btn {
@@ -529,17 +677,50 @@ textarea.input {
   box-shadow: 0 8px 20px rgba(0, 0, 0, 0.25);
 }
 
+/* A button so the labels can be clicked inside the clickable tile (card #167). */
 .card-labels {
   display: flex;
   gap: 4px;
   flex-wrap: wrap;
-  margin-bottom: 6px;
+  margin: 0 0 6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.card-labels:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
 }
 
 .label-pill {
   height: 8px;
   min-width: 36px;
   border-radius: 4px;
+  transition: filter 0.12s;
+}
+
+.card-labels:hover .label-pill {
+  filter: brightness(0.9);
+}
+
+/* Expanded: same look as .label-chip, the label name over its colour. */
+.card-labels.expanded .label-pill {
+  height: auto;
+  min-width: 0;
+  padding: 1px 8px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 16px;
+  color: #fff;
+  white-space: nowrap;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .label-chip {
@@ -969,6 +1150,69 @@ textarea.input {
   overflow-wrap: anywhere;
 }
 
+/* Side panel folded by default (card #166): a narrow strip like the folded Triagem/Concluída columns. */
+.modal-grid.side-folded {
+  grid-template-columns: minmax(0, 1fr) 40px;
+}
+
+.side-expand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 0 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  position: sticky;
+  top: 0;
+  align-self: start;
+  /* Starts below the close button, like the open sidebar. */
+  margin-top: 24px;
+}
+
+.side-expand:hover,
+.side-collapse:hover {
+  background: var(--code-bg);
+}
+
+.side-expand:focus-visible,
+.side-collapse:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.side-expand-arrow {
+  color: var(--text-muted);
+  line-height: 1;
+}
+
+.side-expand-title {
+  writing-mode: vertical-rl;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.side-collapse {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  padding: 2px 6px;
+  margin-left: -6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
 @media (max-width: 760px) {
   .sidebar {
     position: static;
@@ -976,6 +1220,27 @@ textarea.input {
     overflow: visible;
     padding-right: 0;
     margin-top: 0;
+  }
+
+  /* On a phone the panel sits below the main column, so the folded strip becomes a full-width row. */
+  .modal-grid.side-folded {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .side-expand {
+    position: static;
+    flex-direction: row;
+    justify-content: center;
+    margin-top: 0;
+    padding: 10px 12px;
+  }
+
+  .side-expand-title {
+    writing-mode: horizontal-tb;
+  }
+
+  .side-expand-arrow {
+    transform: rotate(-90deg);
   }
 }
 
@@ -1285,6 +1550,7 @@ textarea.input {
   padding: 8px 16px 32px;
   overflow-y: auto;
   flex: 1;
+  min-height: 0;
 }
 
 .page-inner {
@@ -1539,7 +1805,8 @@ textarea.input {
 
 .toast {
   position: fixed;
-  bottom: 16px;
+  /* --dock-h: height of the warnings strip at the foot (BannerDock), so the toast never covers it. */
+  bottom: calc(16px + var(--dock-h, 0px));
   left: 50%;
   transform: translateX(-50%);
   background: var(--text);
@@ -1611,8 +1878,17 @@ textarea.input {
     display: none;
   }
 
-  .brand {
+  .header-start {
     padding-left: 12px;
+  }
+
+  /* Touch: the menu button and its items get a finger-sized target. */
+  .btn.icon-btn.main-menu-button {
+    padding: 8px;
+  }
+
+  .main-menu-item {
+    padding: 12px 12px;
   }
 
   .brand-name {
@@ -1646,6 +1922,16 @@ textarea.input {
     margin: 6px 12px 0;
     padding: 6px 10px;
     font-size: 13px;
+  }
+
+  .banner-dock {
+    padding: 6px 12px;
+    /* Keep clear of the home indicator on phones. */
+    padding-bottom: max(6px, env(safe-area-inset-bottom));
+  }
+
+  .banner-dock .banner {
+    margin: 0;
   }
 
   /* Filters: search on top, the four selects side by side in one strip. */
@@ -1852,4 +2138,266 @@ textarea.input {
   flex-direction: column;
   align-items: flex-start;
   gap: 4px;
+}
+
+/* ---------- automations (D72) ---------- */
+
+/* The whole width (card #160): automations as a grid of cards, the history beside them on wide
+   screens and below them on narrow ones. */
+.page-inner.automations-page {
+  max-width: none;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(420px, 38%);
+  gap: 20px;
+  align-items: start;
+}
+
+.automations-main,
+.automations-side {
+  min-width: 0;
+}
+
+.automation-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 380px), 1fr));
+  gap: 12px;
+}
+
+.automation-grid .panel {
+  margin-bottom: 0;
+}
+
+/* The history stays in view while the list scrolls. */
+.automations-side {
+  position: sticky;
+  top: 0;
+}
+
+.automations-side .automation-runs {
+  margin-top: 8px;
+}
+
+@media (max-width: 1100px) {
+  .page-inner.automations-page {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .automations-side {
+    position: static;
+  }
+
+  .automations-side .automation-runs {
+    margin-top: 22px;
+  }
+}
+
+.automation-composer textarea,
+.automation-edit textarea {
+  width: 100%;
+  resize: vertical;
+  font: inherit;
+}
+
+.automation-composer-foot,
+.automation-edit-foot {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+
+.automation-examples {
+  display: flex;
+  gap: 4px 12px;
+  flex-wrap: wrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.automation-row.off .automation-name,
+.automation-row.off .automation-when,
+.automation-row.off .automation-what {
+  opacity: 0.55;
+}
+
+.automation-head {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.automation-head .grow {
+  flex: 1;
+  min-width: 140px;
+}
+
+.automation-when {
+  margin-top: 6px;
+  font-size: 13px;
+  color: var(--accent);
+}
+
+.automation-what {
+  margin-top: 4px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.automation-url {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 8px;
+}
+
+.automation-url code {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  background: var(--code-bg);
+  padding: 4px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.automation-result {
+  margin-top: 6px;
+}
+
+.automation-edit {
+  margin-top: 8px;
+}
+
+/* On/off switch: a styled checkbox, so the keyboard and screen readers get a real control. */
+.switch {
+  position: relative;
+  display: inline-flex;
+  width: 34px;
+  height: 20px;
+  flex: none;
+  cursor: pointer;
+}
+
+.switch input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  margin: 0;
+  cursor: pointer;
+  /* Above the drawing, so the click lands on the control itself. */
+  z-index: 1;
+}
+
+.switch span {
+  width: 100%;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--border);
+  transition: background 0.15s;
+  position: relative;
+}
+
+.switch span::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  transition: transform 0.15s;
+}
+
+.switch input:checked + span {
+  background: var(--ok);
+}
+
+.switch input:checked + span::after {
+  transform: translateX(14px);
+}
+
+.switch input:focus-visible + span {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* History of automation runs (card #160): time, automation, outcome and card, aligned in columns. */
+.automation-runs {
+  margin-top: 22px;
+  /* The rows lay out by the width they get (beside the list or below it), not by the window's. */
+  container-type: inline-size;
+}
+
+.automation-runs h3 {
+  margin: 0 0 8px;
+  font-size: 15px;
+}
+
+.list.runs-list {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr) max-content max-content;
+  row-gap: 6px;
+}
+
+.runs-list .run-row {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: subgrid;
+  column-gap: 12px;
+  cursor: default;
+  padding: 8px 12px;
+}
+
+.runs-list .run-what {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.runs-list .pill {
+  justify-self: start;
+}
+
+@container (max-width: 640px) {
+  .list.runs-list {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* Narrow: the automation on its own line, then time, outcome and card side by side. */
+  .runs-list .run-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 10px;
+  }
+
+  .runs-list .run-what {
+    flex-basis: 100%;
+    order: -1;
+  }
+}
+
+/* ---------- next automation in the header (card #171, D78) ---------- */
+
+.counter.automation-chip {
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.counter.automation-chip:hover .agenda-title {
+  text-decoration: underline;
+}
+
+.counter.automation-chip.running {
+  background: var(--info-soft);
+  color: var(--info);
 }

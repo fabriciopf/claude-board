@@ -115,6 +115,20 @@ The original card waits in "Waiting for a third party", with its tasks and their
 
 With `autoPublish` on, a card whose branch lives in the Board's own repository is merged into `publishBranch`, tested, built and hot-restarted when it reaches "In review". This is meant for developing the Board with the Board; it is off by default.
 
+## Automations
+
+**Automations**, in the header menu (☰), holds recurring tasks. You describe one in plain words, such as "every Monday at 9am, list the open PRs that have been idle for 3 days" or "when an e-mail from Omar arrives, summarize it and turn the requests into a checklist". Claude Code (the `classificationModel`, with no tools) reads the text into a name, a trigger and an instruction. The list shows what it understood. To change an automation, rewrite its text.
+
+Each firing creates a card in "Ready for Claude" with the instruction as its description. The rest is the same as for any other card: the runner, the questions, the review.
+
+| Trigger | How it fires |
+| --- | --- |
+| Schedule | A 5-field cron in the Board's local time. While the previous card is still queued and has not started, the next turn is skipped. A turn missed while the Board was off fires once when it comes back. |
+| Watch | Every few minutes (15 by default, 5 at least), a short `claude -p` session looks for new items in a claude.ai connector: Gmail, Slack, Google Calendar, Google Drive, Jira or Notion. Each new item becomes a card, and an item already seen never comes back. The session may only call the read tools of those connectors, so an e-mail cannot make it send or delete anything. |
+| URL | `POST /api/automations/hook/<token>` from n8n, a script or a Slack workflow. The request body goes into the card. Off the local machine this needs `--allow-remote`. |
+
+You can also turn each automation on and off, or run it now. An automation stays on the list after it runs until you delete it. Below the list, **Últimas execuções** shows the latest 50 runs: when, which automation, why (schedule, by hand, URL, watch), how it ended (card created, skipped, failed, nothing new) and the card with its current list. A watch that keeps finding nothing updates one line with a count.
+
 ## MCP server
 
 | Tool | Use |
@@ -132,6 +146,7 @@ With `autoPublish` on, a card whose branch lives in the Board's own repository i
 | `card_wait_third_party` | Card goes to "Waiting for a third party" |
 | `card_submit_for_review` | Delivery: card goes to "In review" |
 | `card_split` | Split the card into independent tasks, each a queued card |
+| `automation_list`, `automation_create`, `automation_update` | Recurring tasks: Claude reads the request itself and passes the trigger and the instruction |
 
 The rules are enforced by the server, not only by the UI: the MCP refuses to move a card to "Done". Claude can queue cards, even from inside a run, but not the card it is running nor a card you own. `card_split` only splits the card of its own run, once.
 
