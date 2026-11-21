@@ -26,6 +26,8 @@ import { currentEvents } from '../shared/agenda';
 import { AutomationChip } from './AutomationChip';
 import { UpdateBanner, useUiUpdate } from './UpdateBanner';
 import { BannerDock } from './BannerDock';
+import { HelpButton } from './HelpButton';
+import { isHelpKey } from './help';
 
 type Theme = 'system' | 'light' | 'dark';
 
@@ -57,6 +59,8 @@ export function App() {
   const [advancedTo, setAdvancedTo] = useState<number | null>(null);
   const [focusId, setFocusId] = useState<number | null>(null);
   const [quickAdd, setQuickAdd] = useState<Status | null>(null);
+  // The header's help panel (card #181).
+  const [helpOpen, setHelpOpen] = useState(false);
   const [toast, setToast] = useState<{ msg: string; error: boolean } | null>(null);
   const [theme, setTheme] = useState<Theme>(() => (readStore('cb:theme') as Theme) || 'system');
   const [sound, setSound] = useState<boolean>(() => readStore('cb:sound') !== 'off');
@@ -195,18 +199,26 @@ export function App() {
     [load, notify],
   );
 
-  // Global shortcuts: n new card, / search, arrows move the focus, Esc closes.
+  // Global shortcuts: n new card, / search, arrows move the focus, ? help, Esc closes.
+  // The list the user sees is SHORTCUT_GROUPS in help.ts: a new shortcut goes there too.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
       const typing = !!target.closest('input, textarea, select, [contenteditable]');
       if (e.key === 'Escape') {
-        if (openId !== null) setOpenId(null);
+        if (helpOpen) setHelpOpen(false);
+        else if (openId !== null) setOpenId(null);
         else if (typing) (target as HTMLElement).blur();
         else setQuickAdd(null);
         return;
       }
-      if (typing || openId !== null || e.ctrlKey || e.metaKey || e.altKey) return;
+      if (openId === null && isHelpKey(e, typing)) {
+        e.preventDefault();
+        setHelpOpen(!helpOpen);
+        return;
+      }
+      // With the help open, the keys stay out of the board behind it.
+      if (typing || openId !== null || helpOpen || e.ctrlKey || e.metaKey || e.altKey) return;
       if (e.key === 'n') {
         e.preventDefault();
         setView('board');
@@ -242,7 +254,7 @@ export function App() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [openId, filtered, focusId, view, boardSort]);
+  }, [openId, filtered, focusId, view, boardSort, helpOpen]);
 
   const runner = data?.runner;
   const readyCount = data ? data.cards.filter((c) => c.status === 'ready').length : 0;
@@ -397,6 +409,7 @@ export function App() {
             >
               {theme === 'light' ? <SunIcon /> : theme === 'dark' ? <MoonIcon /> : <MonitorIcon />}
             </button>
+            <HelpButton open={helpOpen} setOpen={setHelpOpen} />
           </div>
         )}
       </header>
@@ -413,11 +426,7 @@ export function App() {
             sortView="board"
             sort={boardSort}
             setSort={setBoardSort}
-          >
-            <span className="muted small kbd-hints" style={{ marginLeft: 'auto' }}>
-              <span className="kbd">n</span> novo · <span className="kbd">/</span> busca · <span className="kbd">←↑↓→</span> navegar · <span className="kbd">Enter</span> abrir
-            </span>
-          </FilterBar>
+          />
           <Board
             cards={filtered}
             totals={totals}
