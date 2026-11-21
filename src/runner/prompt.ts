@@ -33,6 +33,18 @@ export interface PromptInput {
   split?: SplitHint | null;
   /** The other tasks of the card this one was split from. */
   siblings?: CardRef[];
+  /**
+   * Set when the run resumes a session (D94): the start of the card's previous run. The session
+   * already holds every comment from before it and Claude's own comments, so only the user's
+   * comments from then on go into the prompt. Unset = new session, every comment goes.
+   */
+  commentsSince?: string | null;
+}
+
+/** Comments of the card that go into the prompt (D94): all of them in a new session, only the user's new ones in a resumed one. */
+export function promptComments(comments: CardDetail['comments'], since: string | null | undefined): CardDetail['comments'] {
+  const visible = comments.filter((c) => c.author !== 'system');
+  return since ? visible.filter((c) => c.author === 'user' && c.createdAt >= since) : visible;
 }
 
 export interface SplitHint {
@@ -115,7 +127,7 @@ function imagesContext(description: string, comments: CardDetail['comments']): s
 }
 
 function cardContext(input: PromptInput): string {
-  const { config, detail, apps, labels, repositories = [], cwd, branch } = input;
+  const { detail, apps, labels, repositories = [], cwd, branch, commentsSince } = input;
   const card = detail.card;
   const app = apps.find((a) => a.id === card.appId);
   const appLine = app ? `\n- Projeto: ${app.name}${app.path ? ` (pasta ${app.path})` : ''}` : '';
@@ -130,9 +142,7 @@ function cardContext(input: PromptInput): string {
   const repositoryLine = repositoryNames ? `\n- Repositórios: ${repositoryNames}` : '';
   const checklist = detail.checklist.length ? detail.checklist.map((i) => `- [${i.done ? 'x' : ' '}] ${i.text}`).join('\n') : '(vazio)';
   const links = card.links.length ? card.links.map((l) => `- ${l.kind}: ${l.title ? `${l.title} — ` : ''}${l.value}`).join('\n') : '(nenhum)';
-  const comments = detail.comments
-    .filter((c) => c.author !== 'system')
-    .slice(-config.recentCommentsInPrompt)
+  const comments = promptComments(detail.comments, commentsSince)
     .map((c) => `- [${c.author === 'claude' ? 'Claude' : 'Usuário'}${c.kind !== 'comment' ? `, ${c.kind}` : ''}] ${c.bodyMd.replace(/\s+/g, ' ').slice(0, 600)}`)
     .join('\n');
   return `## Card #${card.id}: ${card.title}
@@ -153,7 +163,7 @@ ${checklist}
 
 ${links}
 
-### Últimos comentários
+${commentsSince ? '### Comentários do usuário desde a execução anterior\n\nOs comentários mais antigos e os seus já estão nesta sessão.' : '### Comentários'}
 
 ${comments || '(nenhum)'}`;
 }

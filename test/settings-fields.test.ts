@@ -6,6 +6,8 @@ describe('settings tabs', () => {
     expect(FIELDS.map((f) => f.key).sort()).toEqual(
       [
         'agendaRefreshMinutes',
+        'antigravityBin',
+        'antigravityModel',
         'autoSplit',
         'claudeBin',
         'claudeHome',
@@ -15,9 +17,6 @@ describe('settings tabs', () => {
         'defaultEffort',
         'defaultModel',
         'defaultPermissionMode',
-        'geminiApprovalMode',
-        'geminiBin',
-        'geminiModel',
         'heartbeatSeconds',
         'jiraBaseUrl',
         'maxConcurrency',
@@ -28,7 +27,6 @@ describe('settings tabs', () => {
         'mirrorRepoPath',
         'prPolicy',
         'protectedBranches',
-        'recentCommentsInPrompt',
         'selfUpdate',
         'selfUpdateSource',
         'transcriptRetentionDays',
@@ -53,9 +51,12 @@ describe('settings tabs', () => {
     expect(tabOf('defaultPermissionMode')).toBe('claude');
   });
 
-  it('puts the agent choice and the Gemini CLI settings on their own tab (D92)', () => {
+  it('puts the default agent on the Runs tab, right after the concurrency, and the Antigravity CLI settings on their own tab (D93)', () => {
     const tabOf = (key: string) => FIELDS.find((f) => f.key === key)?.tab;
-    for (const key of ['defaultAgent', 'geminiModel', 'geminiApprovalMode', 'geminiBin']) expect(tabOf(key)).toBe('gemini');
+    expect(tabOf('defaultAgent')).toBe('runs');
+    const runs = FIELDS.filter((f) => f.tab === 'runs').map((f) => f.key);
+    expect(runs.slice(0, 2)).toEqual(['maxConcurrency', 'defaultAgent']);
+    for (const key of ['antigravityModel', 'antigravityBin']) expect(tabOf(key)).toBe('antigravity');
   });
 });
 

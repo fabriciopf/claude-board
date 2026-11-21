@@ -1,9 +1,9 @@
-import { AGENTS, AGENT_LABELS, GEMINI_MODEL_OPTIONS, AUTO_CONCURRENCY, CONCURRENCY_PRESETS, SELF_UPDATE_MODES, EFFORT_LABELS, EFFORT_LEVELS, MODEL_OPTIONS, UNLIMITED_CONCURRENCY } from '../shared/domain';
+import { AGENTS, AGENT_LABELS, ANTIGRAVITY_MODEL_OPTIONS, AUTO_CONCURRENCY, CONCURRENCY_PRESETS, SELF_UPDATE_MODES, EFFORT_LABELS, EFFORT_LEVELS, MODEL_OPTIONS, UNLIMITED_CONCURRENCY } from '../shared/domain';
 import { t, type MessageKey } from './i18n';
 
 export type Config = Record<string, any>;
 
-export type SettingsTab = 'runs' | 'organization' | 'git' | 'claude' | 'gemini';
+export type SettingsTab = 'runs' | 'organization' | 'git' | 'claude' | 'antigravity';
 
 // Labels and hints are getters, read at render time, so they follow the UI language (D90).
 const tab = (id: SettingsTab) => ({
@@ -13,7 +13,7 @@ const tab = (id: SettingsTab) => ({
   },
 });
 
-export const SETTINGS_TABS: { id: SettingsTab; label: string }[] = [tab('runs'), tab('organization'), tab('git'), tab('claude'), tab('gemini')];
+export const SETTINGS_TABS: { id: SettingsTab; label: string }[] = [tab('runs'), tab('organization'), tab('git'), tab('claude'), tab('antigravity')];
 
 export interface Field {
   key: string;
@@ -57,8 +57,16 @@ export const FIELDS: Field[] = [
     optionLabels: () => ({ [AUTO_CONCURRENCY]: t('settings.opt.auto'), [UNLIMITED_CONCURRENCY]: t('settings.opt.unlimited'), '0': t('settings.opt.zero') }),
     hasHint: true,
   }),
+  // The agent of every card that does not choose one (D93): a choice about runs, so it lives here, not on an agent's tab.
+  field({
+    key: 'defaultAgent',
+    tab: 'runs',
+    type: 'select',
+    options: AGENTS,
+    optionLabels: () => ({ ...AGENT_LABELS }),
+    hasHint: true,
+  }),
   field({ key: 'autoSplit', tab: 'runs', type: 'boolean', hasHint: true }),
-  field({ key: 'recentCommentsInPrompt', tab: 'runs', type: 'number', hasHint: true }),
   field({ key: 'userProfile', tab: 'runs', type: 'textarea' }),
   field({ key: 'workspaceDir', tab: 'git', type: 'text', emptyIsNull: true, hasHint: true }),
   field({ key: 'prPolicy', tab: 'git', type: 'select', options: ['none', 'push_branch', 'open_pr'], hasHint: true }),
@@ -103,25 +111,16 @@ export const FIELDS: Field[] = [
   field({ key: 'agendaRefreshMinutes', tab: 'claude', type: 'number', hasHint: true }),
   field({ key: 'heartbeatSeconds', tab: 'claude', type: 'number' }),
   field({ key: 'transcriptRetentionDays', tab: 'claude', type: 'number' }),
-  // Gemini CLI (D92): which agent runs the cards that do not choose, and how Gemini CLI runs.
+  // Antigravity CLI (D93): how Antigravity CLI runs. Which agent runs the cards is on the Runs tab.
   field({
-    key: 'defaultAgent',
-    tab: 'gemini',
+    key: 'antigravityModel',
+    tab: 'antigravity',
     type: 'select',
-    options: AGENTS,
-    optionLabels: () => ({ ...AGENT_LABELS }),
+    options: ['', ...ANTIGRAVITY_MODEL_OPTIONS.map((m) => m.id)],
+    optionLabels: () => ({ '': t('settings.opt.antigravityDefault'), ...Object.fromEntries(ANTIGRAVITY_MODEL_OPTIONS.map((m) => [m.id, m.label])) }),
     hasHint: true,
   }),
-  field({
-    key: 'geminiModel',
-    tab: 'gemini',
-    type: 'select',
-    options: ['', ...GEMINI_MODEL_OPTIONS.map((m) => m.id)],
-    optionLabels: () => ({ '': t('settings.opt.geminiDefault'), ...Object.fromEntries(GEMINI_MODEL_OPTIONS.map((m) => [m.id, m.label])) }),
-    hasHint: true,
-  }),
-  field({ key: 'geminiApprovalMode', tab: 'gemini', type: 'select', options: ['yolo', 'auto_edit', 'default', 'plan'], hasHint: true }),
-  field({ key: 'geminiBin', tab: 'gemini', type: 'text' }),
+  field({ key: 'antigravityBin', tab: 'antigravity', type: 'text', hasHint: true }),
 ];
 
 /** Keys whose draft differs from the saved config. */
