@@ -1,5 +1,28 @@
 import { describe, expect, it } from 'vitest';
-import { EMPTY_FILTERS, columnCountText, countByStatus, filterCards, hasActiveFilter, matchesPriority, parseFilters, pruneFilters } from '../src/ui/board-filters';
+import { EMPTY_FILTERS, columnCountText, columnNeedsAttention, countByStatus, filterCards, filterSelectClass, hasActiveFilter, matchesPriority, parseFilters, pruneFilters } from '../src/ui/board-filters';
+import { readFileSync } from 'node:fs';
+
+describe('a filter with an option chosen stands out (card #172)', () => {
+  it('marks only a select with a value', () => {
+    expect(filterSelectClass('')).toBe('input');
+    expect(filterSelectClass('3')).toBe('input filter-on');
+  });
+
+  it('every filter select of the bar uses it, and the sort select does not', () => {
+    const src = readFileSync(new URL('../src/ui/FilterBar.tsx', import.meta.url), 'utf8');
+    for (const key of ['appId', 'labelId', 'repositoryId', 'owner', 'due', 'priority']) {
+      expect(src).toContain(`className={filterSelectClass(filters.${key})}`);
+    }
+    expect(src).not.toMatch(/filterSelectClass\(sort/);
+  });
+
+  it('the highlight is orange text, not a background', () => {
+    const css = readFileSync(new URL('../src/ui/styles.css', import.meta.url), 'utf8');
+    const rule = css.match(/\.toolbar select\.filter-on \{([^}]*)\}/)?.[1] ?? '';
+    expect(rule).toContain('color: var(--accent)');
+    expect(rule).not.toContain('background');
+  });
+});
 
 describe('board filters kept across reloads', () => {
   it('reads back what was stored', () => {
@@ -60,6 +83,15 @@ describe('column counter while searching (card #108)', () => {
   it('shows shown/total with a filter, also when the filter hides every card', () => {
     expect(columnCountText(2, 7)).toBe('2/7');
     expect(columnCountText(0, 3)).toBe('0/3');
+  });
+
+  it('highlights "Aguardando você" only when it has a card, counting the ones a filter hides (card #164)', () => {
+    expect(columnNeedsAttention('waiting_user', 1, undefined)).toBe(true);
+    expect(columnNeedsAttention('waiting_user', 0, undefined)).toBe(false);
+    expect(columnNeedsAttention('waiting_user', 0, 2)).toBe(true);
+    expect(columnNeedsAttention('waiting_user', 0, 0)).toBe(false);
+    expect(columnNeedsAttention('review', 3, undefined)).toBe(false);
+    expect(columnNeedsAttention('waiting_third_party', 3, 3)).toBe(false);
   });
 
   it('counts the unfiltered cards per status', () => {
