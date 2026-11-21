@@ -324,7 +324,7 @@ pre {
   border: 1px solid transparent;
   border-radius: 6px;
   padding: 0 2px;
-  /* As wide as the chosen option ("0", "∞"), not the longest one ("auto · 12"). */
+  /* As wide as the chosen option ("0", "∞"), not the longest one ("12 (auto)"). */
   field-sizing: content;
   cursor: pointer;
 }
@@ -354,6 +354,47 @@ pre {
 
 .counter.usage {
   cursor: default;
+}
+
+/* "rodando x de y" and "Sessão 5h" share one pill (D83); each half keeps its own tooltip. */
+.counter.runner-usage {
+  gap: 8px;
+}
+
+.runner-part,
+.usage-part {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.usage-part {
+  cursor: default;
+}
+
+.counter-sep {
+  align-self: stretch;
+  width: 1px;
+  margin: 2px 0;
+  background: var(--border);
+}
+
+.usage-part.attention {
+  color: var(--warn);
+  font-weight: 600;
+}
+
+.usage-part.danger {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.usage-part.attention .usage-bar > span {
+  background: var(--warn);
+}
+
+.usage-part.danger .usage-bar > span {
+  background: var(--danger);
 }
 
 .usage-bar {
@@ -396,8 +437,8 @@ pre {
   width: 220px;
 }
 
-/* A filter with an option chosen gets orange text and border, no background (card #172); the open list keeps the normal color. */
-.toolbar select.filter-on {
+/* The search with text, or a filter with an option chosen, gets orange text and border, no background (card #172); the open list keeps the normal color. */
+.toolbar .filter-on {
   color: var(--accent);
   border-color: var(--accent);
   font-weight: 600;
@@ -501,8 +542,10 @@ textarea.input {
   overflow-y: auto;
 }
 
-.banner-dock .banner {
+.banner-dock .notice .banner {
   margin: 0;
+  /* The level shows twice, as tone and as a solid edge in the level colour (D80, card #173). */
+  border-left: 4px solid currentColor;
 }
 
 .banner {
@@ -537,6 +580,12 @@ textarea.input {
 .banner.danger {
   background: var(--danger-soft);
   color: var(--danger);
+}
+
+/* Same tone as the plain .banner; named so the three notice levels read alike in the code. */
+.banner.warning {
+  background: var(--warn-soft);
+  color: var(--warn);
 }
 
 /* ---------- board ---------- */
@@ -2209,6 +2258,10 @@ html[data-busy] body::before {
 .agenda-now > span:first-child {
   flex: 1;
   min-width: 0;
+}
+
+.agenda-now-text svg {
+  vertical-align: -3px;
 }
 
 .agenda-now a.btn {

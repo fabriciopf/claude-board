@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { ActionButton } from './ActionButton';
 import { api } from './api';
 import type { PublishEntry, PublishState } from '../shared/domain';
+import { NOTICE_CLASS, type NoticeLevel } from './notices';
 
 const STATUS_TEXT: Record<PublishEntry['status'], string> = {
   pending: 'na fila',
@@ -13,6 +14,13 @@ const STATUS_TEXT: Record<PublishEntry['status'], string> = {
 /** Whether the publication strip has anything to say: a publication under way, entries waiting or failed, or the runner held by one. */
 export function publishVisible(publish: PublishState | null, held: boolean): boolean {
   return held || (!!publish && (publish.entries.length > 0 || publish.phase !== 'idle'));
+}
+
+/** Error when the only thing left is failed entries (nothing pending, nothing under way); info otherwise. */
+export function publishLevel(publish: PublishState | null, held: boolean): NoticeLevel {
+  const busy = held || (!!publish && publish.phase !== 'idle');
+  const failed = (publish?.entries ?? []).some((e) => e.status === 'failed');
+  return failed && !publish?.pending && !busy ? 'error' : 'info';
 }
 
 /**
@@ -60,7 +68,7 @@ export function PublishBanner({
   const pending = publish?.pending ?? 0;
   const busy = held || (!!publish && publish.phase !== 'idle');
   const failed = entries.filter((e) => e.status === 'failed').length;
-  const danger = failed > 0 && !pending && !busy;
+  const level = publishLevel(publish, held);
   const label = busy ? 'Publicando o Board' : pending ? `Publicação pendente (${pending})` : `Publicação falhou (${failed})`;
   const runningText = running === 1 ? 'A execução em curso continua' : `As ${running} execuções em curso continuam`;
   const explanation = busy
@@ -84,7 +92,7 @@ export function PublishBanner({
   return (
     <div className="publish" ref={ref}>
       <button
-        className={'banner publish-banner' + (danger ? ' danger' : ' info')}
+        className={'banner publish-banner ' + NOTICE_CLASS[level]}
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
         aria-haspopup="dialog"

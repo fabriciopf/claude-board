@@ -16,7 +16,8 @@ import { MODAL_SETTLE_MS, nextInColumn } from './next-card';
 import { SettingsView } from './SettingsView';
 import { PENDING_TAB_LABEL, PENDING_VIEW_NAME, TodayView, showPendingTab, todayItems } from './TodayView';
 import { SORT_STORE_KEYS, parseSort, type CardSort } from './card-sort';
-import { PublishBanner, publishVisible } from './PublishBanner';
+import { PublishBanner, publishLevel, publishVisible } from './PublishBanner';
+import type { Notice } from './notices';
 import { concurrencyTitle, concurrencyValue } from './runner-label';
 import { ConcurrencySelect } from './ConcurrencySelect';
 import { UsageChip } from './UsageChip';
@@ -259,6 +260,52 @@ export function App() {
   const agendaNow = useNow(30000);
   const ongoing = data?.agenda?.available ? currentEvents(data.agenda.events, agendaNow) : [];
 
+  // Board-wide notices for the strip at the foot (card #173): each with its level; the dock shows errors
+  // first, then warnings, then info. Within a level, the order below.
+  const notices: Notice[] = [];
+  const publish = data?.publish ?? null;
+  const held = !!runner?.held;
+  if (publishVisible(publish, held)) {
+    notices.push({
+      key: 'publish',
+      level: publishLevel(publish, held),
+      node: <PublishBanner publish={publish} held={held} running={runner?.running ?? 0} onOpen={(id) => setOpenId(id)} notify={notify} reload={load} />,
+    });
+  }
+  if (runner?.paused) {
+    notices.push({
+      key: 'paused',
+      level: 'warning',
+      node: <div className="banner warning">O runner está pausado: nada sai da fila "{STATUS_LABELS.ready}" até você retomar.</div>,
+    });
+  }
+  if (!runner?.paused && runner?.concurrency?.mode === 'fixed' && runner.concurrency.limit === 0 && readyCount > 0) {
+    notices.push({
+      key: 'zero',
+      level: 'warning',
+      node: (
+        <div className="banner warning">
+          Execuções simultâneas em 0: nada sai da fila "{STATUS_LABELS.ready}" ({readyCount}) até você escolher outro valor no contador "rodando".
+        </div>
+      ),
+    });
+  }
+  if (!runner?.paused && runner?.concurrency?.mode === 'auto' && (runner.concurrency.limit ?? Infinity) <= runner.running && readyCount > 0) {
+    notices.push({
+      key: 'auto',
+      level: 'warning',
+      node: (
+        <div className="banner warning">
+          Modo automático segurando a fila "{STATUS_LABELS.ready}" ({readyCount}): {runner.concurrency.reason}.
+        </div>
+      ),
+    });
+  }
+  if (uiUpdate.update) {
+    notices.push({ key: 'update', level: 'info', node: <UpdateBanner update={uiUpdate.update} dismiss={uiUpdate.dismiss} onOpen={(id) => setOpenId(id)} /> });
+  }
+  if (ongoing.length > 0) notices.push({ key: 'agenda', level: 'info', node: <AgendaBanner events={ongoing} now={agendaNow} /> });
+
   const togglePause = async () => {
     if (!runner) return;
     try {
@@ -311,13 +358,17 @@ export function App() {
         )}
         {runner && (
           <div className="counters">
-            <span className="counter" title={concurrencyTitle(runner.concurrency)}>
-              {runner.running > 0 && <span className="spinner" />} rodando <strong>{runner.running}</strong>
-              {runner.concurrency && <ConcurrencySelect concurrency={runner.concurrency} onChanged={() => void load()} notify={notify} />}
+            {/* Runs and the 5-hour session in one pill: the automatic mode paces the first by the second (D83). */}
+            <span className="counter runner-usage">
+              <span className="runner-part" title={concurrencyTitle(runner.concurrency)}>
+                {runner.running > 0 && <span className="spinner" />} rodando <strong>{runner.running}</strong>
+                {runner.concurrency && <ConcurrencySelect concurrency={runner.concurrency} onChanged={() => void load()} notify={notify} />}
+              </span>
+              <span className="counter-sep" aria-hidden="true" />
+              <UsageChip usage={data?.usage ?? null} inline />
             </span>
             <AgendaChip agenda={data?.agenda ?? null} />
             <AutomationChip tick={automationsTick} onOpen={() => setView('automations')} />
-            <UsageChip usage={data?.usage ?? null} />
             <ActionButton
               className={'btn small icon-btn' + (runner.paused ? ' primary' : '')}
               busyLabel=""
@@ -471,35 +522,7 @@ export function App() {
       )}
 
       {/* Board-wide warnings live in a strip at the foot of the window, outside the scrolling area (card #173). */}
-      <BannerDock>
-        {uiUpdate.update && <UpdateBanner update={uiUpdate.update} dismiss={uiUpdate.dismiss} onOpen={(id) => setOpenId(id)} />}
-        {publishVisible(data?.publish ?? null, !!runner?.held) && (
-          <PublishBanner
-            publish={data?.publish ?? null}
-            held={!!runner?.held}
-            running={runner?.running ?? 0}
-            onOpen={(id) => setOpenId(id)}
-            notify={notify}
-            reload={load}
-          />
-        )}
-        {runner?.paused && (
-          <div className="banner">
-            O runner está pausado: nada sai da fila "{STATUS_LABELS.ready}" até você retomar.
-          </div>
-        )}
-        {!runner?.paused && runner?.concurrency?.mode === 'fixed' && runner.concurrency.limit === 0 && readyCount > 0 && (
-          <div className="banner">
-            Execuções simultâneas em 0: nada sai da fila "{STATUS_LABELS.ready}" ({readyCount}) até você escolher outro valor no contador "rodando".
-          </div>
-        )}
-        {!runner?.paused && runner?.concurrency?.mode === 'auto' && (runner.concurrency.limit ?? Infinity) <= runner.running && readyCount > 0 && (
-          <div className="banner">
-            Modo automático segurando a fila "{STATUS_LABELS.ready}" ({readyCount}): {runner.concurrency.reason}.
-          </div>
-        )}
-        {ongoing.length > 0 && <AgendaBanner events={ongoing} now={agendaNow} />}
-      </BannerDock>
+      <BannerDock notices={notices} />
 
       {openId !== null && data && (
         <CardModal

@@ -19,14 +19,14 @@ export function concurrencyValue(c: ConcurrencyInfo): string {
 /**
  * The choices of the header selector: the presets, plus the current number when config.json holds one
  * outside them (3, 12), so the selector never shows a value it does not list. Auto carries its current
- * limit, the number the header used to show ("auto · 3").
+ * limit before the mode, so the header reads "rodando 1 de 3 (auto)" (asked on card #53, 2026-11-21).
  */
 export function concurrencyOptions(c: ConcurrencyInfo): { value: string; label: string }[] {
   const current = concurrencyValue(c);
   const values = CONCURRENCY_PRESETS.includes(current) ? [...CONCURRENCY_PRESETS] : insertNumber(CONCURRENCY_PRESETS, current);
   return values.map((value) => ({
     value,
-    label: value === AUTO_CONCURRENCY && c.mode === 'auto' ? `auto · ${c.limit}` : concurrencyOptionLabel(value),
+    label: value === AUTO_CONCURRENCY && c.mode === 'auto' ? `${c.limit} (auto)` : concurrencyOptionLabel(value),
   }));
 }
 

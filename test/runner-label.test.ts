@@ -10,9 +10,11 @@ describe('runner counter in the header (D83)', () => {
     expect(concurrencyValue({ mode: 'unlimited', limit: null, reason: '' })).toBe('unlimited');
   });
 
-  it('lists auto, 0, 1, 2, 4, 8 and ∞, and auto carries its current limit', () => {
+  it('lists auto, 0, 1, 2, 4, 8 and ∞, and auto carries its current limit as "3 (auto)"', () => {
     const auto = concurrencyOptions({ mode: 'auto', limit: 3, reason: 'cabem 3' });
-    expect(auto.map((o) => o.label)).toEqual(['auto · 3', '0', '1', '2', '4', '8', '∞']);
+    expect(auto.map((o) => o.label)).toEqual(['3 (auto)', '0', '1', '2', '4', '8', '∞']);
+    // The old wording stays out: the header reads "rodando 1 de 3 (auto)".
+    expect(auto.map((o) => o.label).join(' ')).not.toMatch(/auto ·/);
     const fixed = concurrencyOptions({ mode: 'fixed', limit: 2, reason: '' });
     expect(fixed.map((o) => o.label)).toEqual(['auto', '0', '1', '2', '4', '8', '∞']);
     expect(fixed.map((o) => o.value)).toEqual(CONCURRENCY_PRESETS);
@@ -32,5 +34,16 @@ describe('runner counter in the header (D83)', () => {
 
   it('says nothing about a limit when the runner is not active in this process', () => {
     expect(concurrencyTitle(undefined)).toBe('Execuções rodando agora');
+  });
+});
+
+describe('runner and session share one pill in the header (D83)', () => {
+  it('the 5-hour usage renders inside the "rodando" pill, not as a pill of its own', async () => {
+    const fs = await import('node:fs');
+    const app = fs.readFileSync(new URL('../src/ui/App.tsx', import.meta.url), 'utf8');
+    const pill = app.slice(app.indexOf('className="counter runner-usage"'));
+    expect(pill.indexOf('<UsageChip usage={data?.usage ?? null} inline />')).toBeGreaterThan(0);
+    expect(pill.indexOf('<UsageChip')).toBeLessThan(pill.indexOf('<AgendaChip'));
+    expect(app.match(/<UsageChip/g)).toHaveLength(1);
   });
 });

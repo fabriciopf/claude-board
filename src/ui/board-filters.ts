@@ -61,10 +61,11 @@ export function hasActiveFilter(filters: BoardFilters): boolean {
 }
 
 /**
- * Class of a filter select: one with an option chosen gets `filter-on`, which paints its text orange
- * (card #172), so a narrowed board shows which filter narrowed it. The sort select is not a filter.
+ * Class of the search box and of each filter select: one with text typed or an option chosen gets
+ * `filter-on`, which paints its text and border orange (card #172), so a narrowed board shows which
+ * filter narrowed it. The sort select is not a filter.
  */
-export function filterSelectClass(value: string): string {
+export function filterClass(value: string): string {
   return value === '' ? 'input' : 'input filter-on';
 }
 
