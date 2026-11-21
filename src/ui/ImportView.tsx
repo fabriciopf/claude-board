@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { CardSummary } from '../shared/domain';
+import { ActionButton } from './ActionButton';
 import { api, fmtDate, useServerEvents } from './api';
 
 interface Signal {
@@ -177,7 +178,7 @@ export function ImportView({
     if (!batchCount) return;
     const verb = action === 'accept' ? 'Aceitar' : 'Ignorar';
     if (!window.confirm(`${verb} ${batchCount} card(s) da Triagem?`)) return;
-    void act(
+    return act(
       'batch',
       () =>
         api.post('/api/triage/batch', {
@@ -198,11 +199,12 @@ export function ImportView({
             <span>
               O Claude Code apaga os transcripts com mais de {cleanup ?? 30} dias (cleanupPeriodDays). Para o quadro ter histórico, vale aumentar.
             </span>
-            <button
+            <ActionButton
               className="btn small"
-              onClick={() =>
+              busyLabel="Salvando…"
+              onAction={() =>
                 window.confirm('Definir cleanupPeriodDays = 365 no ~/.claude/settings.json? Faço backup do arquivo antes.') &&
-                void act(
+                act(
                   'cleanup',
                   async () => {
                     const r = await api.post<{ days: number; backup: string | null }>('/api/claude-settings/cleanup-period', { days: 365 });
@@ -214,7 +216,7 @@ export function ImportView({
               }
             >
               Manter 365 dias
-            </button>
+            </ActionButton>
           </div>
         )}
 
@@ -225,9 +227,9 @@ export function ImportView({
             pergunta no fim, pergunta sem resposta e erro. Pode rodar quantas vezes quiser: só relê o que mudou.
           </p>
           <div className="actions">
-            <button className="btn primary" disabled={busy !== null} onClick={() => void scan()}>
-              {busy === 'scan' ? 'Lendo…' : 'Ler o histórico'}
-            </button>
+            <ActionButton className="btn primary" disabled={busy !== null} busy={busy === 'scan'} busyLabel="Lendo…" onAction={scan}>
+              Ler o histórico
+            </ActionButton>
           </div>
           {report && (
             <div className="small" style={{ marginTop: 8 }}>
@@ -255,12 +257,12 @@ export function ImportView({
                 onChange={(e) => setBatch({ ...batch, minConfidence: e.target.value })}
               />
             </label>
-            <button className="btn" disabled={!batchCount || busy !== null} onClick={() => runBatch('accept')}>
+            <ActionButton className="btn" disabled={!batchCount || busy !== null} busyLabel="Aceitando…" onAction={() => runBatch('accept')}>
               Aceitar {batchCount}
-            </button>
-            <button className="btn" disabled={!batchCount || busy !== null} onClick={() => runBatch('ignore')}>
+            </ActionButton>
+            <ActionButton className="btn" disabled={!batchCount || busy !== null} busyLabel="Ignorando…" onAction={() => runBatch('ignore')}>
               Ignorar {batchCount}
-            </button>
+            </ActionButton>
           </div>
           <p className="small muted" style={{ marginBottom: 0 }}>
             Aceitar leva cada card para a lista sugerida. Um por um: abra o card na coluna Triagem do quadro.
@@ -280,23 +282,25 @@ export function ImportView({
 
         <div className="actions" style={{ marginTop: 0, marginBottom: 8 }}>
           <span className="small muted">{selected.size} selecionada(s)</span>
-          <button
+          <ActionButton
             className="btn small"
             disabled={!selected.size || busy !== null}
-            onClick={() => void act('triage', () => api.post('/api/import/triage', { sessionIds: [...selected] }), (r) => `${r.cardIds.length} na Triagem`)}
+            busyLabel="Mandando…"
+            onAction={() => act('triage', () => api.post('/api/import/triage', { sessionIds: [...selected] }), (r) => `${r.cardIds.length} na Triagem`)}
           >
             Mandar para a Triagem
-          </button>
-          <button className="btn small" disabled={!selected.size || busy !== null} onClick={() => void classify()}>
-            {busy === 'classify' ? 'Classificando…' : 'Classificar com LLM…'}
-          </button>
-          <button
+          </ActionButton>
+          <ActionButton className="btn small" disabled={!selected.size || (busy !== null && busy !== 'classify')} busy={busy === 'classify'} busyLabel="Classificando…" onAction={classify}>
+            Classificar com LLM…
+          </ActionButton>
+          <ActionButton
             className="btn small"
             disabled={!selected.size || busy !== null}
-            onClick={() => void act('ignore', () => api.post('/api/import/ignore', { sessionIds: [...selected] }), () => 'Ignoradas')}
+            busyLabel="Ignorando…"
+            onAction={() => act('ignore', () => api.post('/api/import/ignore', { sessionIds: [...selected] }), () => 'Ignoradas')}
           >
             Ignorar
-          </button>
+          </ActionButton>
         </div>
 
         {sessions.length === 0 ? (

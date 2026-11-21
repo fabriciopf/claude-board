@@ -69,7 +69,7 @@ export function UpdateBanner({ update, dismiss, onOpen }: { update: UiBuildInfo;
   const seen = new Set<number>();
   const cards = update.published.filter((p) => !seen.has(p.cardId) && seen.add(p.cardId));
   return (
-    <div className="banner info update-banner" role="status">
+    <div className="banner info update-banner">
       <span>
         <strong>O Board foi atualizado.</strong> Recarregue a página para usar a versão nova.
         {cards.length > 0 && (

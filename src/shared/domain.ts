@@ -54,6 +54,25 @@ export function showsChecklistOnTile(card: { status: Status; checklist: readonly
   return card.checklist.length > 0 && !HIDE_CHECKLIST_ON_TILE.includes(card.status);
 }
 
+/** Lists that stay on the board even with no card: where the user creates work and queues it for Claude (D85). */
+export const ALWAYS_SHOWN_STATUSES: readonly Status[] = ['backlog', 'ready'];
+
+/**
+ * Whether a list shows on the board (D85). Any other list hides while it has no card at all. A list
+ * that only the search or a filter emptied stays, so its "0 de N" counter still tells there is more.
+ * While a card is being dragged, every empty list that takes a drop shows up, so a card can still be
+ * moved into "Em revisão" or "Concluída" when they are empty.
+ */
+export function isColumnShown(
+  status: Status,
+  state: { count: number; total?: number; dragging?: boolean; droppable?: boolean; quickAdd?: boolean },
+): boolean {
+  if (ALWAYS_SHOWN_STATUSES.includes(status)) return true;
+  if (state.count > 0 || (state.total ?? 0) > 0) return true;
+  if (state.quickAdd) return true;
+  return !!state.dragging && state.droppable !== false;
+}
+
 /** Short status, for the list of a split card's tasks. */
 export const STATUS_SHORT_LABELS: Record<Status, string> = {
   triage: 'triagem',
@@ -68,8 +87,8 @@ export const STATUS_SHORT_LABELS: Record<Status, string> = {
 
 export type Owner = 'user' | 'claude';
 export type Actor = 'user' | 'claude' | 'system';
-/** `split`: a task Claude carved out of another card (see `Card.parentId`). */
-export type Origin = 'manual' | 'mcp' | 'import' | 'hook' | 'split';
+/** `split`: a task Claude carved out of another card (see `Card.parentId`). `automation`: created by an automation (D72). */
+export type Origin = 'manual' | 'mcp' | 'import' | 'hook' | 'split' | 'automation';
 
 export type CommentKind = 'comment' | 'question' | 'answer' | 'run_summary' | 'adjustment';
 
@@ -93,17 +112,33 @@ export const EXECUTION_STATUS_LABELS: Record<ExecutionStatus, string> = {
 export type PermissionMode = 'acceptEdits' | 'auto' | 'manual' | 'dontAsk' | 'plan' | 'bypassPermissions';
 export const PERMISSION_MODES: PermissionMode[] = ['acceptEdits', 'auto', 'manual', 'dontAsk', 'plan', 'bypassPermissions'];
 
-/** Highest number of runs the Board keeps going at the same time (settings screen and config.json). */
+/** Highest fixed number of runs config.json accepts (the presets stop at 8; "unlimited" has no ceiling). */
 export const MAX_CONCURRENCY = 20;
 
 /** `maxConcurrency` value that lets the Board pace runs by the 5-hour usage (D47). */
 export const AUTO_CONCURRENCY = 'auto';
-export type ConcurrencySetting = number | typeof AUTO_CONCURRENCY;
+/** `maxConcurrency` value with no ceiling: every card in the queue starts at once (D83). */
+export const UNLIMITED_CONCURRENCY = 'unlimited';
+export type ConcurrencySetting = number | typeof AUTO_CONCURRENCY | typeof UNLIMITED_CONCURRENCY;
+
+/**
+ * The choices offered in the header selector and in Settings (D83). 0 stops the queue without the
+ * pause button; a number typed into config.json by hand (3, 12) still works and shows as an extra option.
+ */
+export const CONCURRENCY_PRESETS: string[] = [AUTO_CONCURRENCY, '0', '1', '2', '4', '8', UNLIMITED_CONCURRENCY];
+
+/** Text of each choice: the numbers as they are, auto and the infinity sign. */
+export function concurrencyOptionLabel(value: string): string {
+  if (value === AUTO_CONCURRENCY) return 'auto';
+  if (value === UNLIMITED_CONCURRENCY) return '∞';
+  return value;
+}
 
 /** How many runs the Board allows right now, and why (shown in the header). */
 export interface ConcurrencyInfo {
-  mode: 'auto' | 'fixed';
-  limit: number;
+  mode: 'auto' | 'fixed' | 'unlimited';
+  /** null = no ceiling (mode "unlimited"); 0 = the queue does not move. */
+  limit: number | null;
   /** One line in pt-BR; in fixed mode, empty. */
   reason: string;
 }
@@ -226,6 +261,8 @@ export interface Card {
   originalDescriptionMd: string | null;
   /** The card this one was split from (null for a card the user created). */
   parentId: number | null;
+  /** The automation that created this card (D72). */
+  automationId: number | null;
   nextPrompt: string | null;
   nextPromptKind: string | null;
   links: CardLink[];
@@ -263,6 +300,8 @@ export interface CardSummary extends Card {
   subtasks: CardRef[];
   /** When the card last entered its current list: the last "moved" event into it, else its creation (card #152). */
   enteredStatusAt: string;
+  /** In "Em revisão" and not opened since Claude or the runner put it there (D84). */
+  unseenInReview: boolean;
 }
 
 export interface Comment {
