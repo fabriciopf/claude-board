@@ -44,6 +44,8 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
   const [adjust, setAdjust] = useState('');
   const [showAdjust, setShowAdjust] = useState(false);
   const [newItem, setNewItem] = useState('');
+  // The checklist opens closed on every card; the header keeps the count and the progress bar (card #166).
+  const [checklistOpen, setChecklistOpen] = useState(false);
   const [link, setLink] = useState({ kind: 'url' as LinkKind, value: '', title: '' });
   const [live, setLive] = useState<string[]>([]);
   const activityRef = useRef<HTMLDivElement>(null);
@@ -76,6 +78,7 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
   }, [cardId, editingDesc, notify, onClose]);
 
   useEffect(() => {
+    setChecklistOpen(false);
     void load();
   }, [cardId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -488,9 +491,16 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
             )}
 
             <div className="section">
-              <div className="section-title">
+              <button
+                type="button"
+                className="section-title section-toggle"
+                aria-expanded={checklistOpen}
+                aria-controls="card-checklist"
+                onClick={() => setChecklistOpen(!checklistOpen)}
+              >
+                <span aria-hidden="true">{checklistOpen ? '▾' : '▸'}</span>
                 Checklist
-                {checklist.length > 0 && (
+                {checklist.length > 0 ? (
                   <>
                     <span className="muted small">
                       {done}/{checklist.length}
@@ -499,36 +509,42 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
                       <div style={{ width: `${(done / checklist.length) * 100}%` }} />
                     </div>
                   </>
+                ) : (
+                  <span className="muted small">vazia</span>
                 )}
-              </div>
-              {checklist.map((item) => (
-                <div key={item.id} className={'checklist-item' + (item.done ? ' done' : '')}>
+              </button>
+              {checklistOpen && (
+                <div id="card-checklist">
+                  {checklist.map((item) => (
+                    <div key={item.id} className={'checklist-item' + (item.done ? ' done' : '')}>
+                      <input
+                        type="checkbox"
+                        checked={item.done}
+                        aria-label={item.text}
+                        onChange={(e) => void run(() => api.patch(`/api/checklist/${item.id}`, { done: e.target.checked }))}
+                      />
+                      <span>{item.text}</span>
+                      {item.createdBy === 'claude' && <span className="pill">Claude</span>}
+                      <button className="btn link small" aria-label="Remover item" onClick={() => void run(() => api.del(`/api/checklist/${item.id}`))}>
+                        ✕
+                      </button>
+                    </div>
+                  ))}
                   <input
-                    type="checkbox"
-                    checked={item.done}
-                    aria-label={item.text}
-                    onChange={(e) => void run(() => api.patch(`/api/checklist/${item.id}`, { done: e.target.checked }))}
+                    className="input"
+                    style={{ width: '100%', marginTop: 4 }}
+                    placeholder="Adicionar item (Enter)"
+                    value={newItem}
+                    onChange={(e) => setNewItem(e.target.value)}
+                    onKeyDown={(e) => {
+                      e.stopPropagation();
+                      if (e.key === 'Enter' && newItem.trim()) {
+                        void run(() => api.post(`/api/cards/${cardId}/checklist`, { text: newItem })).then(() => setNewItem(''));
+                      }
+                    }}
                   />
-                  <span>{item.text}</span>
-                  {item.createdBy === 'claude' && <span className="pill">Claude</span>}
-                  <button className="btn link small" aria-label="Remover item" onClick={() => void run(() => api.del(`/api/checklist/${item.id}`))}>
-                    ✕
-                  </button>
                 </div>
-              ))}
-              <input
-                className="input"
-                style={{ width: '100%', marginTop: 4 }}
-                placeholder="Adicionar item (Enter)"
-                value={newItem}
-                onChange={(e) => setNewItem(e.target.value)}
-                onKeyDown={(e) => {
-                  e.stopPropagation();
-                  if (e.key === 'Enter' && newItem.trim()) {
-                    void run(() => api.post(`/api/cards/${cardId}/checklist`, { text: newItem })).then(() => setNewItem(''));
-                  }
-                }}
-              />
+              )}
             </div>
 
             <div className="section" ref={activityRef}>
