@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { EMPTY_FILTERS, columnCountText, countByStatus, filterCards, hasActiveFilter, matchesPriority, parseFilters, pruneFilters } from '../src/ui/board-filters';
+import { EMPTY_FILTERS, columnCountText, columnNeedsAttention, countByStatus, filterCards, hasActiveFilter, matchesPriority, parseFilters, pruneFilters } from '../src/ui/board-filters';
 
 describe('board filters kept across reloads', () => {
   it('reads back what was stored', () => {
@@ -60,6 +60,15 @@ describe('column counter while searching (card #108)', () => {
   it('shows shown/total with a filter, also when the filter hides every card', () => {
     expect(columnCountText(2, 7)).toBe('2/7');
     expect(columnCountText(0, 3)).toBe('0/3');
+  });
+
+  it('highlights "Aguardando você" only when it has a card, counting the ones a filter hides (card #164)', () => {
+    expect(columnNeedsAttention('waiting_user', 1, undefined)).toBe(true);
+    expect(columnNeedsAttention('waiting_user', 0, undefined)).toBe(false);
+    expect(columnNeedsAttention('waiting_user', 0, 2)).toBe(true);
+    expect(columnNeedsAttention('waiting_user', 0, 0)).toBe(false);
+    expect(columnNeedsAttention('review', 3, undefined)).toBe(false);
+    expect(columnNeedsAttention('waiting_third_party', 3, 3)).toBe(false);
   });
 
   it('counts the unfiltered cards per status', () => {
