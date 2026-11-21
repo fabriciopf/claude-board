@@ -3,7 +3,7 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { buildApp } from '../src/server/app.js';
 import { AgendaWatcher, MISSES_TO_HIDE, readAgendaStream } from '../src/service/agenda.js';
-import { nextEvent, parseCalendarEvents, untilLabel } from '../src/shared/agenda.js';
+import { currentEvents, nextEvent, parseCalendarEvents, untilLabel } from '../src/shared/agenda.js';
 import { makeContext, tempDir } from './helpers.js';
 
 const FAKE = path.resolve('test/fake-agenda.mjs');
@@ -44,6 +44,30 @@ describe('calendar events', () => {
     expect(nextEvent(events, Date.parse('2026-11-19T09:59:00-03:00'))?.title).toBe('A');
     expect(nextEvent(events, Date.parse('2026-11-19T10:00:00-03:00'))?.title).toBe('B');
     expect(nextEvent(events, Date.parse('2026-11-19T12:00:00-03:00'))).toBeNull();
+  });
+
+  it('finds the commitments happening now, edges included at the start only', () => {
+    const events = parseCalendarEvents({
+      events: [ev({ summary: 'Daily' }), ev({ summary: 'Dentista', start: { dateTime: '2026-11-19T09:30:00-03:00' } })],
+    });
+    const at = (t: string) => currentEvents(events, Date.parse(`2026-11-19T${t}-03:00`)).map((e) => e.title);
+    expect(at('09:29:59')).toEqual([]);
+    expect(at('09:30:00')).toEqual(['Dentista']);
+    expect(at('10:10:00')).toEqual(['Dentista', 'Daily']);
+    expect(at('10:30:00')).toEqual([]);
+  });
+
+  it('keeps the video call link, https only', () => {
+    const [withMeet, noMeet, bad] = parseCalendarEvents({
+      events: [
+        ev({ summary: 'A', conferenceUrl: 'https://meet.google.com/ijd-tqyk-wwj' }),
+        ev({ summary: 'B', start: { dateTime: '2026-11-19T10:01:00-03:00' } }),
+        ev({ summary: 'C', start: { dateTime: '2026-11-19T10:02:00-03:00' }, hangoutLink: 'javascript:alert(1)' }),
+      ],
+    });
+    expect(withMeet.meetLink).toBe('https://meet.google.com/ijd-tqyk-wwj');
+    expect(noMeet.meetLink).toBeNull();
+    expect(bad.meetLink).toBeNull();
   });
 
   it('labels the time left', () => {
