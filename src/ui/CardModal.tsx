@@ -44,6 +44,8 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
   const [adjust, setAdjust] = useState('');
   const [showAdjust, setShowAdjust] = useState(false);
   const [newItem, setNewItem] = useState('');
+  // The side panel (Lista, Dono, Projeto, Labels...) opens folded on every modal; d or the strip unfolds it (card #166).
+  const [sideOpen, setSideOpen] = useState(false);
   const [link, setLink] = useState({ kind: 'url' as LinkKind, value: '', title: '' });
   const [live, setLive] = useState<string[]>([]);
   const activityRef = useRef<HTMLDivElement>(null);
@@ -123,11 +125,16 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
   const approve = () => leaveColumn(() => api.post(`/api/cards/${cardId}/approve`), 'Aprovado');
   const archive = () => leaveColumn(() => api.post(`/api/cards/${cardId}/archive`, { archived: true }), 'Arquivado');
 
-  // Keyboard: e edits the description, a approves a card in review.
+  // Keyboard: e edits the description, a approves a card in review, d folds or unfolds the side panel.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
       if (target.closest('input, textarea, select')) return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      if (e.key === 'd') {
+        e.preventDefault();
+        setSideOpen((open) => !open);
+      }
       if (e.key === 'e') {
         e.preventDefault();
         setEditingDesc(true);
@@ -182,7 +189,7 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
         <button className="btn link modal-close" onClick={onClose} aria-label="Fechar">
           ✕
         </button>
-        <div className="modal-grid">
+        <div className={'modal-grid' + (sideOpen ? '' : ' side-folded')}>
           <div>
             <div className="muted small">
               #{card.id} · em <strong>{STATUS_LABELS[card.status]}</strong>
@@ -569,255 +576,281 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
             </div>
           </div>
 
-          <aside className="sidebar">
-            <div className="field">
-              <label htmlFor="f-status">Lista</label>
-              <select
-                id="f-status"
-                className="input"
-                value={card.status}
-                disabled={running}
-                onChange={(e) => void move(card, e.target.value as Card['status']).then(load)}
+          {!sideOpen ? (
+            <button
+              className="side-expand"
+              onClick={() => setSideOpen(true)}
+              title="Mostrar os detalhes (d)"
+              aria-label="Mostrar os detalhes do card"
+              aria-expanded={false}
+              aria-controls="card-side"
+            >
+              <span className="side-expand-arrow" aria-hidden="true">
+                ‹
+              </span>
+              <span className="side-expand-title">Detalhes</span>
+              <span className="kbd">d</span>
+            </button>
+          ) : (
+            <aside className="sidebar" id="card-side">
+              <button
+                className="side-collapse"
+                onClick={() => setSideOpen(false)}
+                title="Recolher os detalhes (d)"
+                aria-expanded={true}
+                aria-controls="card-side"
               >
-                {Object.entries(STATUS_LABELS).map(([value, label]) => (
-                  <option key={value} value={value} disabled={value === 'running' || value === 'triage'}>
-                    {label}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="field">
-              <label htmlFor="f-owner">Dono</label>
-              <select id="f-owner" className="input" value={card.owner} onChange={(e) => void patch({ owner: e.target.value })}>
-                <option value="user">Você</option>
-                <option value="claude">Claude</option>
-              </select>
-            </div>
-            <div className="field">
-              <label htmlFor="f-app">Projeto</label>
-              <select
-                id="f-app"
-                className="input"
-                value={card.appId ?? ''}
-                onChange={(e) => void patch({ appId: e.target.value ? Number(e.target.value) : null })}
-              >
-                <option value="">Sem projeto</option>
-                {apps
-                  .filter((a) => !a.archived || a.id === card.appId)
-                  .map((a) => (
-                    <option key={a.id} value={a.id}>
-                      {a.name}
-                    </option>
-                  ))}
-              </select>
-              {apps.length === 0 && <span className="muted small">Cadastre os projetos em Configurações.</span>}
-            </div>
-            <div className="field">
-              <label>Labels</label>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                {labels.map((l) => {
-                  const on = card.labelIds.includes(l.id);
-                  return (
-                    <button
-                      key={l.id}
-                      className="label-chip"
-                      style={{ background: l.color, opacity: on ? 1 : 0.35, border: 0, cursor: 'pointer' }}
-                      aria-pressed={on}
-                      onClick={() =>
-                        void run(() =>
-                          api.put(`/api/cards/${cardId}/labels`, {
-                            labelIds: on ? card.labelIds.filter((x) => x !== l.id) : [...card.labelIds, l.id],
-                          }),
-                        )
-                      }
-                    >
-                      {l.name}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-            <div className="field">
-              <label id="f-repositories">Repositórios</label>
-              <div role="group" aria-labelledby="f-repositories" style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                {repositories.map((x) => {
-                  const ids = card.repositoryIds ?? [];
-                  const on = ids.includes(x.id);
-                  return (
-                    <button
-                      key={x.id}
-                      className={'repo-chip toggle' + (on ? ' on' : '')}
-                      aria-pressed={on}
-                      onClick={() =>
-                        void run(() =>
-                          api.put(`/api/cards/${cardId}/repositories`, {
-                            repositoryIds: on ? ids.filter((y) => y !== x.id) : [...ids, x.id],
-                          }),
-                        )
-                      }
-                    >
-                      {x.name}
-                    </button>
-                  );
-                })}
-              </div>
-              {repositories.length === 0 && <span className="muted small">Cadastre os repositórios em Configurações.</span>}
-            </div>
-            <div className="field">
-              <label htmlFor="f-priority">Prioridade</label>
-              <select id="f-priority" className="input" value={card.priority} onChange={(e) => void patch({ priority: Number(e.target.value) })}>
-                <option value={1}>1 · Alta</option>
-                <option value={2}>2 · Média-alta</option>
-                <option value={3}>3 · Normal</option>
-                <option value={4}>4 · Baixa</option>
-              </select>
-            </div>
-            <div className="field">
-              <label htmlFor="f-due">Prazo</label>
-              <input id="f-due" type="date" className="input" value={card.dueDate ?? ''} onChange={(e) => void patch({ dueDate: e.target.value || null })} />
-            </div>
-            <div className="field">
-              <label htmlFor="f-repo">Repositório (caminho local)</label>
-              <input
-                id="f-repo"
-                className="input"
-                defaultValue={card.repoPath ?? ''}
-                placeholder="vazio = pasta de trabalho do Board"
-                onBlur={(e) => e.target.value !== (card.repoPath ?? '') && void patch({ repoPath: e.target.value.trim() || null })}
-                onKeyDown={(e) => e.stopPropagation()}
-              />
-            </div>
-            <div className="field">
-              <label htmlFor="f-base">Branch base</label>
-              <input
-                id="f-base"
-                className="input"
-                defaultValue={card.baseBranch ?? ''}
-                placeholder="padrão da configuração"
-                onBlur={(e) => e.target.value !== (card.baseBranch ?? '') && void patch({ baseBranch: e.target.value.trim() || null })}
-                onKeyDown={(e) => e.stopPropagation()}
-              />
-            </div>
-            {card.branch && (
-              <div className="muted small">
-                Branch: <code>{card.branch}</code>
-                <br />
-                Worktree: <code>{card.worktreePath}</code>
-              </div>
-            )}
-            <div className="field">
-              <label htmlFor="f-perm">Modo de permissão</label>
-              <select
-                id="f-perm"
-                className="input"
-                value={card.permissionMode ?? ''}
-                onChange={(e) => void patch({ permissionMode: e.target.value || null })}
-              >
-                <option value="">padrão da configuração</option>
-                {PERMISSION_MODES.filter((m) => m !== 'bypassPermissions').map((m) => (
-                  <option key={m} value={m}>
-                    {m}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="field">
-              <label htmlFor="f-model">Modelo</label>
-              <select id="f-model" className="input" value={card.model ?? ''} onChange={(e) => void patch({ model: e.target.value || null })}>
-                <option value="">padrão da configuração ({modelLabel(defaults.defaultModel)})</option>
-                {[...MODEL_OPTIONS, ...(card.model && !MODEL_OPTIONS.some((m) => m.id === card.model) ? [{ id: card.model, label: card.model }] : [])].map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="field">
-              <label htmlFor="f-effort">Effort</label>
-              <select id="f-effort" className="input" value={card.effort ?? ''} onChange={(e) => void patch({ effort: e.target.value || null })}>
-                <option value="">padrão da configuração ({effortLabel(defaults.defaultEffort)})</option>
-                {EFFORT_LEVELS.map((l) => (
-                  <option key={l} value={l}>
-                    {EFFORT_LABELS[l]}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="field">
-              <label htmlFor="f-turns">Máx. de turnos</label>
-              <input
-                id="f-turns"
-                type="number"
-                min={1}
-                className="input"
-                defaultValue={card.maxTurns ?? ''}
-                placeholder="sem limite"
-                onBlur={(e) => void patch({ maxTurns: e.target.value ? Number(e.target.value) : null })}
-                onKeyDown={(e) => e.stopPropagation()}
-              />
-            </div>
-            <label className="small" style={{ display: 'flex', gap: 6, alignItems: 'flex-start' }}>
-              <input
-                type="checkbox"
-                checked={card.dangerousAllowed}
-                onChange={(e) => {
-                  if (
-                    e.target.checked &&
-                    !window.confirm(
-                      'Liberar o modo sem permissões (bypassPermissions)? O Claude poderá rodar qualquer comando sem pedir. Só faça isso em tarefa isolada.',
-                    )
-                  ) {
-                    return;
-                  }
-                  void patch({ dangerousAllowed: e.target.checked });
-                }}
-              />
-              <span>Perigoso: rodar sem permissões</span>
-            </label>
-
-            <div className="field">
-              <label>Links</label>
-              {card.links.map((l, i) => {
-                const href = linkHref(l.kind, l.value, defaults.jiraBaseUrl);
-                return (
-                  <div key={i} className="small" style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-                    <span className="pill">{l.kind}</span>
-                    {href ? (
-                      <a href={href} target="_blank" rel="noreferrer" style={{ overflowWrap: 'anywhere' }}>
-                        {l.title || l.value}
-                      </a>
-                    ) : (
-                      <span style={{ overflowWrap: 'anywhere' }}>{l.title || l.value}</span>
-                    )}
-                    <button className="btn link small" aria-label="Remover link" onClick={() => void run(() => api.del(`/api/cards/${cardId}/links/${i}`))}>
-                      ✕
-                    </button>
-                  </div>
-                );
-              })}
-              <div className="link-add">
-                <select className="input" value={link.kind} onChange={(e) => setLink({ ...link, kind: e.target.value as LinkKind })} aria-label="Tipo de link">
-                  {LINK_KINDS.map((k) => (
-                    <option key={k.value} value={k.value}>
-                      {k.label}
+                Detalhes <span className="side-expand-arrow" aria-hidden="true">›</span> <span className="kbd">d</span>
+              </button>
+              <div className="field">
+                <label htmlFor="f-status">Lista</label>
+                <select
+                  id="f-status"
+                  className="input"
+                  value={card.status}
+                  disabled={running}
+                  onChange={(e) => void move(card, e.target.value as Card['status']).then(load)}
+                >
+                  {Object.entries(STATUS_LABELS).map(([value, label]) => (
+                    <option key={value} value={value} disabled={value === 'running' || value === 'triage'}>
+                      {label}
                     </option>
                   ))}
                 </select>
-                <input
+              </div>
+              <div className="field">
+                <label htmlFor="f-owner">Dono</label>
+                <select id="f-owner" className="input" value={card.owner} onChange={(e) => void patch({ owner: e.target.value })}>
+                  <option value="user">Você</option>
+                  <option value="claude">Claude</option>
+                </select>
+              </div>
+              <div className="field">
+                <label htmlFor="f-app">Projeto</label>
+                <select
+                  id="f-app"
                   className="input"
-                  placeholder="URL, chave ou caminho (Enter)"
-                  value={link.value}
-                  onChange={(e) => setLink({ ...link, value: e.target.value })}
-                  onKeyDown={(e) => {
-                    e.stopPropagation();
-                    if (e.key === 'Enter' && link.value.trim()) {
-                      void run(() => api.post(`/api/cards/${cardId}/links`, link)).then(() => setLink({ kind: link.kind, value: '', title: '' }));
-                    }
-                  }}
+                  value={card.appId ?? ''}
+                  onChange={(e) => void patch({ appId: e.target.value ? Number(e.target.value) : null })}
+                >
+                  <option value="">Sem projeto</option>
+                  {apps
+                    .filter((a) => !a.archived || a.id === card.appId)
+                    .map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.name}
+                      </option>
+                    ))}
+                </select>
+                {apps.length === 0 && <span className="muted small">Cadastre os projetos em Configurações.</span>}
+              </div>
+              <div className="field">
+                <label>Labels</label>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                  {labels.map((l) => {
+                    const on = card.labelIds.includes(l.id);
+                    return (
+                      <button
+                        key={l.id}
+                        className="label-chip"
+                        style={{ background: l.color, opacity: on ? 1 : 0.35, border: 0, cursor: 'pointer' }}
+                        aria-pressed={on}
+                        onClick={() =>
+                          void run(() =>
+                            api.put(`/api/cards/${cardId}/labels`, {
+                              labelIds: on ? card.labelIds.filter((x) => x !== l.id) : [...card.labelIds, l.id],
+                            }),
+                          )
+                        }
+                      >
+                        {l.name}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              <div className="field">
+                <label id="f-repositories">Repositórios</label>
+                <div role="group" aria-labelledby="f-repositories" style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                  {repositories.map((x) => {
+                    const ids = card.repositoryIds ?? [];
+                    const on = ids.includes(x.id);
+                    return (
+                      <button
+                        key={x.id}
+                        className={'repo-chip toggle' + (on ? ' on' : '')}
+                        aria-pressed={on}
+                        onClick={() =>
+                          void run(() =>
+                            api.put(`/api/cards/${cardId}/repositories`, {
+                              repositoryIds: on ? ids.filter((y) => y !== x.id) : [...ids, x.id],
+                            }),
+                          )
+                        }
+                      >
+                        {x.name}
+                      </button>
+                    );
+                  })}
+                </div>
+                {repositories.length === 0 && <span className="muted small">Cadastre os repositórios em Configurações.</span>}
+              </div>
+              <div className="field">
+                <label htmlFor="f-priority">Prioridade</label>
+                <select id="f-priority" className="input" value={card.priority} onChange={(e) => void patch({ priority: Number(e.target.value) })}>
+                  <option value={1}>1 · Alta</option>
+                  <option value={2}>2 · Média-alta</option>
+                  <option value={3}>3 · Normal</option>
+                  <option value={4}>4 · Baixa</option>
+                </select>
+              </div>
+              <div className="field">
+                <label htmlFor="f-due">Prazo</label>
+                <input id="f-due" type="date" className="input" value={card.dueDate ?? ''} onChange={(e) => void patch({ dueDate: e.target.value || null })} />
+              </div>
+              <div className="field">
+                <label htmlFor="f-repo">Repositório (caminho local)</label>
+                <input
+                  id="f-repo"
+                  className="input"
+                  defaultValue={card.repoPath ?? ''}
+                  placeholder="vazio = pasta de trabalho do Board"
+                  onBlur={(e) => e.target.value !== (card.repoPath ?? '') && void patch({ repoPath: e.target.value.trim() || null })}
+                  onKeyDown={(e) => e.stopPropagation()}
                 />
               </div>
-            </div>
-          </aside>
+              <div className="field">
+                <label htmlFor="f-base">Branch base</label>
+                <input
+                  id="f-base"
+                  className="input"
+                  defaultValue={card.baseBranch ?? ''}
+                  placeholder="padrão da configuração"
+                  onBlur={(e) => e.target.value !== (card.baseBranch ?? '') && void patch({ baseBranch: e.target.value.trim() || null })}
+                  onKeyDown={(e) => e.stopPropagation()}
+                />
+              </div>
+              {card.branch && (
+                <div className="muted small">
+                  Branch: <code>{card.branch}</code>
+                  <br />
+                  Worktree: <code>{card.worktreePath}</code>
+                </div>
+              )}
+              <div className="field">
+                <label htmlFor="f-perm">Modo de permissão</label>
+                <select
+                  id="f-perm"
+                  className="input"
+                  value={card.permissionMode ?? ''}
+                  onChange={(e) => void patch({ permissionMode: e.target.value || null })}
+                >
+                  <option value="">padrão da configuração</option>
+                  {PERMISSION_MODES.filter((m) => m !== 'bypassPermissions').map((m) => (
+                    <option key={m} value={m}>
+                      {m}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="field">
+                <label htmlFor="f-model">Modelo</label>
+                <select id="f-model" className="input" value={card.model ?? ''} onChange={(e) => void patch({ model: e.target.value || null })}>
+                  <option value="">padrão da configuração ({modelLabel(defaults.defaultModel)})</option>
+                  {[...MODEL_OPTIONS, ...(card.model && !MODEL_OPTIONS.some((m) => m.id === card.model) ? [{ id: card.model, label: card.model }] : [])].map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="field">
+                <label htmlFor="f-effort">Effort</label>
+                <select id="f-effort" className="input" value={card.effort ?? ''} onChange={(e) => void patch({ effort: e.target.value || null })}>
+                  <option value="">padrão da configuração ({effortLabel(defaults.defaultEffort)})</option>
+                  {EFFORT_LEVELS.map((l) => (
+                    <option key={l} value={l}>
+                      {EFFORT_LABELS[l]}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="field">
+                <label htmlFor="f-turns">Máx. de turnos</label>
+                <input
+                  id="f-turns"
+                  type="number"
+                  min={1}
+                  className="input"
+                  defaultValue={card.maxTurns ?? ''}
+                  placeholder="sem limite"
+                  onBlur={(e) => void patch({ maxTurns: e.target.value ? Number(e.target.value) : null })}
+                  onKeyDown={(e) => e.stopPropagation()}
+                />
+              </div>
+              <label className="small" style={{ display: 'flex', gap: 6, alignItems: 'flex-start' }}>
+                <input
+                  type="checkbox"
+                  checked={card.dangerousAllowed}
+                  onChange={(e) => {
+                    if (
+                      e.target.checked &&
+                      !window.confirm(
+                        'Liberar o modo sem permissões (bypassPermissions)? O Claude poderá rodar qualquer comando sem pedir. Só faça isso em tarefa isolada.',
+                      )
+                    ) {
+                      return;
+                    }
+                    void patch({ dangerousAllowed: e.target.checked });
+                  }}
+                />
+                <span>Perigoso: rodar sem permissões</span>
+              </label>
+
+              <div className="field">
+                <label>Links</label>
+                {card.links.map((l, i) => {
+                  const href = linkHref(l.kind, l.value, defaults.jiraBaseUrl);
+                  return (
+                    <div key={i} className="small" style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                      <span className="pill">{l.kind}</span>
+                      {href ? (
+                        <a href={href} target="_blank" rel="noreferrer" style={{ overflowWrap: 'anywhere' }}>
+                          {l.title || l.value}
+                        </a>
+                      ) : (
+                        <span style={{ overflowWrap: 'anywhere' }}>{l.title || l.value}</span>
+                      )}
+                      <button className="btn link small" aria-label="Remover link" onClick={() => void run(() => api.del(`/api/cards/${cardId}/links/${i}`))}>
+                        ✕
+                      </button>
+                    </div>
+                  );
+                })}
+                <div className="link-add">
+                  <select className="input" value={link.kind} onChange={(e) => setLink({ ...link, kind: e.target.value as LinkKind })} aria-label="Tipo de link">
+                    {LINK_KINDS.map((k) => (
+                      <option key={k.value} value={k.value}>
+                        {k.label}
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    className="input"
+                    placeholder="URL, chave ou caminho (Enter)"
+                    value={link.value}
+                    onChange={(e) => setLink({ ...link, value: e.target.value })}
+                    onKeyDown={(e) => {
+                      e.stopPropagation();
+                      if (e.key === 'Enter' && link.value.trim()) {
+                        void run(() => api.post(`/api/cards/${cardId}/links`, link)).then(() => setLink({ kind: link.kind, value: '', title: '' }));
+                      }
+                    }}
+                  />
+                </div>
+              </div>
+            </aside>
+          )}
         </div>
       </div>
     </div>

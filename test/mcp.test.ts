@@ -39,6 +39,9 @@ describe('MCP over HTTP', () => {
     const names = (await c.listTools()).tools.map((t) => t.name).sort();
     expect(names).toEqual(
       [
+        'automation_create',
+        'automation_list',
+        'automation_update',
         'board_list_cards',
         'card_ask_user',
         'card_checklist_add',

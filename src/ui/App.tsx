@@ -5,7 +5,10 @@ import { Board, navigationGrid, readCollapsed } from './Board';
 import { CardModal } from './CardModal';
 import { chimeFor, electRingerTab, playChime, ring, unlockOnFirstGesture } from './chime';
 import { MonitorIcon, MoonIcon, PauseIcon, PlayIcon, SoundOffIcon, SoundOnIcon, SunIcon } from './HeaderIcons';
+import { AutomationsView } from './AutomationsView';
 import { ImportView } from './ImportView';
+import { MainMenu } from './MainMenu';
+import { TAB_VIEWS, type View } from './main-menu';
 import { FILTERS_STORE_KEY, countByStatus, filterCards, hasActiveFilter, parseFilters, pruneFilters, type BoardFilters } from './board-filters';
 import { FilterBar } from './FilterBar';
 import { nextInColumn } from './next-card';
@@ -18,7 +21,6 @@ import { UsageChip } from './UsageChip';
 import { AgendaChip } from './AgendaChip';
 import { UpdateBanner, useUiUpdate } from './UpdateBanner';
 
-type View = 'board' | 'today' | 'import' | 'archived' | 'settings';
 type Theme = 'system' | 'light' | 'dark';
 
 const THEME_LABELS: Record<Theme, string> = { system: 'Tema do sistema', light: 'Tema claro', dark: 'Tema escuro' };
@@ -54,6 +56,8 @@ export function App() {
   // Order of the cards, one per view (card #152).
   const [boardSort, setBoardSort] = useState<CardSort>(() => parseSort('board', readStore(SORT_STORE_KEYS.board)));
   const [todaySort, setTodaySort] = useState<CardSort>(() => parseSort('today', readStore(SORT_STORE_KEYS.today)));
+  // Bumped by the server when an automation changes, so the Automações view reloads (D72).
+  const [automationsTick, setAutomationsTick] = useState(0);
   const searchRef = useRef<HTMLInputElement>(null);
   const toastTimer = useRef<number>(0);
 
@@ -117,6 +121,12 @@ export function App() {
   const uiUpdate = useUiUpdate();
   useServerEvents((msg) => {
     if (msg.type === 'execution.progress') return;
+    if (msg.type === 'automations.changed') {
+      setAutomationsTick((t) => t + 1);
+      return;
+    }
+    // The history of runs shows each card's state; a reconnect means the server may have restarted.
+    if (msg.type === 'card.changed' || msg.type === 'reconnected') setAutomationsTick((t) => t + 1);
     // A publication swapped the screen on disk, or the server is back from a restart (D51).
     if (msg.type === 'ui.updated' || msg.type === 'reconnected') uiUpdate.check();
     const kind = chimeFor(msg);
@@ -231,7 +241,6 @@ export function App() {
 
   const runner = data?.runner;
   const readyCount = data ? data.cards.filter((c) => c.status === 'ready').length : 0;
-  const waiting = data ? todayItems(data.cards).filter((i) => i.card.status === 'waiting_user').length : 0;
 
   const togglePause = async () => {
     if (!runner) return;
@@ -242,24 +251,25 @@ export function App() {
   return (
     <div className="app">
       <header className="header">
-        <div className="brand">
-          {/* Same drawing as the favicon in index.html, so the header and the browser tab match. */}
-          <svg className="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
-            <rect x="2" y="4" width="8" height="24" rx="2" fill="#d97757" />
-            <rect x="12" y="4" width="8" height="16" rx="2" fill="#d97757" opacity=".7" />
-            <rect x="22" y="4" width="8" height="10" rx="2" fill="#d97757" opacity=".45" />
-          </svg>
-          <span className="brand-name">Claude Board</span>
+        <div className="header-start">
+          <MainMenu view={view} onSelect={setView} />
+          {/* The logo goes home (the board), as logos do; it does not open the menu (D71). */}
+          <button className="brand" onClick={() => setView('board')} title="Ir para o Quadro">
+            {/* Same drawing as the favicon in index.html, so the header and the browser tab match. */}
+            <svg className="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
+              <rect x="2" y="4" width="8" height="24" rx="2" fill="#d97757" />
+              <rect x="12" y="4" width="8" height="16" rx="2" fill="#d97757" opacity=".7" />
+              <rect x="22" y="4" width="8" height="10" rx="2" fill="#d97757" opacity=".45" />
+            </svg>
+            <span className="brand-name">Claude Board</span>
+          </button>
         </div>
         <nav className="tabs" aria-label="Visões">
           {(
             [
               ['board', 'Quadro'],
               ['today', `${PENDING_VIEW_NAME}${data ? ` (${todayItems(data.cards).length})` : ''}`],
-              ['import', 'Importação'],
-              ['archived', 'Arquivados'],
-              ['settings', 'Configurações'],
-            ] as [View, string][]
+            ] as [(typeof TAB_VIEWS)[number], string][]
           ).map(([v, label]) => (
             <button key={v} className={'tab' + (view === v ? ' active' : '')} onClick={() => setView(v)}>
               {label}
@@ -272,9 +282,6 @@ export function App() {
               {runner.running > 0 && <span className="spinner" />} rodando <strong>{runner.running}</strong>
               {runner.concurrency && <span className="muted small">{concurrencySuffix(runner.concurrency)}</span>}
             </span>
-            <button className={'counter' + (waiting > 0 ? ' attention' : '')} onClick={() => setView('today')}>
-              aguardando você <strong>{waiting}</strong>
-            </button>
             <AgendaChip agenda={data?.agenda ?? null} />
             <UsageChip usage={data?.usage ?? null} />
             <PublishChip publish={data?.publish ?? null} running={runner.running} onOpen={(id) => setOpenId(id)} notify={notify} />
@@ -431,6 +438,8 @@ export function App() {
           </div>
         </div>
       )}
+
+      {view === 'automations' && data && <AutomationsView tick={automationsTick} onOpen={setOpenId} notify={notify} />}
 
       {view === 'import' && data && (
         <ImportView triage={data.cards.filter((c) => c.status === 'triage')} onOpen={setOpenId} notify={notify} />
