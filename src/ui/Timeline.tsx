@@ -9,6 +9,8 @@ import {
   type Execution,
   type Status,
 } from '../shared/domain';
+import { ActionButton } from './ActionButton';
+import { OwnerAvatar } from './OwnerAvatar';
 import { api, fmtDate } from './api';
 import { renderMarkdown } from './markdown';
 
@@ -75,6 +77,8 @@ function eventText(e: BoardEvent): string | null {
       return 'aprovou o trabalho';
     case 'answered':
       return null; // the answer itself is shown as a comment
+    case 'viewed':
+      return null; // only clears the "not seen yet" mark of a card in review (D84)
     case 'reopened_by_comment':
       return null; // the comment and the move to the queue are shown on their own
     case 'publish_conflict_returned':
@@ -115,9 +119,9 @@ function Transcript({ executionId }: { executionId: number }) {
   };
   if (!items && !error) {
     return (
-      <button className="btn small" onClick={() => void load()}>
+      <ActionButton className="btn small" busyLabel="Carregando o transcript…" onAction={load}>
         Ver transcript
-      </button>
+      </ActionButton>
     );
   }
   if (error) return <div className="error-box">{error}</div>;
@@ -190,9 +194,13 @@ export function Timeline({ comments, events, executions }: { comments: Comment[]
       key: 'c' + c.id,
       node: (
         <div className="tl-item">
-          <span className={'avatar ' + (c.author === 'claude' ? 'claude' : 'user')} style={{ marginLeft: 0 }}>
-            {c.author === 'claude' ? 'C' : c.author === 'user' ? 'V' : 'S'}
-          </span>
+          {c.author === 'system' ? (
+            <span className="avatar user" style={{ marginLeft: 0 }}>
+              S
+            </span>
+          ) : (
+            <OwnerAvatar owner={c.author} label={AUTHOR[c.author]} style={{ marginLeft: 0 }} />
+          )}
           <div className="tl-body">
             <div className="tl-head">
               <strong>{AUTHOR[c.author]}</strong>
