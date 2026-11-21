@@ -180,6 +180,47 @@ export function isEffortLevel(v: unknown): v is EffortLevel {
   return typeof v === 'string' && (EFFORT_LEVELS as string[]).includes(v);
 }
 
+/**
+ * The command-line agent a run drives (D92). Claude Code is the default and the only one with the
+ * Board's full feature set; Gemini CLI runs the same cards with Google's models.
+ */
+export type AgentId = 'claude' | 'gemini';
+export const AGENTS: AgentId[] = ['claude', 'gemini'];
+export const AGENT_LABELS: Record<AgentId, string> = {
+  claude: 'Claude Code',
+  gemini: 'Gemini CLI',
+};
+
+export function isAgentId(v: unknown): v is AgentId {
+  return typeof v === 'string' && (AGENTS as string[]).includes(v);
+}
+
+export function agentLabel(id: string | null | undefined): string {
+  return AGENT_LABELS[(id as AgentId) ?? 'claude'] ?? id ?? AGENT_LABELS.claude;
+}
+
+/** Gemini CLI models offered on the card and in the settings; any other id is also accepted. */
+export const GEMINI_MODEL_OPTIONS: { id: string; label: string }[] = [
+  { id: 'gemini-3-pro-preview', label: 'Gemini 3 Pro (preview)' },
+  { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro' },
+  { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash' },
+];
+
+/** Model options of an agent. */
+export function modelOptionsFor(agent: AgentId): { id: string; label: string }[] {
+  return agent === 'gemini' ? GEMINI_MODEL_OPTIONS : MODEL_OPTIONS;
+}
+
+/**
+ * Whether a model id belongs to an agent's family. A card switched from Claude Code to Gemini CLI may
+ * still carry `claude-opus-5-5`: that model is not passed to Gemini (and the reverse).
+ */
+export function modelFitsAgent(model: string, agent: AgentId): boolean {
+  const claudeLike = /^(claude|opus|sonnet|haiku|fable)\b/i.test(model);
+  const geminiLike = /^gemini/i.test(model);
+  return agent === 'gemini' ? !claudeLike : !geminiLike;
+}
+
 /** Model ids and aliases are one token (`claude-opus-5-5`, `opus`, `claude-sonnet-5-5[1m]`). */
 export function isValidModelId(v: unknown): v is string {
   return typeof v === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:\-[\]/@]{0,99}$/.test(v);
@@ -252,7 +293,10 @@ export interface Card {
   model: string | null;
   /** Effort for this card's runs; null = the default in the settings. */
   effort: EffortLevel | null;
+  /** Agent for this card's runs; null = the default in the settings (D92). */
+  agent: AgentId | null;
   dangerousAllowed: boolean;
+  /** Session of the card's last run, in the agent that ran it (Claude Code or Gemini CLI). */
   claudeSessionId: string | null;
   /** Short name Claude gave the task on its first run; also the Claude Code session name. */
   sessionName: string | null;
@@ -335,6 +379,8 @@ export interface Execution {
   /** Model and effort the run was started with (null = Claude Code's own default, or a run from before migration 6). */
   model: string | null;
   effort: string | null;
+  /** Agent the run drove; null = a run from before migration 15, always Claude Code. */
+  agent: AgentId | null;
 }
 
 export interface BoardEvent {

@@ -48,6 +48,17 @@ export async function runDoctor(config: Config, opts: { checkPort?: boolean } = 
     detail: claude.ok ? `${config.claudeBin}: ${claude.out.split('\n')[0]}` : `não achei "${config.claudeBin}": ${claude.out}`,
   });
 
+  // Gemini CLI (D92): required only when it is the default agent; otherwise a card that picks it fails alone.
+  const gemini = run(config.geminiBin, [...config.geminiArgsPrefix, '--version']);
+  checks.push({
+    name: 'Gemini CLI no PATH',
+    ok: gemini.ok,
+    required: config.defaultAgent === 'gemini',
+    detail: gemini.ok
+      ? `${config.geminiBin}: ${gemini.out.split('\n')[0]}`
+      : `não achei "${config.geminiBin}" (só faz falta para cards com o agente Gemini CLI; instale com npm i -g @google/gemini-cli)`,
+  });
+
   const home = claudeHomeDir(config);
   const projects = path.join(home, 'projects');
   const history = path.join(home, 'history.jsonl');

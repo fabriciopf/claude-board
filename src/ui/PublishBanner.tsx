@@ -4,12 +4,9 @@ import { api } from './api';
 import type { PublishEntry, PublishState } from '../shared/domain';
 import { NOTICE_CLASS, type NoticeLevel } from './notices';
 
-const STATUS_TEXT: Record<PublishEntry['status'], string> = {
-  pending: 'na fila',
-  publishing: 'publicando',
-  published: 'publicada',
-  failed: 'falhou',
-};
+import { t } from './i18n';
+
+const statusText = (s: PublishEntry['status']) => t(`app.publish.status.${s}`);
 
 /** Whether the publication strip has anything to say: a publication under way, entries waiting or failed, or the runner held by one. */
 export function publishVisible(publish: PublishState | null, held: boolean): boolean {
@@ -69,15 +66,15 @@ export function PublishBanner({
   const busy = held || (!!publish && publish.phase !== 'idle');
   const failed = entries.filter((e) => e.status === 'failed').length;
   const level = publishLevel(publish, held);
-  const label = busy ? 'Publicando o Board' : pending ? `Publicação pendente (${pending})` : `Publicação falhou (${failed})`;
-  const runningText = running === 1 ? 'A execução em curso continua' : `As ${running} execuções em curso continuam`;
+  const label = busy ? t('app.publish.busy') : pending ? t('app.publish.pending', { n: pending }) : t('app.publish.failed', { n: failed });
+  const runningText = running === 1 ? t('app.publish.runningOne') : t('app.publish.runningMany', { n: running });
   const explanation = busy
     ? running === 0
-      ? 'o servidor reinicia em seguida e a página volta sozinha.'
-      : `o servidor reinicia em seguida e a página volta sozinha. ${runningText}; nenhuma nova começa até lá.`
+      ? t('app.publish.restart')
+      : t('app.publish.restartRunning', { running: runningText })
     : pending
-      ? 'melhorias do próprio Board entregues e ainda não publicadas no Board em uso.'
-      : 'clique para ver o erro e tentar de novo.';
+      ? t('app.publish.pendingExplain')
+      : t('app.publish.failedExplain');
 
   const act = async (fn: () => Promise<unknown>, ok: string) => {
     try {
@@ -96,7 +93,7 @@ export function PublishBanner({
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
         aria-haspopup="dialog"
-        title={open ? 'Fechar os detalhes da publicação' : 'Ver o que está sendo publicado'}
+        title={open ? t('app.publish.closeDetailsTitle') : t('app.publish.seeDetailsTitle')}
       >
         <span className="publish-banner-text">
           {busy && <span className="spinner" />}
@@ -104,10 +101,10 @@ export function PublishBanner({
             <strong>{label}:</strong> {explanation}
           </span>
         </span>
-        <span className="publish-banner-toggle">{open ? 'Fechar ▾' : 'Detalhes ▴'}</span>
+        <span className="publish-banner-toggle">{open ? t('app.publish.close') : t('app.publish.details')}</span>
       </button>
       {open && (
-        <div className="publish-pop" role="dialog" aria-label="Publicação do Board">
+        <div className="publish-pop" role="dialog" aria-label={t('app.publish.dialog')}>
           {publish?.detail && <p className="publish-detail">{publish.detail}</p>}
           {entries.length > 0 ? (
             <ul className="publish-list">
@@ -117,14 +114,14 @@ export function PublishBanner({
                     #{e.cardId} {e.cardTitle}
                   </button>
                   <span className="muted small">
-                    <code>{e.branch}</code> · {STATUS_TEXT[e.status]}
-                    {e.kind === 'ui' ? ' · só tela' : e.kind === 'server' ? ' · reinicia o servidor' : ''}
+                    <code>{e.branch}</code> · {statusText(e.status)}
+                    {e.kind === 'ui' ? ` · ${t('app.publish.uiOnly')}` : e.kind === 'server' ? ` · ${t('app.publish.restarts')}` : ''}
                   </span>
                   {e.status === 'failed' && (
                     <>
                       {e.errorMd && <pre className="publish-error">{e.errorMd}</pre>}
-                      <ActionButton className="btn small" busyLabel="Recolocando na fila…" onAction={() => act(() => api.post(`/api/publish/${e.id}/retry`), 'Publicação de volta na fila')}>
-                        Tentar de novo
+                      <ActionButton className="btn small" busyLabel={t('app.publish.requeueing')} onAction={() => act(() => api.post(`/api/publish/${e.id}/retry`), t('app.publish.requeued'))}>
+                        {t('app.publish.retry')}
                       </ActionButton>
                     </>
                   )}
@@ -132,14 +129,14 @@ export function PublishBanner({
               ))}
             </ul>
           ) : (
-            !publish?.detail && <p className="muted small">Nenhuma branch na fila de publicação.</p>
+            !publish?.detail && <p className="muted small">{t('app.publish.empty')}</p>
           )}
           {(pending > 0 || publish?.phase === 'waiting') && (
             <div className="publish-now">
-              <ActionButton className="btn small primary" disabled={busy} busyLabel="Iniciando…" onAction={() => act(() => api.post('/api/publish/now'), 'Publicação iniciada')}>
-                {busy ? 'Publicando…' : 'Publicar agora'}
+              <ActionButton className="btn small primary" disabled={busy} busyLabel={t('app.publish.starting')} onAction={() => act(() => api.post('/api/publish/now'), t('app.publish.started'))}>
+                {busy ? t('app.publish.publishing') : t('app.publish.now')}
               </ActionButton>
-              <span className="muted small">{running > 0 ? `${runningText} durante o reinício.` : 'Nenhuma execução em curso.'}</span>
+              <span className="muted small">{running > 0 ? t('app.publish.duringRestart', { running: runningText }) : t('app.publish.noneRunning')}</span>
             </div>
           )}
         </div>

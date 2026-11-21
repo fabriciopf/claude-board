@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { ActionButton } from './ActionButton';
 import { api, fmtDate } from './api';
 import type { SelfUpdateState } from '../shared/domain';
+import { t } from './i18n';
 import { NOTICE_CLASS } from './notices';
 import { commitUrl, selfUpdateView } from './self-update-view';
 
@@ -67,7 +68,7 @@ export function SelfUpdateBanner({
   const apply = async () => {
     try {
       await api.post('/api/self-update/apply');
-      notify('Atualização iniciada');
+      notify(t('app.selfUpdate.started'));
       setOpen(false);
       await reload();
     } catch (err) {
@@ -93,24 +94,25 @@ export function SelfUpdateBanner({
         {view.kind !== 'busy' && (
           <span className="update-actions">
             <button className="btn small" onClick={() => setOpen((v) => !v)} aria-expanded={open} aria-haspopup="dialog">
-              {view.kind === 'failed' ? 'Ver o erro' : 'Novidades'}
+              {view.kind === 'failed' ? t('app.selfUpdate.seeError') : t('app.selfUpdate.news')}
             </button>
-            <ActionButton className="btn small primary" busyLabel="Iniciando…" onAction={apply}>
-              {view.kind === 'failed' ? 'Tentar de novo' : 'Atualizar'}
+            <ActionButton className="btn small primary" busyLabel={t('app.publish.starting')} onAction={apply}>
+              {view.kind === 'failed' ? t('app.publish.retry') : t('app.selfUpdate.update')}
             </ActionButton>
             {view.kind === 'available' && (
-              <button className="btn small" onClick={later} title="Esconde o aviso até sair outra versão">
-                Depois
+              <button className="btn small" onClick={later} title={t('app.selfUpdate.laterTitle')}>
+                {t('app.update.later')}
               </button>
             )}
           </span>
         )}
       </div>
       {open && view.kind !== 'busy' && (
-        <div className="publish-pop" role="dialog" aria-label="Versão nova do Board">
+        <div className="publish-pop" role="dialog" aria-label={t('app.selfUpdate.availableLabel')}>
           {state.failure && state.failure.sha === state.remoteSha && <pre className="publish-error">{state.failure.message}</pre>}
           <p className="publish-detail">
-            {state.behind === 1 ? '1 mudança' : `${state.behind} mudanças`} em <code>{state.source}</code>
+            {state.behind === 1 ? t('app.selfUpdate.changeOne') : t('app.selfUpdate.changeMany', { n: state.behind })}{' '}
+            {t('app.selfUpdate.in', { source: '' }).trim()} <code>{state.source}</code>
           </p>
           <ul className="self-update-commits">
             {state.commits.map((c) => {
@@ -132,19 +134,19 @@ export function SelfUpdateBanner({
               );
             })}
           </ul>
-          {state.behind > state.commits.length && <p className="muted small">e mais {state.behind - state.commits.length} (merges e anteriores).</p>}
+          {state.behind > state.commits.length && <p className="muted small">{t('app.selfUpdate.more', { n: state.behind - state.commits.length })}</p>}
           {state.sourceUrl && (
             <p className="small">
               <a href={state.sourceUrl} target="_blank" rel="noreferrer">
-                Ver todas no GitHub
+                {t('app.selfUpdate.seeAll')}
               </a>
             </p>
           )}
           <p className="muted small">
             {state.ahead > 0
-              ? `Este Board tem ${state.ahead} mudança(s) que o remoto não tem: elas ficam, e os testes rodam antes de aplicar.`
-              : 'O Board compila a versão nova, aplica e reinicia se o servidor mudou.'}{' '}
-            {running > 0 ? (running === 1 ? 'A execução em curso continua.' : `As ${running} execuções em curso continuam.`) : ''}
+              ? t('app.selfUpdate.ahead', { n: state.ahead })
+              : t('app.selfUpdate.compiles')}{' '}
+            {running > 0 ? `${running === 1 ? t('app.publish.runningOne') : t('app.publish.runningMany', { n: running })}.` : ''}
           </p>
         </div>
       )}

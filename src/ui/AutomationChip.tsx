@@ -1,14 +1,16 @@
 import { useEffect, useState } from 'react';
-import { automationWhen, describeTrigger, nextAutomationRun, type Automation } from '../shared/automation';
+import { nextAutomationRun, type Automation } from '../shared/automation';
 import { api } from './api';
+import { automationWhenText, triggerText } from './automation-labels';
 import { AutomationIcon } from './HeaderIcons';
+import { locale, t } from './i18n';
 
 interface ListResponse {
   automations: Automation[];
   checkingId: number | null;
 }
 
-const clock = (ms: number) => new Date(ms).toLocaleString('pt-BR', { weekday: 'short', hour: '2-digit', minute: '2-digit' });
+const clock = (ms: number) => new Date(ms).toLocaleString(locale(), { weekday: 'short', hour: '2-digit', minute: '2-digit' });
 
 /**
  * The next automation to run and how long until it does (card #171, D78). Reloads when the
@@ -32,8 +34,8 @@ export function AutomationChip({ tick, onOpen }: { tick: number; onOpen: () => v
   }, [tick]);
 
   useEffect(() => {
-    const t = window.setInterval(() => setNow(Date.now()), 30000);
-    return () => window.clearInterval(t);
+    const timer = window.setInterval(() => setNow(Date.now()), 30000);
+    return () => window.clearInterval(timer);
   }, []);
 
   if (!list) return null;
@@ -41,16 +43,21 @@ export function AutomationChip({ tick, onOpen }: { tick: number; onOpen: () => v
   if (!next) return null;
 
   const { automation: a, at, running } = next;
+  const trigger = triggerText(a.trigger);
   return (
     <button
       type="button"
       className={'counter automation-chip' + (running ? ' running' : '')}
       onClick={onOpen}
-      title={`Próxima automação: ${a.name} (${describeTrigger(a.trigger)})${running ? ', rodando agora' : `, ${clock(at)}`}. Clique para abrir Automações.`}
+      title={
+        running
+          ? t('automations.chip.titleRunning', { name: a.name, trigger })
+          : t('automations.chip.titleAt', { name: a.name, trigger, at: clock(at) })
+      }
     >
       {running ? <span className="spinner" /> : <AutomationIcon />}
       <span className="agenda-title">{a.name}</span>
-      <strong>{automationWhen(at, running, now)}</strong>
+      <strong>{automationWhenText(at, running, now)}</strong>
     </button>
   );
 }

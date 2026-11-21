@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from './api';
 import { uiAssets, uiChanged, type UiBuildInfo } from '../shared/ui-build';
+import { t } from './i18n';
 
 /**
  * When this page was loaded and which build it runs (D51). The Vite dev server loads `/src/main.tsx`,
@@ -53,7 +54,7 @@ export function useUiUpdate(): { update: UiBuildInfo | null; check: () => void; 
 
   // The tab title tells it too, for a Board left in a background tab.
   useEffect(() => {
-    document.title = update ? `Atualizado · ${BASE_TITLE}` : BASE_TITLE;
+    document.title = update ? t('app.update.tabTitle', { title: BASE_TITLE }) : BASE_TITLE;
   }, [update]);
 
   const dismiss = useCallback(() => {
@@ -71,11 +72,11 @@ export function UpdateBanner({ update, dismiss, onOpen }: { update: UiBuildInfo;
   return (
     <div className="banner info update-banner">
       <span>
-        <strong>O Board foi atualizado.</strong> Recarregue a página para usar a versão nova.
+        <strong>{t('app.update.heading')}</strong> {t('app.update.body')}
         {cards.length > 0 && (
           <>
             {' '}
-            Entrou:{' '}
+            {t('app.update.included')}{' '}
             {cards.map((c, i) => (
               <span key={c.cardId}>
                 {i > 0 && ', '}
@@ -90,10 +91,10 @@ export function UpdateBanner({ update, dismiss, onOpen }: { update: UiBuildInfo;
       </span>
       <span className="update-actions">
         <button className="btn small primary" onClick={() => window.location.reload()}>
-          Recarregar
+          {t('app.update.reload')}
         </button>
-        <button className="btn small" onClick={dismiss} title="Esconde o aviso até a próxima atualização">
-          Depois
+        <button className="btn small" onClick={dismiss} title={t('app.update.laterTitle')}>
+          {t('app.update.later')}
         </button>
       </span>
     </div>

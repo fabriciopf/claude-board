@@ -1,13 +1,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { HELP_KEY, HELP_STEPS, SHORTCUT_GROUPS, isHelpKey } from '../src/ui/help';
+import { HELP_KEY, helpSteps, isHelpKey, shortcutGroups } from '../src/ui/help';
 
 // Card #181 (D88): the shortcuts left the filter bar for the header's help panel, next to the instructions.
 
 const UI_DIR = path.join(__dirname, '..', 'src', 'ui');
 const read = (file: string) => fs.readFileSync(path.join(UI_DIR, file), 'utf8');
-const allKeys = SHORTCUT_GROUPS.flatMap((g) => g.items.flatMap((i) => i.keys));
+const allKeys = shortcutGroups().flatMap((g) => g.items.flatMap((i) => i.keys));
 
 describe('help panel content', () => {
   it('lists every shortcut the board and the card modal handle', () => {
@@ -27,13 +27,13 @@ describe('help panel content', () => {
   });
 
   it('marks only Ctrl+Enter as a combination', () => {
-    const combos = SHORTCUT_GROUPS.flatMap((g) => g.items).filter((i) => i.combo);
+    const combos = shortcutGroups().flatMap((g) => g.items).filter((i) => i.combo);
     expect(combos.map((i) => i.keys.join('+'))).toEqual(['Ctrl+Enter']);
   });
 
   it('walks a card through the columns, ending with only the user approving', () => {
-    expect(HELP_STEPS.length).toBeGreaterThanOrEqual(4);
-    expect(HELP_STEPS.at(-1)).toMatch(/Só você/);
+    expect(helpSteps().length).toBeGreaterThanOrEqual(4);
+    expect(helpSteps().at(-1)).toMatch(/Só você/);
   });
 });
 

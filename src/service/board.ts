@@ -3,8 +3,11 @@ import path from 'node:path';
 import { nowIso, tx, type Db } from '../db/index.js';
 import type { EventBus } from '../server/bus.js';
 import {
+  AGENTS,
   EFFORT_LEVELS,
   NEWEST_FIRST_STATUSES,
+  isAgentId,
+  type AgentId,
   REOPEN_ON_COMMENT,
   STATUSES,
   isEffortLevel,
@@ -75,6 +78,7 @@ export function rowToCard(r: Row, labelIds: number[] = [], repositoryIds: number
     maxTurns: r.max_turns ?? null,
     model: r.model ?? null,
     effort: r.effort ?? null,
+    agent: r.agent ?? null,
     dangerousAllowed: bool(r.dangerous_allowed),
     claudeSessionId: r.claude_session_id ?? null,
     nextPrompt: r.next_prompt ?? null,
@@ -117,6 +121,7 @@ export function rowToExecution(r: Row): Execution {
     cwd: r.cwd ?? null,
     model: r.model ?? null,
     effort: r.effort ?? null,
+    agent: r.agent ?? null,
   };
 }
 
@@ -149,6 +154,13 @@ function checkModel(v: string | null | undefined): string | null {
   return model;
 }
 
+/** Card agent: claude or gemini, or null/'' for the settings default (D92). */
+function checkAgent(v: string | null | undefined): AgentId | null {
+  if (!v) return null;
+  if (!isAgentId(v)) throw new RuleError('invalid_agent', `Agente é ${AGENTS.join(' ou ')}.`, 400);
+  return v;
+}
+
 /** Card effort: one of Claude Code's levels, or null/'' for the settings default. */
 function checkEffort(v: string | null | undefined): EffortLevel | null {
   if (!v) return null;
@@ -170,6 +182,7 @@ export interface CardInput {
   maxTurns?: number | null;
   model?: string | null;
   effort?: EffortLevel | null;
+  agent?: AgentId | null;
   labelIds?: number[];
   repositoryIds?: number[];
   links?: CardLink[];
@@ -193,6 +206,7 @@ export interface CardPatch {
   maxTurns?: number | null;
   model?: string | null;
   effort?: EffortLevel | null;
+  agent?: AgentId | null;
   dangerousAllowed?: boolean;
   suggestedStatus?: Status | null;
   suggestionConfidence?: number | null;
@@ -212,6 +226,7 @@ const PATCH_COLUMNS: Record<keyof CardPatch, string> = {
   maxTurns: 'max_turns',
   model: 'model',
   effort: 'effort',
+  agent: 'agent',
   dangerousAllowed: 'dangerous_allowed',
   suggestedStatus: 'suggested_status',
   suggestionConfidence: 'suggestion_confidence',
@@ -653,15 +668,15 @@ export class BoardService {
       throw new RuleError('invalid_priority', 'Prioridade vai de 1 (alta) a 4 (baixa).', 400);
     }
     this.assertApp(input.appId);
-    input = { ...input, model: checkModel(input.model), effort: checkEffort(input.effort) };
+    input = { ...input, model: checkModel(input.model), effort: checkEffort(input.effort), agent: checkAgent(input.agent) };
     const now = nowIso();
     const r = this.db
       .prepare(
         `INSERT INTO cards (title, description_md, status, position, owner, app_id, priority, due_date, origin,
-           repo_path, base_branch, permission_mode, max_turns, model, effort, links_json,
+           repo_path, base_branch, permission_mode, max_turns, model, effort, agent, links_json,
            suggested_status, suggestion_confidence, suggestion_evidence, created_at, updated_at, completed_at,
            parent_id, dangerous_allowed, automation_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         title,
@@ -679,6 +694,7 @@ export class BoardService {
         input.maxTurns ?? null,
         input.model ?? null,
         input.effort ?? null,
+        input.agent ?? null,
         JSON.stringify(input.links ?? []),
         input.suggestedStatus ?? null,
         input.suggestionConfidence ?? null,
@@ -734,6 +750,7 @@ export class BoardService {
             maxTurns: parent.maxTurns,
             model: parent.model,
             effort: parent.effort,
+            agent: parent.agent,
             labelIds: parent.labelIds,
             repositoryIds: parent.repositoryIds,
             links: parent.links,
@@ -793,6 +810,7 @@ export class BoardService {
       if (key === 'appId') this.assertApp(value as number | null);
       if (key === 'model') value = checkModel(value as string | null);
       if (key === 'effort') value = checkEffort(value as string | null);
+      if (key === 'agent') value = checkAgent(value as string | null);
       if (key === 'dangerousAllowed') {
         if (actor !== 'user') throw new RuleError('target_not_allowed', 'Só o usuário libera o modo sem permissões.', 403);
         value = value ? 1 : 0;

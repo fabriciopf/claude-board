@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { AUTO_CONCURRENCY, SELF_UPDATE_MODES, UNLIMITED_CONCURRENCY, DEFAULT_RUN_EFFORT, DEFAULT_RUN_MODEL, MAX_CONCURRENCY, isEffortLevel, isValidModelId, type ConcurrencySetting, type SelfUpdateMode } from './shared/domain.js';
+import { AUTO_CONCURRENCY, SELF_UPDATE_MODES, UNLIMITED_CONCURRENCY, DEFAULT_RUN_EFFORT, DEFAULT_RUN_MODEL, MAX_CONCURRENCY, isAgentId, isEffortLevel, isValidModelId, type AgentId, type ConcurrencySetting, type SelfUpdateMode } from './shared/domain.js';
 
 export interface Config {
   port: number;
@@ -9,6 +9,16 @@ export interface Config {
   claudeBin: string;
   /** Extra arguments placed before every Claude Code argument (used by the fake claude in tests). */
   claudeArgsPrefix: string[];
+  /** Agent of every run whose card does not choose one (D92). */
+  defaultAgent: AgentId;
+  /** Gemini CLI executable. */
+  geminiBin: string;
+  /** Extra arguments placed before every Gemini CLI argument (used by the fake gemini in tests). */
+  geminiArgsPrefix: string[];
+  /** Model of every Gemini run whose card does not choose one; '' = Gemini CLI's own default. */
+  geminiModel: string;
+  /** --approval-mode of Gemini runs: yolo (no confirmation, as a headless run needs), auto_edit, default or plan. */
+  geminiApprovalMode: 'yolo' | 'auto_edit' | 'default' | 'plan';
   claudeHome: string;
   /** VS Code workspace root: runs start here to load the same CLAUDE.md, skills, settings and memory. */
   workspaceDir: string | null;
@@ -70,6 +80,11 @@ export const DEFAULT_CONFIG: Config = {
   host: '127.0.0.1',
   claudeBin: 'claude',
   claudeArgsPrefix: [],
+  defaultAgent: 'claude',
+  geminiBin: 'gemini',
+  geminiArgsPrefix: [],
+  geminiModel: '',
+  geminiApprovalMode: 'yolo',
   claudeHome: '~/.claude',
   workspaceDir: null,
   heartbeatSeconds: 30,
@@ -194,6 +209,11 @@ export function saveConfig(current: Config, patch: Partial<Config>): Config {
   if (next.defaultModel && !isValidModelId(next.defaultModel)) throw new Error(`Modelo inválido: ${next.defaultModel}`);
   next.defaultEffort = String(next.defaultEffort ?? '').trim();
   if (next.defaultEffort && !isEffortLevel(next.defaultEffort)) throw new Error('Effort: use low, medium, high, xhigh ou max.');
+  if (!isAgentId(next.defaultAgent)) throw new Error('Agente padrão: use claude ou gemini.');
+  next.geminiBin = String(next.geminiBin ?? '').trim() || DEFAULT_CONFIG.geminiBin;
+  next.geminiModel = String(next.geminiModel ?? '').trim();
+  if (next.geminiModel && !isValidModelId(next.geminiModel)) throw new Error(`Modelo do Gemini inválido: ${next.geminiModel}`);
+  if (!['yolo', 'auto_edit', 'default', 'plan'].includes(next.geminiApprovalMode)) throw new Error('Aprovação do Gemini: use yolo, auto_edit, default ou plan.');
   if (!['', 'window', 'background'].includes(next.publishRestartMode)) throw new Error('publishRestartMode: use "", "window" ou "background".');
   next.publishBranch = String(next.publishBranch ?? '').trim() || DEFAULT_CONFIG.publishBranch;
   next.runnerEntrypoint = String(next.runnerEntrypoint ?? '').trim();

@@ -129,20 +129,45 @@ pre {
 
 /* ---------- header ---------- */
 
+/*
+ * Header on one line (comment on card #186, same rule as the filter bar, D91): the logo and the pending tab keep
+ * their size, the counters strip takes the rest. Inside it, the agenda and automation chips (--chip-min) and the
+ * runner pill (--usage-min) shrink to a floor with an ellipsis; below that the strip scrolls sideways. It never
+ * wraps. Under 1100 px the name next to the logo goes, as it already did on the phone.
+ */
 .header {
+  --header-h: 28px;
+  --chip-min: 160px;
+  --usage-min: 320px;
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 8px 16px;
+  gap: 8px;
+  padding: 6px 16px;
   background: var(--surface);
   border-bottom: 1px solid var(--border);
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
 }
 
 .header-start {
   display: flex;
   align-items: center;
   gap: 6px;
+  flex: none;
+}
+
+.header > .tabs {
+  flex: none;
+}
+
+.header .tab {
+  padding: 4px 8px;
+  font-size: 12.5px;
+}
+
+@media (max-width: 1100px) {
+  .header .brand-name {
+    display: none;
+  }
 }
 
 /* The logo is a button that goes to the board (D71): no button chrome. */
@@ -232,6 +257,33 @@ pre {
 
 .main-menu-item.current svg {
   color: var(--accent);
+}
+
+/* ---------- language menu (card #184, D90) ---------- */
+
+.lang-menu-button.active {
+  background: var(--surface-2);
+  border-color: var(--text-muted);
+}
+
+/* Fixed, not absolute: on the phone the header row scrolls sideways and would clip it. */
+.lang-menu-list {
+  position: fixed;
+  z-index: 60;
+  min-width: 170px;
+  padding: 4px;
+  border-radius: 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: 0 8px 24px rgba(9, 30, 66, 0.18), var(--shadow);
+  display: flex;
+  flex-direction: column;
+}
+
+.lang-menu-check {
+  display: inline-flex;
+  width: 16px;
+  flex: none;
 }
 
 /* ---------- help button and panel (card #181, D88) ---------- */
@@ -380,10 +432,96 @@ pre {
 
 .counters {
   display: flex;
-  gap: 8px;
-  margin-left: auto;
+  gap: 6px;
+  flex: 1 1 auto;
+  min-width: 0;
   align-items: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  /* Room for focus rings, which the scroll box would clip. */
+  padding: 2px 0;
+  font-size: 12.5px;
+}
+
+/* Pushed to the right with an auto margin, not justify-content: an overflowing strip still scrolls back to its start. */
+.counters > :first-child {
+  margin-left: auto;
+}
+
+.counters > * {
+  flex: none;
+}
+
+.counters > .counter {
+  height: var(--header-h);
+  padding: 0 9px;
+}
+
+.counters > .btn {
+  height: var(--header-h);
+  min-width: var(--header-h);
+  font-size: 12.5px;
+}
+
+.counters > .agenda-chip,
+.counters > .automation-chip {
+  flex: 0 1 auto;
+  min-width: var(--chip-min);
+}
+
+/* The five icons (pause, sound, theme, language, help) sit after the strip and never scroll away, like the menu, the logo and the pending tab (comment on card #186). */
+.header-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex: none;
+}
+
+.header-actions > .btn,
+.header-actions > .lang-menu > .btn {
+  height: var(--header-h);
+  min-width: var(--header-h);
+}
+
+.counters .agenda-title {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.counters > .counter svg,
+.counters > .counter .spinner,
+.counters > .counter > strong {
+  flex: none;
+}
+
+/* The runner pill shrinks too, down to "rodando x de y | 5 horas: n% ▬": only the "reset em …" note gives way, with an ellipsis. */
+.counters > .runner-usage {
+  flex: 0 1 auto;
+  min-width: var(--usage-min);
+}
+
+.counters .runner-part,
+.counters .counter-sep,
+.counters .usage-bar {
+  flex: none;
+}
+
+.counters .usage-part,
+.counters .usage-viewport,
+.counters .usage-row {
+  min-width: 0;
+}
+
+.counters .usage-part {
+  flex: 0 1 auto;
+  overflow: hidden;
+}
+
+.counters .usage-row > span:last-child:not(.usage-bar) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .counter {
@@ -545,16 +683,73 @@ pre {
   color: var(--danger);
 }
 
+/*
+ * Filters on one line (card #186): every control starts at its natural width and shrinks down to a floor
+ * (--filter-min, --sort-min, --search-min). Below the sum of the floors (about 900 px of window) the row
+ * scrolls sideways; it never wraps to a second line.
+ */
 .toolbar {
+  --filter-min: 76px;
+  --filter-max: 170px;
+  --sort-min: 112px;
+  --search-min: 110px;
+  --filter-h: 28px;
   display: flex;
-  gap: 8px;
-  padding: 8px 16px;
+  gap: 6px;
+  padding: 6px 16px;
   align-items: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  font-size: 12.5px;
+}
+
+.toolbar input[type='search'],
+.toolbar select,
+.toolbar select.input {
+  height: var(--filter-h);
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: 6px;
+  font-size: 12.5px;
+  text-overflow: ellipsis;
 }
 
 .toolbar input[type='search'] {
-  width: 220px;
+  /* Shrinks first, so the selects keep their text as long as there is room. */
+  flex: 1 6 200px;
+  min-width: var(--search-min);
+  max-width: 240px;
+}
+
+/* field-sizing: a closed select is as wide as the option showing ("Projeto"), not as its longest option (Chromium; elsewhere the floor and the cap still hold). */
+.toolbar > select,
+.toolbar > select.input {
+  field-sizing: content;
+  flex: 0 1 auto;
+  min-width: var(--filter-min);
+  max-width: var(--filter-max);
+}
+
+/* An unset filter shows only its field name and never cuts it; only a chosen value shrinks to the floor, with an ellipsis (the title keeps the field name). */
+.toolbar > select.input:not(.filter-on) {
+  min-width: auto;
+}
+
+.toolbar .btn.small,
+.toolbar .btn.link {
+  flex: none;
+  height: var(--filter-h);
+  font-size: 12.5px;
+}
+
+/* The sort direction ("Mais distante primeiro") shrinks too; its aria-label keeps the whole text. */
+.toolbar .sort-control .btn.small {
+  flex: 0 1 auto;
+  min-width: var(--filter-min);
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* The search with text, or a filter with an option chosen, gets orange text and border, no background (card #172); the open list keeps the normal color. */
@@ -569,12 +764,16 @@ pre {
   font-weight: normal;
 }
 
-/* Sort select and its direction button stay together when the toolbar wraps (card #152). */
+/* The toolbar no longer wraps (card #186), so the sort select and its direction button are plain toolbar items, and the select can shrink to its floor. */
 .sort-control {
-  display: inline-flex;
-  gap: 4px;
-  align-items: center;
-  flex: none;
+  display: contents;
+}
+
+.toolbar .sort-control select {
+  field-sizing: content;
+  flex: 0 1 auto;
+  min-width: var(--sort-min);
+  max-width: 200px;
 }
 
 .input,
@@ -773,7 +972,9 @@ textarea.input {
   line-height: 1;
 }
 
-.column.collapsed .column-title {
+/* The count turns with the name (card #187): a filtered "73/116" read across overflowed the 44 px strip. */
+.column.collapsed .column-title,
+.column.collapsed .column-count {
   flex: none;
   writing-mode: vertical-rl;
   white-space: nowrap;
@@ -2166,7 +2367,7 @@ html[data-busy] body::before {
      instead of four wrapped lines over the board. */
   .header {
     display: grid;
-    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-columns: auto minmax(0, 1fr) auto;
     align-items: center;
     gap: 6px 0;
     padding: 6px 0 8px;
@@ -2208,12 +2409,18 @@ html[data-busy] body::before {
 
   .header > .counters {
     grid-column: 1 / -1;
-    margin-left: 0;
   }
 
-  .counter,
-  .counters > .btn {
-    flex: none;
+  /* The icons stay on the first line, at the right of the logo and the pending tab. */
+  .header > .header-actions {
+    grid-column: 3;
+    grid-row: 1;
+    padding-right: 12px;
+  }
+
+  /* On the phone the strip starts at the left edge, under the logo. */
+  .counters > :first-child {
+    margin-left: 0;
   }
 
   /* More specific than the base rule below, which comes later in the file. */
@@ -2239,24 +2446,14 @@ html[data-busy] body::before {
     margin: 0;
   }
 
-  /* Filters: search on top, the four selects side by side in one strip. */
+  /* Filters: the same single line as on desktop (card #186), at the floor widths, swiped sideways without a scrollbar. */
   .toolbar {
-    flex-wrap: nowrap;
-    overflow-x: auto;
     scrollbar-width: none;
-    padding: 8px 12px;
+    padding: 6px 12px;
   }
 
   .toolbar::-webkit-scrollbar {
     display: none;
-  }
-
-  .toolbar > * {
-    flex: none;
-  }
-
-  .toolbar input[type='search'] {
-    width: 150px;
   }
 
   /* Board: one column per screen, with the next one peeking, snapping as you swipe. */

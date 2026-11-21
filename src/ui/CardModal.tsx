@@ -1,11 +1,21 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { EFFORT_LABELS, EFFORT_LEVELS, MODEL_OPTIONS, PERMISSION_MODES, REOPEN_ON_COMMENT, STATUS_LABELS, STATUS_SHORT_LABELS, effortLabel, modelLabel, type App, type Card, type Label, type LinkKind, type Repository } from '../shared/domain';
+import { AGENTS, AGENT_LABELS, EFFORT_LABELS, EFFORT_LEVELS, PERMISSION_MODES, REOPEN_ON_COMMENT, STATUSES, agentLabel, effortLabel, isAgentId, modelFitsAgent, modelLabel, modelOptionsFor, type AgentId, type App, type Card, type Label, type LinkKind, type Repository } from '../shared/domain';
 import { ActionButton, ActionGroup, useBusy } from './ActionButton';
 import { ApiError, api, fmtDate, useServerEvents, type CardDetailResponse } from './api';
 import { latestDelivery } from './delivery';
+import { statusLabel, statusShortLabel, t } from './i18n';
 import { renderMarkdown } from './markdown';
 import { useImagePaste } from './paste-image';
 import { Timeline } from './Timeline';
+
+/** Settings the modal names in the "padrão" option of its selects. */
+interface ConfigDefaults {
+  defaultModel?: string;
+  defaultEffort?: string;
+  defaultAgent?: string;
+  geminiModel?: string;
+  jiraBaseUrl?: string;
+}
 
 interface Props {
   cardId: number;
@@ -28,10 +38,10 @@ interface Props {
   settleMs?: number;
 }
 
-const LINK_KINDS: { value: LinkKind; label: string }[] = [
+const linkKinds = (): { value: LinkKind; label: string }[] => [
   { value: 'pr', label: 'PR' },
   { value: 'jira', label: 'Jira' },
-  { value: 'file', label: 'Arquivo' },
+  { value: 'file', label: t('card.linkFile') },
   { value: 'url', label: 'URL' },
 ];
 
@@ -45,8 +55,8 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
   const [settled, setSettled] = useState(settleMs <= 0);
   useEffect(() => {
     if (settleMs <= 0) return;
-    const t = window.setTimeout(() => setSettled(true), settleMs);
-    return () => window.clearTimeout(t);
+    const timer = window.setTimeout(() => setSettled(true), settleMs);
+    return () => window.clearTimeout(timer);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const [detail, setDetail] = useState<CardDetailResponse | null>(null);
   const [editingDesc, setEditingDesc] = useState(false);
@@ -71,11 +81,11 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
   const replyPaste = useImagePaste(setReply, pasteError);
   const adjustPaste = useImagePaste(setAdjust, pasteError);
   // Default model and effort from the settings, named in the "padrão" option of the card's selects.
-  const [defaults, setDefaults] = useState<{ defaultModel?: string; defaultEffort?: string; jiraBaseUrl?: string }>({});
+  const [defaults, setDefaults] = useState<ConfigDefaults>({});
 
   useEffect(() => {
     void api
-      .get<{ defaultModel?: string; defaultEffort?: string; jiraBaseUrl?: string }>('/api/config')
+      .get<ConfigDefaults>('/api/config')
       .then(setDefaults)
       .catch(() => undefined);
   }, []);
@@ -105,7 +115,7 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
 
   useServerEvents((msg) => {
     // A task moving changes the list of a split card; the card it came from changes a task's header.
-    const related = msg.cardId !== undefined && (msg.cardId === detail?.parent?.id || !!detail?.subtasks.some((t) => t.id === msg.cardId));
+    const related = msg.cardId !== undefined && (msg.cardId === detail?.parent?.id || !!detail?.subtasks.some((task) => task.id === msg.cardId));
     if (related && msg.type === 'card.changed') {
       void load();
       return;
@@ -158,15 +168,15 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
       notify(err instanceof ApiError ? err.message : String(err), true);
     }
   };
-  const approve = () => track('approve', () => leaveColumn(() => api.post(`/api/cards/${cardId}/approve`), 'Aprovado'));
-  const archive = () => leaveColumn(() => api.post(`/api/cards/${cardId}/archive`, { archived: true }), 'Arquivado');
+  const approve = () => track('approve', () => leaveColumn(() => api.post(`/api/cards/${cardId}/approve`), t('card.approved')));
+  const archive = () => leaveColumn(() => api.post(`/api/cards/${cardId}/archive`, { archived: true }), t('card.archived'));
 
   // Sending a comment or a reply, by Ctrl+Enter or by the button, lets go of the focus (card #176, D82):
   // the field or button keeps no caret or ring, and the modal's shortcuts (e, a, d) work again.
   const releaseFocus = () => (document.activeElement as HTMLElement | null)?.blur();
   const sendReply = (text: string) => {
     releaseFocus();
-    return track('reply', () => run(() => api.post(`/api/cards/${cardId}/reply`, { text }), 'Resposta enviada').then((ok) => ok && setReply('')));
+    return track('reply', () => run(() => api.post(`/api/cards/${cardId}/reply`, { text }), t('card.replySent')).then((ok) => ok && setReply('')));
   };
   const sendComment = () => {
     releaseFocus();
@@ -174,7 +184,7 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
   };
   const sendAdjust = () =>
     track('adjust', () =>
-      run(() => api.post(`/api/cards/${cardId}/adjust`, { text: adjust }), 'Ajustes enviados').then((ok) => {
+      run(() => api.post(`/api/cards/${cardId}/adjust`, { text: adjust }), t('card.adjustSent')).then((ok) => {
         if (!ok) return;
         setAdjust('');
         setShowAdjust(false);
@@ -211,17 +221,22 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
   if (!detail) {
     return (
       <div className="modal-backdrop" onClick={onClose}>
-        <div className="modal">Carregando…</div>
+        <div className="modal">{t('card.loading')}</div>
       </div>
     );
   }
 
   const { card, checklist, comments, executions, events, openQuestion, parent, subtasks } = detail;
-  const tasksDone = subtasks.filter((t) => t.status === 'done').length;
+  const tasksDone = subtasks.filter((task) => task.status === 'done').length;
   const running = executions.some((x) => x.status === 'running');
   const done = checklist.filter((i) => i.done).length;
   const workDir = card.worktreePath ?? executions.at(-1)?.cwd ?? null;
   const lastExec = executions.at(-1);
+  const defaultAgent: AgentId = isAgentId(defaults.defaultAgent) ? defaults.defaultAgent : 'claude';
+  // The agent of the next run, and the one that holds the session "Continuar no terminal" resumes.
+  const agent: AgentId = card.agent ?? defaultAgent;
+  const lastAgent: AgentId = lastExec ? (lastExec.agent ?? 'claude') : agent;
+  const modelOptions = modelOptionsFor(agent);
   const failed = card.status === 'waiting_user' && !openQuestion && lastExec && lastExec.status !== 'success' && lastExec.status !== 'waiting_user';
   const delivery = card.status === 'review' ? latestDelivery(comments) : null;
   // In review the description is closed by default, like "Pedido original" (card #96). Editing opens it.
@@ -230,14 +245,14 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
     <div className="md" onDoubleClick={() => setEditingDesc(true)} dangerouslySetInnerHTML={{ __html: renderMarkdown(card.descriptionMd) }} />
   ) : (
     <div className="md empty" onClick={() => setEditingDesc(true)}>
-      Sem descrição. Clique para escrever o que o Claude deve fazer (markdown; Ctrl+V cola uma imagem).
+      {t('card.noDescriptionClick')}
     </div>
   );
 
   const copy = async (text: string) => {
     try {
       await navigator.clipboard.writeText(text);
-      notify('Copiado: ' + text);
+      notify(t('card.copied', { text }));
     } catch {
       notify(text);
     }
@@ -246,17 +261,17 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
   return (
     <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className="modal" role="dialog" aria-modal="true" aria-label={card.title}>
-        <button className="btn link modal-close" onClick={onClose} aria-label="Fechar">
+        <button className="btn link modal-close" onClick={onClose} aria-label={t('card.close')}>
           ✕
         </button>
         <div className={'modal-grid' + (sideOpen ? '' : ' side-folded')}>
           <div>
             <div className="muted small">
-              #{card.id} · em <strong>{STATUS_LABELS[card.status]}</strong>
-              {card.archived ? ' · arquivado' : ''}
+              #{card.id} · {t('card.in')} <strong>{statusLabel(card.status)}</strong>
+              {card.archived ? ` · ${t('card.archivedSuffix')}` : ''}
               {parent && (
                 <>
-                  {' · tarefa de '}
+                  {` · ${t('card.taskOf')} `}
                   <button className="btn link small" onClick={() => onOpenCard(parent.id)}>
                     #{parent.id} {parent.title}
                   </button>
@@ -267,7 +282,7 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
                 <>
                   {' · '}
                   <span className="saving-badge" role="status">
-                    <span className="spinner" /> salvando…
+                    <span className="spinner" /> {t('card.saving')}
                   </span>
                 </>
               )}
@@ -275,7 +290,7 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
             <input
               className="title-input"
               value={title}
-              aria-label="Título"
+              aria-label={t('card.title')}
               onChange={(e) => setTitle(e.target.value)}
               onBlur={() => title.trim() !== card.title && void patch({ title })}
               onKeyDown={(e) => {
@@ -291,7 +306,7 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
             {collapseDesc && (
               <details className="original-box">
                 <summary>
-                  Descrição <span className="kbd">e</span>
+                  {t('card.description')} <span className="kbd">e</span>
                 </summary>
                 {descView}
               </details>
@@ -300,27 +315,27 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
             {card.originalTitle !== null &&
               (card.originalTitle !== card.title || (card.originalDescriptionMd ?? '') !== card.descriptionMd) && (
                 <details className="original-box">
-                  <summary>Pedido original</summary>
+                  <summary>{t('card.originalRequest')}</summary>
                   <div className="original-title">{card.originalTitle}</div>
                   {card.originalDescriptionMd?.trim() ? (
                     <div className="md" dangerouslySetInnerHTML={{ __html: renderMarkdown(card.originalDescriptionMd) }} />
                   ) : (
-                    <div className="muted small">Sem descrição.</div>
+                    <div className="muted small">{t('card.noDescription')}</div>
                   )}
                 </details>
               )}
 
             {card.status === 'triage' && card.suggestionEvidence && (
               <div className="question-box">
-                <strong>Sugestão da importação:</strong> {card.suggestedStatus ? STATUS_LABELS[card.suggestedStatus] : '—'}
-                {card.suggestionConfidence != null ? ` (confiança ${Math.round(card.suggestionConfidence * 100)}%)` : ''}
+                <strong>{t('card.importSuggestion')}</strong> {card.suggestedStatus ? statusLabel(card.suggestedStatus) : '—'}
+                {card.suggestionConfidence != null ? ` ${t('card.confidence', { pct: Math.round(card.suggestionConfidence * 100) })}` : ''}
                 <div className="md" dangerouslySetInnerHTML={{ __html: renderMarkdown(card.suggestionEvidence) }} />
               </div>
             )}
 
             {openQuestion && card.status === 'waiting_user' && (
               <div className="question-box">
-                <strong>O Claude perguntou:</strong>
+                <strong>{t('card.claudeAsked')}</strong>
                 <div className="md" dangerouslySetInnerHTML={{ __html: renderMarkdown(openQuestion.bodyMd) }} />
                 {openQuestion.options && (
                   <ActionGroup locked={!settled || isBusy('reply')}>
@@ -337,7 +352,7 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
                   className="input"
                   rows={3}
                   style={{ marginTop: 8 }}
-                  placeholder="Sua resposta (Ctrl+Enter envia)"
+                  placeholder={t('card.replyPlaceholder')}
                   value={reply}
                   onPaste={replyPaste.onPaste}
                   onDrop={replyPaste.onDrop}
@@ -348,8 +363,8 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
                   }}
                 />
                 <div className="actions">
-                  <ActionButton className="btn primary" disabled={!reply.trim()} busy={isBusy('reply')} busyLabel="Enviando…" onAction={() => sendReply(reply)}>
-                    Responder
+                  <ActionButton className="btn primary" disabled={!reply.trim()} busy={isBusy('reply')} busyLabel={t('card.sending')} onAction={() => sendReply(reply)}>
+                    {t('card.reply')}
                   </ActionButton>
                 </div>
               </div>
@@ -358,9 +373,9 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
             {running && (
               <div className="live-box">
                 <div className="section-title">
-                  <span className="spinner" /> O Claude está trabalhando
+                  <span className="spinner" /> {t('card.working')}
                 </div>
-                <div className="live-line">{live.length ? live.join('\n') : 'Aguardando a primeira saída…'}</div>
+                <div className="live-line">{live.length ? live.join('\n') : t('card.waitingOutput')}</div>
               </div>
             )}
 
@@ -369,61 +384,61 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
               {['backlog', 'triage', 'waiting_third_party'].includes(card.status) && (
                 <ActionButton
                   className="btn primary"
-                  busyLabel="Mandando…"
-                  onAction={() => run(() => api.post(`/api/cards/${cardId}/send-to-claude`), 'Card na fila do Claude')}
+                  busyLabel={t('card.sendingToClaude')}
+                  onAction={() => run(() => api.post(`/api/cards/${cardId}/send-to-claude`), t('card.queued'))}
                 >
-                  Mandar pro Claude
+                  {t('card.sendToClaude')}
                 </ActionButton>
               )}
               {card.status === 'triage' && (
                 <>
-                  <ActionButton className="btn" busyLabel="Aceitando…" onAction={() => run(() => api.post(`/api/triage/${cardId}/accept`, {}), 'Aceito')}>
-                    Aceitar ({STATUS_LABELS[card.suggestedStatus && card.suggestedStatus !== 'triage' ? card.suggestedStatus : 'backlog']})
+                  <ActionButton className="btn" busyLabel={t('card.accepting')} onAction={() => run(() => api.post(`/api/triage/${cardId}/accept`, {}), t('card.accepted'))}>
+                    {t('card.accept', { status: statusLabel(card.suggestedStatus && card.suggestedStatus !== 'triage' ? card.suggestedStatus : 'backlog') })}
                   </ActionButton>
-                  <ActionButton className="btn" busyLabel="Ignorando…" onAction={() => run(() => api.post(`/api/triage/${cardId}/ignore`, {}), 'Ignorado')}>
-                    Ignorar
+                  <ActionButton className="btn" busyLabel={t('card.ignoring')} onAction={() => run(() => api.post(`/api/triage/${cardId}/ignore`, {}), t('card.ignored'))}>
+                    {t('card.ignore')}
                   </ActionButton>
                 </>
               )}
               {card.status === 'review' && (
                 <>
-                  <ActionButton className="btn ok" busy={isBusy('approve')} busyLabel="Aprovando…" onAction={approve}>
-                    Aprovar <span className="kbd">a</span>
+                  <ActionButton className="btn ok" busy={isBusy('approve')} busyLabel={t('card.approving')} onAction={approve}>
+                    {t('card.approve')} <span className="kbd">a</span>
                   </ActionButton>
                   <button className="btn" onClick={() => setShowAdjust(!showAdjust)}>
-                    Pedir ajustes
+                    {t('card.askChanges')}
                   </button>
                 </>
               )}
               {failed && (
-                <ActionButton className="btn primary" busyLabel="Recolocando na fila…" onAction={() => run(() => api.post(`/api/cards/${cardId}/retry`), 'Card de volta na fila')}>
-                  Tentar de novo
+                <ActionButton className="btn primary" busyLabel={t('card.requeueing')} onAction={() => run(() => api.post(`/api/cards/${cardId}/retry`), t('card.backInQueue'))}>
+                  {t('card.retry')}
                 </ActionButton>
               )}
               {running && (
-                <ActionButton className="btn danger" busyLabel="Parando…" onAction={() => run(() => api.post(`/api/cards/${cardId}/stop`), 'Execução parada')}>
-                  Parar
+                <ActionButton className="btn danger" busyLabel={t('card.stopping')} onAction={() => run(() => api.post(`/api/cards/${cardId}/stop`), t('card.stopped'))}>
+                  {t('card.stop')}
                 </ActionButton>
               )}
               {workDir && (
-                <ActionButton className="btn" busyLabel="Abrindo…" onAction={() => run(() => api.post(`/api/cards/${cardId}/open-vscode`), 'Abrindo o VS Code')}>
-                  Abrir no VS Code
+                <ActionButton className="btn" busyLabel={t('card.opening')} onAction={() => run(() => api.post(`/api/cards/${cardId}/open-vscode`), t('card.openingVscode'))}>
+                  {t('card.openVscode')}
                 </ActionButton>
               )}
               {card.claudeSessionId && (
                 <button
                   className="btn"
-                  onClick={() => void copy(`${workDir ? `cd "${workDir}"; ` : ''}claude --resume ${card.claudeSessionId}`)}
+                  onClick={() => void copy(`${workDir ? `cd "${workDir}"; ` : ''}${lastAgent === 'gemini' ? 'gemini' : 'claude'} --resume ${card.claudeSessionId}`)}
                 >
-                  Continuar no terminal
+                  {t('card.continueTerminal')}
                 </button>
               )}
               <ActionButton
                 className="btn"
-                busyLabel={card.archived ? 'Desarquivando…' : 'Arquivando…'}
-                onAction={() => (card.archived ? run(() => api.post(`/api/cards/${cardId}/archive`, { archived: false }), 'Desarquivado') : archive())}
+                busyLabel={card.archived ? t('card.unarchiving') : t('card.archiving')}
+                onAction={() => (card.archived ? run(() => api.post(`/api/cards/${cardId}/archive`, { archived: false }), t('card.unarchived')) : archive())}
               >
-                {card.archived ? 'Desarquivar' : 'Arquivar'}
+                {card.archived ? t('card.unarchive') : t('card.archive')}
               </ActionButton>
             </div>
             </ActionGroup>
@@ -434,7 +449,7 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
                   className="input"
                   rows={3}
                   autoFocus
-                  placeholder="O que o Claude precisa ajustar? (Ctrl+Enter envia)"
+                  placeholder={t('card.adjustPlaceholder')}
                   value={adjust}
                   onPaste={adjustPaste.onPaste}
                   onDrop={adjustPaste.onDrop}
@@ -449,8 +464,8 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
                   }}
                 />
                 <div className="actions">
-                  <ActionButton className="btn primary" disabled={!adjust.trim()} busy={isBusy('adjust')} busyLabel="Enviando…" onAction={sendAdjust}>
-                    Enviar ajustes ao Claude
+                  <ActionButton className="btn primary" disabled={!adjust.trim()} busy={isBusy('adjust')} busyLabel={t('card.sending')} onAction={sendAdjust}>
+                    {t('card.sendAdjust')}
                   </ActionButton>
                 </div>
               </div>
@@ -459,19 +474,19 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
             {delivery && (
               <div className="delivery-box">
                 <div className="delivery-head">
-                  <strong>O Claude entregou</strong>
+                  <strong>{t('card.delivered')}</strong>
                   <span className="muted small">{fmtDate(delivery.summary.createdAt)}</span>
                   <button
                     className="btn link small"
                     onClick={() => activityRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
                   >
-                    Ver toda a atividade
+                    {t('card.seeActivity')}
                   </button>
                 </div>
                 <div className="md" dangerouslySetInnerHTML={{ __html: renderMarkdown(delivery.summary.bodyMd) }} />
                 {delivery.after.map((c) => (
                   <div key={c.id} className="delivery-after">
-                    <div className="muted small">Depois da entrega · {fmtDate(c.createdAt)}</div>
+                    <div className="muted small">{t('card.afterDelivery', { date: fmtDate(c.createdAt) })}</div>
                     <div className="md" dangerouslySetInnerHTML={{ __html: renderMarkdown(c.bodyMd) }} />
                   </div>
                 ))}
@@ -481,7 +496,7 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
             {!collapseDesc && (
               <div className="section">
                 <div className="section-title">
-                  Descrição <span className="kbd">e</span>
+                  {t('card.description')} <span className="kbd">e</span>
                 </div>
                 {editingDesc ? (
                   <>
@@ -490,7 +505,7 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
                       rows={10}
                       autoFocus
                       value={desc}
-                      placeholder="Markdown. Ctrl+V cola uma imagem."
+                      placeholder={t('card.descPlaceholder')}
                       onPaste={descPaste.onPaste}
                       onDrop={descPaste.onDrop}
                       onChange={(e) => setDesc(e.target.value)}
@@ -507,7 +522,7 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
                       }}
                     />
                     <div className="actions">
-                      {descPaste.uploading && <span className="muted small">Enviando imagem…</span>}
+                      {descPaste.uploading && <span className="muted small">{t('card.uploadingImage')}</span>}
                       <button
                         className="btn primary small"
                         disabled={descPaste.uploading}
@@ -516,7 +531,7 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
                           void patch({ descriptionMd: desc });
                         }}
                       >
-                        Salvar
+                        {t('card.save')}
                       </button>
                       <button
                         className="btn small"
@@ -525,7 +540,7 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
                           setEditingDesc(false);
                         }}
                       >
-                        Cancelar
+                        {t('card.cancel')}
                       </button>
                     </div>
                   </>
@@ -538,22 +553,20 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
             {subtasks.length > 0 && (
               <div className="section">
                 <div className="section-title">
-                  Tarefas
-                  <span className="muted small">
-                    {tasksDone}/{subtasks.length} concluídas
-                  </span>
+                  {t('card.tasks')}
+                  <span className="muted small">{t('card.tasksDone', { done: tasksDone, total: subtasks.length })}</span>
                   <div className="progress">
                     <div style={{ width: `${(tasksDone / subtasks.length) * 100}%` }} />
                   </div>
                 </div>
-                <div className="muted small">Cada tarefa tem card e sessão próprios. Este card é concluído quando você aprovar todas.</div>
-                {subtasks.map((t) => (
-                  <button key={t.id} className="subtask-row" onClick={() => onOpenCard(t.id)}>
+                <div className="muted small">{t('card.tasksHint')}</div>
+                {subtasks.map((task) => (
+                  <button key={task.id} className="subtask-row" onClick={() => onOpenCard(task.id)}>
                     <span className="text">
-                      <span className="muted small">#{t.id} </span>
-                      {t.title}
+                      <span className="muted small">#{task.id} </span>
+                      {task.title}
                     </span>
-                    <span className={`sub-status s-${t.status}`}>{STATUS_SHORT_LABELS[t.status]}</span>
+                    <span className={`sub-status s-${task.status}`}>{statusShortLabel(task.status)}</span>
                   </button>
                 ))}
               </div>
@@ -561,7 +574,7 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
 
             <div className="section">
               <div className="section-title">
-                Checklist
+                {t('card.checklist')}
                 {checklist.length > 0 && (
                   <>
                     <span className="muted small">
@@ -587,7 +600,7 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
                   />
                   <span>{item.text}</span>
                   {item.createdBy === 'claude' && <span className="pill">Claude</span>}
-                  <ActionButton className="btn link small" aria-label="Remover item" onAction={() => run(() => api.del(`/api/checklist/${item.id}`))}>
+                  <ActionButton className="btn link small" aria-label={t('card.removeItem')} onAction={() => run(() => api.del(`/api/checklist/${item.id}`))}>
                     ✕
                   </ActionButton>
                 </div>
@@ -595,7 +608,7 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
               <input
                 className="input"
                 style={{ width: '100%', marginTop: 4 }}
-                placeholder={isBusy('checklist-add') ? 'Adicionando…' : 'Adicionar item (Enter)'}
+                placeholder={isBusy('checklist-add') ? t('card.adding') : t('card.addItem')}
                 aria-busy={isBusy('checklist-add') || undefined}
                 value={newItem}
                 onChange={(e) => setNewItem(e.target.value)}
@@ -607,20 +620,20 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
             </div>
 
             <div className="section" ref={activityRef}>
-              <div className="section-title">Atividade</div>
+              <div className="section-title">{t('card.activity')}</div>
               <Timeline comments={comments} events={events} executions={executions} />
             </div>
 
             {/* Fixed at the bottom of the modal while it scrolls (card #96). */}
             <div className="section comment-dock">
-              <div className="section-title">Comentar</div>
+              <div className="section-title">{t('card.comment')}</div>
               {REOPEN_ON_COMMENT.includes(card.status) && !card.archived && (
-                <div className="muted small">Comentar devolve o card para "{STATUS_LABELS.ready}": o Claude retoma o card a partir do seu comentário.</div>
+                <div className="muted small">{t('card.commentReopens', { status: statusLabel('ready') })}</div>
               )}
               <textarea
                 className="input"
                 rows={2}
-                placeholder="Comentário (Ctrl+Enter envia)"
+                placeholder={t('card.commentPlaceholder')}
                 value={comment}
                 onPaste={commentPaste.onPaste}
                 onDrop={commentPaste.onDrop}
@@ -631,8 +644,8 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
                 }}
               />
               <div className="actions">
-                <ActionButton className="btn small" disabled={!comment.trim()} busy={isBusy('comment')} busyLabel="Enviando…" onAction={sendComment}>
-                  Comentar
+                <ActionButton className="btn small" disabled={!comment.trim()} busy={isBusy('comment')} busyLabel={t('card.sending')} onAction={sendComment}>
+                  {t('card.comment')}
                 </ActionButton>
               </div>
             </div>
@@ -642,15 +655,15 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
             <button
               className="side-expand"
               onClick={() => setSideOpen(true)}
-              title="Mostrar os detalhes (d)"
-              aria-label="Mostrar os detalhes do card"
+              title={t('card.showDetails')}
+              aria-label={t('card.showDetailsAria')}
               aria-expanded={false}
               aria-controls="card-side"
             >
               <span className="side-expand-arrow" aria-hidden="true">
                 ‹
               </span>
-              <span className="side-expand-title">Detalhes</span>
+              <span className="side-expand-title">{t('card.details')}</span>
               <span className="kbd">d</span>
             </button>
           ) : (
@@ -658,14 +671,14 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
               <button
                 className="side-collapse"
                 onClick={() => setSideOpen(false)}
-                title="Recolher os detalhes (d)"
+                title={t('card.hideDetails')}
                 aria-expanded={true}
                 aria-controls="card-side"
               >
-                Detalhes <span className="side-expand-arrow" aria-hidden="true">›</span> <span className="kbd">d</span>
+                {t('card.details')} <span className="side-expand-arrow" aria-hidden="true">›</span> <span className="kbd">d</span>
               </button>
               <div className="field">
-                <label htmlFor="f-status">Lista</label>
+                <label htmlFor="f-status">{t('card.list')}</label>
                 <select
                   id="f-status"
                   className="input"
@@ -677,29 +690,29 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
                     void track('move', () => move(card, to).then(load));
                   }}
                 >
-                  {Object.entries(STATUS_LABELS).map(([value, label]) => (
+                  {STATUSES.map((value) => (
                     <option key={value} value={value} disabled={value === 'running' || value === 'triage'}>
-                      {label}
+                      {statusLabel(value)}
                     </option>
                   ))}
                 </select>
               </div>
               <div className="field">
-                <label htmlFor="f-owner">Dono</label>
+                <label htmlFor="f-owner">{t('card.owner')}</label>
                 <select id="f-owner" className="input" value={card.owner} onChange={(e) => void patch({ owner: e.target.value })}>
-                  <option value="user">Você</option>
+                  <option value="user">{t('card.ownerUser')}</option>
                   <option value="claude">Claude</option>
                 </select>
               </div>
               <div className="field">
-                <label htmlFor="f-app">Projeto</label>
+                <label htmlFor="f-app">{t('card.project')}</label>
                 <select
                   id="f-app"
                   className="input"
                   value={card.appId ?? ''}
                   onChange={(e) => void patch({ appId: e.target.value ? Number(e.target.value) : null })}
                 >
-                  <option value="">Sem projeto</option>
+                  <option value="">{t('card.noProject')}</option>
                   {apps
                     .filter((a) => !a.archived || a.id === card.appId)
                     .map((a) => (
@@ -708,10 +721,10 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
                       </option>
                     ))}
                 </select>
-                {apps.length === 0 && <span className="muted small">Cadastre os projetos em Configurações.</span>}
+                {apps.length === 0 && <span className="muted small">{t('card.registerProjects')}</span>}
               </div>
               <div className="field">
-                <label>Labels</label>
+                <label>{t('card.labels')}</label>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
                   {labels.map((l) => {
                     const on = card.labelIds.includes(l.id);
@@ -739,7 +752,7 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
                 </div>
               </div>
               <div className="field">
-                <label id="f-repositories">Repositórios</label>
+                <label id="f-repositories">{t('card.repositories')}</label>
                 <div role="group" aria-labelledby="f-repositories" style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
                   {repositories.map((x) => {
                     const ids = card.repositoryIds ?? [];
@@ -765,59 +778,59 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
                     );
                   })}
                 </div>
-                {repositories.length === 0 && <span className="muted small">Cadastre os repositórios em Configurações.</span>}
+                {repositories.length === 0 && <span className="muted small">{t('card.registerRepositories')}</span>}
               </div>
               <div className="field">
-                <label htmlFor="f-priority">Prioridade</label>
+                <label htmlFor="f-priority">{t('card.priority')}</label>
                 <select id="f-priority" className="input" value={card.priority} onChange={(e) => void patch({ priority: Number(e.target.value) })}>
-                  <option value={1}>1 · Alta</option>
-                  <option value={2}>2 · Média-alta</option>
-                  <option value={3}>3 · Normal</option>
-                  <option value={4}>4 · Baixa</option>
+                  <option value={1}>{t('card.priority1')}</option>
+                  <option value={2}>{t('card.priority2')}</option>
+                  <option value={3}>{t('card.priority3')}</option>
+                  <option value={4}>{t('card.priority4')}</option>
                 </select>
               </div>
               <div className="field">
-                <label htmlFor="f-due">Prazo</label>
+                <label htmlFor="f-due">{t('card.due')}</label>
                 <input id="f-due" type="date" className="input" value={card.dueDate ?? ''} onChange={(e) => void patch({ dueDate: e.target.value || null })} />
               </div>
               <div className="field">
-                <label htmlFor="f-repo">Repositório (caminho local)</label>
+                <label htmlFor="f-repo">{t('card.repoPath')}</label>
                 <input
                   id="f-repo"
                   className="input"
                   defaultValue={card.repoPath ?? ''}
-                  placeholder="vazio = pasta de trabalho do Board"
+                  placeholder={t('card.repoPathPlaceholder')}
                   onBlur={(e) => e.target.value !== (card.repoPath ?? '') && void patch({ repoPath: e.target.value.trim() || null })}
                   onKeyDown={(e) => e.stopPropagation()}
                 />
               </div>
               <div className="field">
-                <label htmlFor="f-base">Branch base</label>
+                <label htmlFor="f-base">{t('card.baseBranch')}</label>
                 <input
                   id="f-base"
                   className="input"
                   defaultValue={card.baseBranch ?? ''}
-                  placeholder="padrão da configuração"
+                  placeholder={t('card.fromSettings')}
                   onBlur={(e) => e.target.value !== (card.baseBranch ?? '') && void patch({ baseBranch: e.target.value.trim() || null })}
                   onKeyDown={(e) => e.stopPropagation()}
                 />
               </div>
               {card.branch && (
                 <div className="muted small">
-                  Branch: <code>{card.branch}</code>
+                  {t('card.branch')} <code>{card.branch}</code>
                   <br />
                   Worktree: <code>{card.worktreePath}</code>
                 </div>
               )}
               <div className="field">
-                <label htmlFor="f-perm">Modo de permissão</label>
+                <label htmlFor="f-perm">{t('card.permissionMode')}</label>
                 <select
                   id="f-perm"
                   className="input"
                   value={card.permissionMode ?? ''}
                   onChange={(e) => void patch({ permissionMode: e.target.value || null })}
                 >
-                  <option value="">padrão da configuração</option>
+                  <option value="">{t('card.fromSettings')}</option>
                   {PERMISSION_MODES.filter((m) => m !== 'bypassPermissions').map((m) => (
                     <option key={m} value={m}>
                       {m}
@@ -826,10 +839,35 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
                 </select>
               </div>
               <div className="field">
-                <label htmlFor="f-model">Modelo</label>
+                <label htmlFor="f-agent">{t('card.agent')}</label>
+                <select
+                  id="f-agent"
+                  className="input"
+                  value={card.agent ?? ''}
+                  onChange={(e) => {
+                    const next = (e.target.value || null) as AgentId | null;
+                    const nextAgent = next ?? defaultAgent;
+                    // A model of the other agent's family would not be passed anyway (D92): clear it.
+                    void patch(card.model && !modelFitsAgent(card.model, nextAgent) ? { agent: next, model: null } : { agent: next });
+                  }}
+                >
+                  <option value="">{t('card.fromSettingsWith', { value: agentLabel(defaultAgent) })}</option>
+                  {AGENTS.map((a) => (
+                    <option key={a} value={a}>
+                      {AGENT_LABELS[a]}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="field">
+                <label htmlFor="f-model">{t('card.model')}</label>
                 <select id="f-model" className="input" value={card.model ?? ''} onChange={(e) => void patch({ model: e.target.value || null })}>
-                  <option value="">padrão da configuração ({modelLabel(defaults.defaultModel)})</option>
-                  {[...MODEL_OPTIONS, ...(card.model && !MODEL_OPTIONS.some((m) => m.id === card.model) ? [{ id: card.model, label: card.model }] : [])].map((m) => (
+                  <option value="">
+                    {t('card.fromSettingsWith', {
+                      value: agent === 'gemini' ? defaults.geminiModel || AGENT_LABELS.gemini : modelLabel(defaults.defaultModel),
+                    })}
+                  </option>
+                  {[...modelOptions, ...(card.model && !modelOptions.some((m) => m.id === card.model) ? [{ id: card.model, label: card.model }] : [])].map((m) => (
                     <option key={m.id} value={m.id}>
                       {m.label}
                     </option>
@@ -837,9 +875,16 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
                 </select>
               </div>
               <div className="field">
-                <label htmlFor="f-effort">Effort</label>
-                <select id="f-effort" className="input" value={card.effort ?? ''} onChange={(e) => void patch({ effort: e.target.value || null })}>
-                  <option value="">padrão da configuração ({effortLabel(defaults.defaultEffort)})</option>
+                <label htmlFor="f-effort">{t('card.effort')}</label>
+                <select
+                  id="f-effort"
+                  className="input"
+                  value={card.effort ?? ''}
+                  disabled={agent === 'gemini'}
+                  title={agent === 'gemini' ? t('card.agentEffortNone') : undefined}
+                  onChange={(e) => void patch({ effort: e.target.value || null })}
+                >
+                  <option value="">{t('card.fromSettingsWith', { value: effortLabel(defaults.defaultEffort) })}</option>
                   {EFFORT_LEVELS.map((l) => (
                     <option key={l} value={l}>
                       {EFFORT_LABELS[l]}
@@ -848,14 +893,14 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
                 </select>
               </div>
               <div className="field">
-                <label htmlFor="f-turns">Máx. de turnos</label>
+                <label htmlFor="f-turns">{t('card.maxTurns')}</label>
                 <input
                   id="f-turns"
                   type="number"
                   min={1}
                   className="input"
                   defaultValue={card.maxTurns ?? ''}
-                  placeholder="sem limite"
+                  placeholder={t('card.noLimit')}
                   onBlur={(e) => void patch({ maxTurns: e.target.value ? Number(e.target.value) : null })}
                   onKeyDown={(e) => e.stopPropagation()}
                 />
@@ -867,20 +912,18 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
                   onChange={(e) => {
                     if (
                       e.target.checked &&
-                      !window.confirm(
-                        'Liberar o modo sem permissões (bypassPermissions)? O Claude poderá rodar qualquer comando sem pedir. Só faça isso em tarefa isolada.',
-                      )
+                      !window.confirm(t('card.dangerConfirm'))
                     ) {
                       return;
                     }
                     void patch({ dangerousAllowed: e.target.checked });
                   }}
                 />
-                <span>Perigoso: rodar sem permissões</span>
+                <span>{t('card.danger')}</span>
               </label>
 
               <div className="field">
-                <label>Links</label>
+                <label>{t('card.links')}</label>
                 {card.links.map((l, i) => {
                   const href = linkHref(l.kind, l.value, defaults.jiraBaseUrl);
                   return (
@@ -893,15 +936,15 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
                       ) : (
                         <span style={{ overflowWrap: 'anywhere' }}>{l.title || l.value}</span>
                       )}
-                      <ActionButton className="btn link small" aria-label="Remover link" onAction={() => run(() => api.del(`/api/cards/${cardId}/links/${i}`))}>
+                      <ActionButton className="btn link small" aria-label={t('card.removeLink')} onAction={() => run(() => api.del(`/api/cards/${cardId}/links/${i}`))}>
                         ✕
                       </ActionButton>
                     </div>
                   );
                 })}
                 <div className="link-add">
-                  <select className="input" value={link.kind} onChange={(e) => setLink({ ...link, kind: e.target.value as LinkKind })} aria-label="Tipo de link">
-                    {LINK_KINDS.map((k) => (
+                  <select className="input" value={link.kind} onChange={(e) => setLink({ ...link, kind: e.target.value as LinkKind })} aria-label={t('card.linkKind')}>
+                    {linkKinds().map((k) => (
                       <option key={k.value} value={k.value}>
                         {k.label}
                       </option>
@@ -909,7 +952,7 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
                   </select>
                   <input
                     className="input"
-                    placeholder={isBusy('link-add') ? 'Adicionando…' : 'URL, chave ou caminho (Enter)'}
+                    placeholder={isBusy('link-add') ? t('card.adding') : t('card.linkPlaceholder')}
                   aria-busy={isBusy('link-add') || undefined}
                     value={link.value}
                     onChange={(e) => setLink({ ...link, value: e.target.value })}
