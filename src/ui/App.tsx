@@ -5,20 +5,24 @@ import { Board, navigationGrid, readCollapsed } from './Board';
 import { CardModal } from './CardModal';
 import { chimeFor, electRingerTab, playChime, ring, unlockOnFirstGesture } from './chime';
 import { MonitorIcon, MoonIcon, PauseIcon, PlayIcon, SoundOffIcon, SoundOnIcon, SunIcon } from './HeaderIcons';
+import { AutomationsView } from './AutomationsView';
 import { ImportView } from './ImportView';
+import { MainMenu } from './MainMenu';
+import type { View } from './main-menu';
 import { FILTERS_STORE_KEY, countByStatus, filterCards, hasActiveFilter, parseFilters, pruneFilters, type BoardFilters } from './board-filters';
 import { FilterBar } from './FilterBar';
 import { nextInColumn } from './next-card';
 import { SettingsView } from './SettingsView';
-import { PENDING_VIEW_NAME, TodayView, todayItems } from './TodayView';
+import { PENDING_TAB_LABEL, PENDING_VIEW_NAME, TodayView, showPendingTab, todayItems } from './TodayView';
 import { SORT_STORE_KEYS, parseSort, type CardSort } from './card-sort';
 import { PublishChip } from './PublishChip';
 import { concurrencySuffix, concurrencyTitle } from './runner-label';
 import { UsageChip } from './UsageChip';
 import { AgendaChip } from './AgendaChip';
+import { AutomationChip } from './AutomationChip';
 import { UpdateBanner, useUiUpdate } from './UpdateBanner';
+import { BannerDock } from './BannerDock';
 
-type View = 'board' | 'today' | 'import' | 'archived' | 'settings';
 type Theme = 'system' | 'light' | 'dark';
 
 const THEME_LABELS: Record<Theme, string> = { system: 'Tema do sistema', light: 'Tema claro', dark: 'Tema escuro' };
@@ -54,6 +58,8 @@ export function App() {
   // Order of the cards, one per view (card #152).
   const [boardSort, setBoardSort] = useState<CardSort>(() => parseSort('board', readStore(SORT_STORE_KEYS.board)));
   const [todaySort, setTodaySort] = useState<CardSort>(() => parseSort('today', readStore(SORT_STORE_KEYS.today)));
+  // Bumped by the server when an automation changes, so the Automações view reloads (D72).
+  const [automationsTick, setAutomationsTick] = useState(0);
   const searchRef = useRef<HTMLInputElement>(null);
   const toastTimer = useRef<number>(0);
 
@@ -79,6 +85,14 @@ export function App() {
   useEffect(() => {
     writeStore('cb:view', view);
   }, [view]);
+
+  // Items in "Minhas pendências"; null until the board loads.
+  const pendingCount = data ? todayItems(data.cards).length : null;
+
+  // With nothing pending the tab is gone (card #170), so the view goes back to the board.
+  useEffect(() => {
+    if (view === 'today' && pendingCount === 0) setView('board');
+  }, [view, pendingCount]);
 
   useEffect(() => {
     writeStore('cb:sound', sound ? 'on' : 'off');
@@ -117,6 +131,12 @@ export function App() {
   const uiUpdate = useUiUpdate();
   useServerEvents((msg) => {
     if (msg.type === 'execution.progress') return;
+    if (msg.type === 'automations.changed') {
+      setAutomationsTick((t) => t + 1);
+      return;
+    }
+    // The history of runs shows each card's state; a reconnect means the server may have restarted.
+    if (msg.type === 'card.changed' || msg.type === 'reconnected') setAutomationsTick((t) => t + 1);
     // A publication swapped the screen on disk, or the server is back from a restart (D51).
     if (msg.type === 'ui.updated' || msg.type === 'reconnected') uiUpdate.check();
     const kind = chimeFor(msg);
@@ -231,7 +251,6 @@ export function App() {
 
   const runner = data?.runner;
   const readyCount = data ? data.cards.filter((c) => c.status === 'ready').length : 0;
-  const waiting = data ? todayItems(data.cards).filter((i) => i.card.status === 'waiting_user').length : 0;
 
   const togglePause = async () => {
     if (!runner) return;
@@ -242,29 +261,37 @@ export function App() {
   return (
     <div className="app">
       <header className="header">
-        <div className="brand">
-          {/* Same drawing as the favicon in index.html, so the header and the browser tab match. */}
-          <svg className="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
-            <rect x="2" y="4" width="8" height="24" rx="2" fill="#d97757" />
-            <rect x="12" y="4" width="8" height="16" rx="2" fill="#d97757" opacity=".7" />
-            <rect x="22" y="4" width="8" height="10" rx="2" fill="#d97757" opacity=".45" />
-          </svg>
-          <span className="brand-name">Claude Board</span>
+        <div className="header-start">
+          <MainMenu view={view} onSelect={setView} />
+          {/* The logo goes home (the board), as logos do; it does not open the menu (D71). */}
+          <button className="brand" onClick={() => setView('board')} title="Ir para o Quadro">
+            {/* Same drawing as the favicon in index.html, so the header and the browser tab match. */}
+            <svg className="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
+              <rect x="2" y="4" width="8" height="24" rx="2" fill="#d97757" />
+              <rect x="12" y="4" width="8" height="16" rx="2" fill="#d97757" opacity=".7" />
+              <rect x="22" y="4" width="8" height="10" rx="2" fill="#d97757" opacity=".45" />
+            </svg>
+            <span className="brand-name">Claude Board</span>
+          </button>
         </div>
         <nav className="tabs" aria-label="Visões">
-          {(
-            [
-              ['board', 'Quadro'],
-              ['today', `${PENDING_VIEW_NAME}${data ? ` (${todayItems(data.cards).length})` : ''}`],
-              ['import', 'Importação'],
-              ['archived', 'Arquivados'],
-              ['settings', 'Configurações'],
-            ] as [View, string][]
-          ).map(([v, label]) => (
-            <button key={v} className={'tab' + (view === v ? ' active' : '')} onClick={() => setView(v)}>
-              {label}
+          <button className={'tab' + (view === 'board' ? ' active' : '')} onClick={() => setView('board')}>
+            Quadro
+          </button>
+          {/* Pending tab only with something pending, text and count together (card #170). */}
+          {showPendingTab(pendingCount) && (
+            <button
+              className={'tab' + (view === 'today' ? ' active' : '')}
+              onClick={() => setView('today')}
+              aria-label={`${PENDING_TAB_LABEL}: ${pendingCount}`}
+              title={PENDING_VIEW_NAME}
+            >
+              {PENDING_TAB_LABEL}
+              <span className="tab-badge" aria-hidden="true">
+                {pendingCount}
+              </span>
             </button>
-          ))}
+          )}
         </nav>
         {runner && (
           <div className="counters">
@@ -272,10 +299,8 @@ export function App() {
               {runner.running > 0 && <span className="spinner" />} rodando <strong>{runner.running}</strong>
               {runner.concurrency && <span className="muted small">{concurrencySuffix(runner.concurrency)}</span>}
             </span>
-            <button className={'counter' + (waiting > 0 ? ' attention' : '')} onClick={() => setView('today')}>
-              aguardando você <strong>{waiting}</strong>
-            </button>
             <AgendaChip agenda={data?.agenda ?? null} />
+            <AutomationChip tick={automationsTick} onOpen={() => setView('automations')} />
             <UsageChip usage={data?.usage ?? null} />
             <PublishChip publish={data?.publish ?? null} running={runner.running} onOpen={(id) => setOpenId(id)} notify={notify} />
             <button
@@ -319,27 +344,6 @@ export function App() {
           </div>
         )}
       </header>
-
-      {uiUpdate.update && <UpdateBanner update={uiUpdate.update} dismiss={uiUpdate.dismiss} onOpen={(id) => setOpenId(id)} />}
-
-      {runner?.held && (
-        <div className="banner">
-          {runner.running === 0
-            ? 'Publicando o Board: o servidor reinicia em seguida e a página volta sozinha.'
-            : `Publicando o Board: o servidor reinicia em seguida e a página volta sozinha. ${runner.running === 1 ? 'A execução em curso continua' : `As ${runner.running} execuções em curso continuam`}; nenhuma nova começa até lá.`}
-        </div>
-      )}
-
-      {runner?.paused && (
-        <div className="banner">
-          O runner está pausado: nada sai da fila "{STATUS_LABELS.ready}" até você retomar.
-        </div>
-      )}
-      {!runner?.paused && runner?.concurrency?.mode === 'auto' && runner.concurrency.limit <= runner.running && readyCount > 0 && (
-        <div className="banner">
-          Modo automático segurando a fila "{STATUS_LABELS.ready}" ({readyCount}): {runner.concurrency.reason}.
-        </div>
-      )}
 
       {view === 'board' && data && (
         <>
@@ -432,11 +436,35 @@ export function App() {
         </div>
       )}
 
+      {view === 'automations' && data && <AutomationsView tick={automationsTick} onOpen={setOpenId} notify={notify} />}
+
       {view === 'import' && data && (
         <ImportView triage={data.cards.filter((c) => c.status === 'triage')} onOpen={setOpenId} notify={notify} />
       )}
 
       {view === 'settings' && data && <SettingsView apps={data.apps} labels={data.labels} repositories={data.repositories} notify={notify} />}
+
+      {/* Board-wide warnings live in a strip at the foot of the window, outside the scrolling area (card #173). */}
+      <BannerDock>
+        {uiUpdate.update && <UpdateBanner update={uiUpdate.update} dismiss={uiUpdate.dismiss} onOpen={(id) => setOpenId(id)} />}
+        {runner?.held && (
+          <div className="banner">
+            {runner.running === 0
+              ? 'Publicando o Board: o servidor reinicia em seguida e a página volta sozinha.'
+              : `Publicando o Board: o servidor reinicia em seguida e a página volta sozinha. ${runner.running === 1 ? 'A execução em curso continua' : `As ${runner.running} execuções em curso continuam`}; nenhuma nova começa até lá.`}
+          </div>
+        )}
+        {runner?.paused && (
+          <div className="banner">
+            O runner está pausado: nada sai da fila "{STATUS_LABELS.ready}" até você retomar.
+          </div>
+        )}
+        {!runner?.paused && runner?.concurrency?.mode === 'auto' && runner.concurrency.limit <= runner.running && readyCount > 0 && (
+          <div className="banner">
+            Modo automático segurando a fila "{STATUS_LABELS.ready}" ({readyCount}): {runner.concurrency.reason}.
+          </div>
+        )}
+      </BannerDock>
 
       {openId !== null && data && (
         <CardModal

@@ -60,6 +60,14 @@ export function hasActiveFilter(filters: BoardFilters): boolean {
   return KEYS.some((key) => filters[key] !== '');
 }
 
+/**
+ * Class of a filter select: one with an option chosen gets `filter-on`, which paints its text orange
+ * (card #172), so a narrowed board shows which filter narrowed it. The sort select is not a filter.
+ */
+export function filterSelectClass(value: string): string {
+  return value === '' ? 'input' : 'input filter-on';
+}
+
 /** Cards per status, for the column counters. */
 export function countByStatus(cards: readonly { status: string }[]): Record<string, number> {
   const out: Record<string, number> = {};
@@ -73,6 +81,15 @@ export function countByStatus(cards: readonly { status: string }[]): Record<stri
  */
 export function columnCountText(shown: number, total: number | undefined): string {
   return total === undefined ? String(shown) : `${shown}/${total}`;
+}
+
+/**
+ * Yellow highlight on the "Aguardando você" column title (card #164), replacing the header counter.
+ * It looks at every card in the column, not only the ones the search and filters leave on screen:
+ * a filter that hides the card does not make the question go away.
+ */
+export function columnNeedsAttention(status: string, shown: number, total: number | undefined): boolean {
+  return status === 'waiting_user' && (total ?? shown) > 0;
 }
 
 interface FilterableCard {

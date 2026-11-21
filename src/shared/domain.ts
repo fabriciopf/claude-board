@@ -68,8 +68,8 @@ export const STATUS_SHORT_LABELS: Record<Status, string> = {
 
 export type Owner = 'user' | 'claude';
 export type Actor = 'user' | 'claude' | 'system';
-/** `split`: a task Claude carved out of another card (see `Card.parentId`). */
-export type Origin = 'manual' | 'mcp' | 'import' | 'hook' | 'split';
+/** `split`: a task Claude carved out of another card (see `Card.parentId`). `automation`: created by an automation (D72). */
+export type Origin = 'manual' | 'mcp' | 'import' | 'hook' | 'split' | 'automation';
 
 export type CommentKind = 'comment' | 'question' | 'answer' | 'run_summary' | 'adjustment';
 
@@ -226,6 +226,8 @@ export interface Card {
   originalDescriptionMd: string | null;
   /** The card this one was split from (null for a card the user created). */
   parentId: number | null;
+  /** The automation that created this card (D72). */
+  automationId: number | null;
   nextPrompt: string | null;
   nextPromptKind: string | null;
   links: CardLink[];

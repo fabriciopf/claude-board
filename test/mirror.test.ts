@@ -4,7 +4,7 @@ import path from 'node:path';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { runCommand, type CmdResult } from '../src/publish/git.js';
 import { blockedHits, githubSlug, splitList } from '../src/publish/mirror.js';
-import { Publisher } from '../src/publish/publisher.js';
+import { MIRROR_OFF_NOTE, Publisher } from '../src/publish/publisher.js';
 import { makeContext, tempDir } from './helpers.js';
 
 const fakeBuild = path.resolve('test/fake-build.mjs');
@@ -200,6 +200,26 @@ describe('public mirror on "Concluída" (D66)', () => {
     ctx.service.approve(card.id);
     await publisher.mirror.whenIdle();
     expect(remoteBranches()).toEqual(['main']);
+    expect(ghCalls).toEqual([]);
+    // Off is said on the card, not skipped in silence (card #163)…
+    expect(comments(card.id)).toContain(MIRROR_OFF_NOTE);
+    // …only where there was work to send.
+    expect(comments(other.id)).not.toContain(MIRROR_OFF_NOTE);
+    expect(comments(plain.id)).not.toContain(MIRROR_OFF_NOTE);
+    const plainOff = ctx.service.createCard({ title: 'Parecer desligado', descriptionMd: 'x', owner: 'claude', repoPath: repo }, 'user', 'manual');
+    ctx.service.moveCard(plainOff.id, { status: 'review' }, 'system');
+    ctx.service.approve(plainOff.id);
+    expect(comments(plainOff.id)).not.toContain(MIRROR_OFF_NOTE);
+  });
+
+  it('with the mirror off, a card concluded before its publication is told so once', async () => {
+    ctx.config.mirrorRepoPath = '';
+    const card = ctx.service.createCard({ title: 'Fila desligada', descriptionMd: 'x', owner: 'claude', repoPath: repo }, 'user', 'manual');
+    ctx.service.setRunFields(card.id, { branch: `cb/${card.id}-fila` });
+    ctx.db.prepare("INSERT INTO publish_queue (card_id, branch, status, queued_at) VALUES (?, ?, 'pending', datetime('now'))").run(card.id, `cb/${card.id}-fila`);
+    ctx.service.moveCard(card.id, { status: 'review' }, 'system');
+    ctx.service.approve(card.id);
+    expect(comments(card.id).split(MIRROR_OFF_NOTE).length - 1).toBe(1);
     expect(ghCalls).toEqual([]);
   });
 
