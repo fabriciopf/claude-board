@@ -139,13 +139,99 @@ pre {
   flex-wrap: wrap;
 }
 
+.header-start {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* The logo is a button that goes to the board (D71): no button chrome. */
 .brand {
+  font: inherit;
   font-weight: 700;
   font-size: 16px;
+  color: inherit;
   display: flex;
   align-items: center;
   gap: 8px;
   white-space: nowrap;
+  border: 0;
+  background: transparent;
+  padding: 4px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.brand:hover {
+  background: var(--surface-2);
+}
+
+/* ---------- menu button (card #161, D71) ---------- */
+
+.main-menu {
+  position: relative;
+}
+
+.btn.icon-btn.main-menu-button {
+  padding: 5px 6px;
+}
+
+/* The current view is behind the menu: the button carries the "you are here" mark the tabs lost. */
+.main-menu-button.active,
+.main-menu-button[aria-expanded='true'] {
+  background: var(--surface-2);
+  border-color: var(--text-muted);
+}
+
+.main-menu-list {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 6px);
+  z-index: 60;
+  min-width: 200px;
+  padding: 4px;
+  border-radius: 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: 0 8px 24px rgba(9, 30, 66, 0.18), var(--shadow);
+  display: flex;
+  flex-direction: column;
+}
+
+.main-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.main-menu-item svg {
+  color: var(--text-muted);
+  flex: none;
+}
+
+.main-menu-item:hover,
+.main-menu-item:focus-visible {
+  background: var(--surface-2);
+  outline: none;
+}
+
+.main-menu-item.current {
+  font-weight: 600;
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.main-menu-item.current svg {
+  color: var(--accent);
 }
 
 .brand-mark {
@@ -446,6 +532,19 @@ textarea.input {
   flex: 1;
 }
 
+/* "Aguardando você" with at least one card (card #164): the title itself turns yellow, in place of the old header counter. */
+.column-title.attention .column-title-text {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 6px;
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.column.collapsed .column-title.attention .column-title-text {
+  padding: 8px 1px;
+}
+
 .info-btn {
   width: 18px;
   height: 18px;
@@ -529,17 +628,50 @@ textarea.input {
   box-shadow: 0 8px 20px rgba(0, 0, 0, 0.25);
 }
 
+/* A button so the labels can be clicked inside the clickable tile (card #167). */
 .card-labels {
   display: flex;
   gap: 4px;
   flex-wrap: wrap;
-  margin-bottom: 6px;
+  margin: 0 0 6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.card-labels:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
 }
 
 .label-pill {
   height: 8px;
   min-width: 36px;
   border-radius: 4px;
+  transition: filter 0.12s;
+}
+
+.card-labels:hover .label-pill {
+  filter: brightness(0.9);
+}
+
+/* Expanded: same look as .label-chip, the label name over its colour. */
+.card-labels.expanded .label-pill {
+  height: auto;
+  min-width: 0;
+  padding: 1px 8px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 16px;
+  color: #fff;
+  white-space: nowrap;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .label-chip {
@@ -889,6 +1021,25 @@ textarea.input {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+/* A section title that folds its section (Checklist, card #166). */
+.section-toggle {
+  width: 100%;
+  background: none;
+  border: 0;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+}
+
+.section-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
 }
 
 .md {
@@ -1611,8 +1762,17 @@ textarea.input {
     display: none;
   }
 
-  .brand {
+  .header-start {
     padding-left: 12px;
+  }
+
+  /* Touch: the menu button and its items get a finger-sized target. */
+  .btn.icon-btn.main-menu-button {
+    padding: 8px;
+  }
+
+  .main-menu-item {
+    padding: 12px 12px;
   }
 
   .brand-name {
@@ -1852,4 +2012,149 @@ textarea.input {
   flex-direction: column;
   align-items: flex-start;
   gap: 4px;
+}
+
+/* ---------- automations (D72) ---------- */
+
+.automations-page {
+  max-width: 860px;
+}
+
+.automation-composer textarea,
+.automation-edit textarea {
+  width: 100%;
+  resize: vertical;
+  font: inherit;
+}
+
+.automation-composer-foot,
+.automation-edit-foot {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+
+.automation-examples {
+  display: flex;
+  gap: 4px 12px;
+  flex-wrap: wrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.automation-row.off .automation-name,
+.automation-row.off .automation-when,
+.automation-row.off .automation-what {
+  opacity: 0.55;
+}
+
+.automation-head {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.automation-head .grow {
+  flex: 1;
+  min-width: 140px;
+}
+
+.automation-when {
+  margin-top: 6px;
+  font-size: 13px;
+  color: var(--accent);
+}
+
+.automation-what {
+  margin-top: 4px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.automation-url {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 8px;
+}
+
+.automation-url code {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  background: var(--code-bg);
+  padding: 4px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.automation-result {
+  margin-top: 6px;
+}
+
+.automation-edit {
+  margin-top: 8px;
+}
+
+/* On/off switch: a styled checkbox, so the keyboard and screen readers get a real control. */
+.switch {
+  position: relative;
+  display: inline-flex;
+  width: 34px;
+  height: 20px;
+  flex: none;
+  cursor: pointer;
+}
+
+.switch input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  margin: 0;
+  cursor: pointer;
+  /* Above the drawing, so the click lands on the control itself. */
+  z-index: 1;
+}
+
+.switch span {
+  width: 100%;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--border);
+  transition: background 0.15s;
+  position: relative;
+}
+
+.switch span::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  transition: transform 0.15s;
+}
+
+.switch input:checked + span {
+  background: var(--ok);
+}
+
+.switch input:checked + span::after {
+  transform: translateX(14px);
+}
+
+.switch input:focus-visible + span {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }

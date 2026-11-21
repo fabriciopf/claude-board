@@ -75,6 +75,15 @@ export function columnCountText(shown: number, total: number | undefined): strin
   return total === undefined ? String(shown) : `${shown}/${total}`;
 }
 
+/**
+ * Yellow highlight on the "Aguardando você" column title (card #164), replacing the header counter.
+ * It looks at every card in the column, not only the ones the search and filters leave on screen:
+ * a filter that hides the card does not make the question go away.
+ */
+export function columnNeedsAttention(status: string, shown: number, total: number | undefined): boolean {
+  return status === 'waiting_user' && (total ?? shown) > 0;
+}
+
 interface FilterableCard {
   id: number;
   priority: number;
