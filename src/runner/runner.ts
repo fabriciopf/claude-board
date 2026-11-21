@@ -6,7 +6,7 @@ import type { AppContext, RunnerControl } from '../context.js';
 import { nowIso } from '../db/index.js';
 import { AUTO_CONCURRENCY, type Card, type ConcurrencyInfo, type ExecutionStatus, type Status } from '../shared/domain.js';
 import { CARD_HEADER, EXECUTION_HEADER } from '../mcp/http.js';
-import { BurnMeter, decideAuto } from './auto-concurrency.js';
+import { BurnMeter, decideAuto, typicalRunMinutes, type RunTiming } from './auto-concurrency.js';
 import { isAlive, killTree, processStartTimes, spawnDetached } from './process.js';
 import { buildSystemPrompt, buildUserPrompt, splitCandidate, type PromptKind } from './prompt.js';
 import { applyEvent, emptyState, parseLine, type StreamState } from './stream.js';
@@ -192,7 +192,20 @@ export class Runner implements RunnerControl {
   concurrency(now = Date.now()): ConcurrencyInfo {
     const setting = this.ctx.config.maxConcurrency;
     if (setting !== AUTO_CONCURRENCY) return { mode: 'fixed', limit: Math.max(1, Number(setting) || 1), reason: '' };
-    return decideAuto({ usage: this.ctx.usage?.get() ?? null, now, rate: this.meter.measure(now) });
+    return decideAuto({ usage: this.ctx.usage?.get() ?? null, now, rate: this.meter.measure(now), runs: this.runTiming(now) });
+  }
+
+  /** How long the runs in progress have been going, and how long a run usually takes (last 40 finished). */
+  private runTiming(now: number): RunTiming {
+    const minutes = (from: string, to: number) => (to - Date.parse(from)) / 60000;
+    const running = this.ctx.db.prepare("SELECT started_at FROM executions WHERE status = 'running'").all() as { started_at: string }[];
+    const finished = this.ctx.db
+      .prepare('SELECT started_at, ended_at FROM executions WHERE ended_at IS NOT NULL ORDER BY id DESC LIMIT 40')
+      .all() as { started_at: string; ended_at: string }[];
+    return {
+      ages: running.map((r) => Math.max(0, minutes(r.started_at, now))).filter(Number.isFinite),
+      typicalMinutes: typicalRunMinutes(finished.map((r) => minutes(r.started_at, Date.parse(r.ended_at)))),
+    };
   }
 
   /** Starts as many queued cards as concurrency allows. Returns how many started. */

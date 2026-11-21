@@ -9,6 +9,7 @@ import {
   type Execution,
   type Status,
 } from '../shared/domain';
+import { ActionButton } from './ActionButton';
 import { api, fmtDate } from './api';
 import { renderMarkdown } from './markdown';
 
@@ -115,9 +116,9 @@ function Transcript({ executionId }: { executionId: number }) {
   };
   if (!items && !error) {
     return (
-      <button className="btn small" onClick={() => void load()}>
+      <ActionButton className="btn small" busyLabel="Carregando o transcript…" onAction={load}>
         Ver transcript
-      </button>
+      </ActionButton>
     );
   }
   if (error) return <div className="error-box">{error}</div>;

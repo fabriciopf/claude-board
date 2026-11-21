@@ -15,8 +15,9 @@ import {
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { NEWEST_FIRST_STATUSES, STATUS_DESCRIPTIONS, STATUS_LABELS, STATUSES, type App, type CardSummary, type Label, type Repository, type Status } from '../shared/domain';
+import { ActionButton, useBusy } from './ActionButton';
 import { CardTile } from './CardTile';
-import { columnCountText } from './board-filters';
+import { columnCountText, columnNeedsAttention } from './board-filters';
 import { DEFAULT_SORT, compareCards, type CardSort } from './card-sort';
 
 /** Lists nobody drops a card into by hand: the runner and the importer own them. */
@@ -74,7 +75,8 @@ interface BoardProps {
   onFocus: (id: number | null) => void;
   onOpen: (id: number) => void;
   onMove: (cardId: number, status: Status, position: number) => Promise<void>;
-  onQuickAdd: (status: Status, title: string) => Promise<void>;
+  /** Resolves to true once the card exists, so the draft is only cleared on success. */
+  onQuickAdd: (status: Status, title: string) => Promise<boolean>;
   quickAddStatus: Status | null;
   setQuickAddStatus: (s: Status | null) => void;
   /** Cards per status before the search and filters; set only while one is active (card #108). */
@@ -89,13 +91,15 @@ function SortableCard(props: {
   labels: Map<number, Label>;
   repositories: Map<number, Repository>;
   focused: boolean;
+  saving: boolean;
   onOpen: (id: number) => void;
   onFocus: (id: number) => void;
 }) {
   const { card } = props;
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: card.id,
-    disabled: card.running,
+    // A card whose move is still on its way stays put until the server answers (card #165).
+    disabled: card.running || props.saving,
   });
   const onKeyDown = (e: KeyboardEvent) => {
     if (e.key === 'Enter') {
@@ -112,6 +116,7 @@ function SortableCard(props: {
       repositories={props.repositories}
       focused={props.focused}
       dragging={isDragging}
+      saving={props.saving}
       style={{ transform: CSS.Transform.toString(transform), transition }}
       {...attributes}
       {...listeners}
@@ -132,6 +137,7 @@ function Column(props: {
   labels: Map<number, Label>;
   repositories: Map<number, Repository>;
   focusId: number | null;
+  savingId: number | null;
   collapsed: boolean;
   toggleCollapsed: () => void;
   isOver: boolean;
@@ -139,10 +145,16 @@ function Column(props: {
   onFocus: (id: number) => void;
   quickAdd: boolean;
   setQuickAdd: (open: boolean) => void;
-  onQuickAdd: (title: string) => Promise<void>;
+  onQuickAdd: (title: string) => Promise<boolean>;
   total?: number;
 }) {
   const count = columnCountText(props.ids.length, props.total);
+  const attention = columnNeedsAttention(props.status, props.ids.length, props.total);
+  const title = (
+    <span className={'column-title' + (attention ? ' attention' : '')}>
+      <span className="column-title-text">{STATUS_LABELS[props.status]}</span>
+    </span>
+  );
   const countTitle = props.total === undefined ? undefined : `${props.ids.length} de ${props.total} cards com a busca e os filtros atuais`;
   const { setNodeRef } = useDroppable({ id: colId(props.status), disabled: NO_DROP.includes(props.status) });
   const [draft, setDraft] = useState('');
@@ -162,22 +174,25 @@ function Column(props: {
             {side === 'right' ? '‹' : '›'}
           </span>
           <span className="column-count" title={countTitle}>{count}</span>
-          <span className="column-title">{STATUS_LABELS[props.status]}</span>
+          {title}
         </button>
       </section>
     );
   }
   const canQuickAdd = props.status === 'backlog' || props.status === 'ready' || props.status === 'waiting_third_party';
-  const submit = async () => {
-    const title = draft.trim();
-    if (!title) return;
-    await props.onQuickAdd(title);
-    setDraft('');
-  };
+  // Enter and the button both add: one card per submit, however many times either is hit (card #165).
+  const { track, isBusy } = useBusy();
+  const adding = isBusy('add');
+  const submit = () =>
+    track('add', async () => {
+      const title = draft.trim();
+      if (!title) return;
+      if (await props.onQuickAdd(title)) setDraft('');
+    });
   return (
     <section className={'column' + (props.isOver ? ' drop-target' : '')} aria-label={STATUS_LABELS[props.status]}>
       <div className="column-head">
-        <span className="column-title">{STATUS_LABELS[props.status]}</span>
+        {title}
         <button
           className="info-btn"
           title={STATUS_DESCRIPTIONS[props.status]}
@@ -212,6 +227,7 @@ function Column(props: {
                 labels={props.labels}
                 repositories={props.repositories}
                 focused={props.focusId === id}
+                saving={props.savingId === id}
                 onOpen={props.onOpen}
                 onFocus={props.onFocus}
               />
@@ -229,6 +245,8 @@ function Column(props: {
                 rows={2}
                 placeholder="Título do card (Enter salva, Esc cancela)"
                 value={draft}
+                readOnly={adding}
+                aria-busy={adding || undefined}
                 onChange={(e) => setDraft(e.target.value)}
                 onKeyDown={(e) => {
                   e.stopPropagation();
@@ -240,10 +258,10 @@ function Column(props: {
                 }}
               />
               <div className="actions" style={{ marginTop: 6 }}>
-                <button className="btn primary small" onClick={() => void submit()}>
+                <ActionButton className="btn primary small" busy={adding} busyLabel="Adicionando…" onAction={submit}>
                   Adicionar
-                </button>
-                <button className="btn small" onClick={() => props.setQuickAdd(false)}>
+                </ActionButton>
+                <button className="btn small" disabled={adding} onClick={() => props.setQuickAdd(false)}>
                   Cancelar
                 </button>
               </div>
@@ -269,6 +287,9 @@ export function Board(props: BoardProps) {
   const [columns, setColumns] = useState<Columns>(() => group(props.cards, sort));
   const [activeId, setActiveId] = useState<number | null>(null);
   const [overCol, setOverCol] = useState<Status | null>(null);
+  // The card whose move is on its way: it keeps the place it was dropped in and shows "salvando"
+  // until the server answers, instead of jumping back while the request is out (card #165).
+  const [savingId, setSavingId] = useState<number | null>(null);
   const [collapsed, setCollapsed] = useState<Set<Status>>(readCollapsed);
   // Mouse drags after 6px. A finger has to hold the card first (card #106): a plain swipe scrolls the
   // board sideways and the columns up and down instead of picking the card up.
@@ -278,9 +299,18 @@ export function Board(props: BoardProps) {
   );
 
   useEffect(() => {
-    if (activeId === null) setColumns(group(props.cards, sort));
+    if (activeId === null && savingId === null) setColumns(group(props.cards, sort));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [props.cards, activeId, sort.key, sort.dir]);
+  }, [props.cards, activeId, savingId, sort.key, sort.dir]);
+
+  const save = async (moving: number, status: Status, position: number) => {
+    setSavingId(moving);
+    try {
+      await props.onMove(moving, status, position);
+    } finally {
+      setSavingId(null);
+    }
+  };
 
   const toggleCollapsed = (status: Status) => {
     const cfg = COLLAPSIBLE[status];
@@ -342,8 +372,14 @@ export function Board(props: BoardProps) {
       // place it would have in the board order (top of a newest-first list, else the end).
       const target = group(props.cards)[container].filter((id) => id !== moving);
       const index = NEWEST_FIRST_STATUSES.includes(container) ? 0 : target.length;
+      // Until the answer, the card waits in the column it was dropped in, where the sort puts it.
+      setColumns((prev) => {
+        const next = { ...prev, [card.status]: prev[card.status].filter((id) => id !== moving) };
+        const sorted = group([...props.cards.filter((c) => c.id !== moving), { ...card, status: container }], sort)[container];
+        return { ...next, [container]: sorted };
+      });
       setActiveId(null);
-      await props.onMove(moving, container, positionAt([...target.slice(0, index), moving, ...target.slice(index)], index, byId, moving));
+      await save(moving, container, positionAt([...target.slice(0, index), moving, ...target.slice(index)], index, byId, moving));
       return;
     }
     let ids = columns[container];
@@ -355,7 +391,7 @@ export function Board(props: BoardProps) {
     const unchanged = container === card.status && group(props.cards, sort)[container].indexOf(moving) === index;
     setActiveId(null);
     if (unchanged) return;
-    await props.onMove(moving, container, positionAt(ids, index, byId, moving));
+    await save(moving, container, positionAt(ids, index, byId, moving));
   };
 
   const active = activeId !== null ? byId.get(activeId) : undefined;
@@ -384,6 +420,7 @@ export function Board(props: BoardProps) {
             labels={labels}
             repositories={repositories}
             focusId={props.focusId}
+            savingId={savingId}
             collapsed={collapsed.has(status)}
             toggleCollapsed={() => toggleCollapsed(status)}
             isOver={activeId !== null && overCol === status && !NO_DROP.includes(status)}
