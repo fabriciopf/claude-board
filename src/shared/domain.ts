@@ -181,14 +181,16 @@ export function isEffortLevel(v: unknown): v is EffortLevel {
 }
 
 /**
- * The command-line agent a run drives (D92). Claude Code is the default and the only one with the
- * Board's full feature set; Gemini CLI runs the same cards with Google's models.
+ * The command-line agent a run drives (D92, D93). Claude Code is the default and the only one with the
+ * Board's full feature set; Antigravity CLI (`agy`, Google) runs the same cards with Google's models.
+ * Antigravity CLI replaced Gemini CLI, the second agent of D92: a card still saying 'gemini' reads as
+ * Antigravity (migration 16).
  */
-export type AgentId = 'claude' | 'gemini';
-export const AGENTS: AgentId[] = ['claude', 'gemini'];
+export type AgentId = 'claude' | 'antigravity';
+export const AGENTS: AgentId[] = ['claude', 'antigravity'];
 export const AGENT_LABELS: Record<AgentId, string> = {
   claude: 'Claude Code',
-  gemini: 'Gemini CLI',
+  antigravity: 'Antigravity CLI',
 };
 
 export function isAgentId(v: unknown): v is AgentId {
@@ -196,29 +198,38 @@ export function isAgentId(v: unknown): v is AgentId {
 }
 
 export function agentLabel(id: string | null | undefined): string {
+  // 'gemini' only names runs from before D93.
+  if (id === 'gemini') return 'Gemini CLI';
   return AGENT_LABELS[(id as AgentId) ?? 'claude'] ?? id ?? AGENT_LABELS.claude;
 }
 
-/** Gemini CLI models offered on the card and in the settings; any other id is also accepted. */
-export const GEMINI_MODEL_OPTIONS: { id: string; label: string }[] = [
-  { id: 'gemini-3-pro-preview', label: 'Gemini 3 Pro (preview)' },
-  { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro' },
-  { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash' },
+/** Command a person types to continue a card's session in a terminal, in the agent that holds it. */
+export function resumeCommand(agent: string | null | undefined, sessionId: string): string {
+  if (agent === 'antigravity') return `agy --conversation ${sessionId}`;
+  if (agent === 'gemini') return `gemini --resume ${sessionId}`;
+  return `claude --resume ${sessionId}`;
+}
+
+/** Antigravity CLI models offered on the card and in the settings (`agy models` lists the rest); any other id is also accepted. */
+export const ANTIGRAVITY_MODEL_OPTIONS: { id: string; label: string }[] = [
+  { id: 'gemini-3.8-flash-high', label: 'Gemini 3.8 Flash (high)' },
+  { id: 'gemini-4-neon-high', label: 'Gemini 4 Neon (high)' },
+  { id: 'gemini-pro-orchestrator', label: 'Gemini Pro Orchestrator' },
 ];
 
 /** Model options of an agent. */
 export function modelOptionsFor(agent: AgentId): { id: string; label: string }[] {
-  return agent === 'gemini' ? GEMINI_MODEL_OPTIONS : MODEL_OPTIONS;
+  return agent === 'antigravity' ? ANTIGRAVITY_MODEL_OPTIONS : MODEL_OPTIONS;
 }
 
 /**
- * Whether a model id belongs to an agent's family. A card switched from Claude Code to Gemini CLI may
- * still carry `claude-opus-5-5`: that model is not passed to Gemini (and the reverse).
+ * Whether a model id belongs to an agent's family. A card switched from Claude Code to Antigravity CLI
+ * may still carry `claude-opus-5-5`: that model is not passed to Antigravity (and the reverse).
  */
 export function modelFitsAgent(model: string, agent: AgentId): boolean {
   const claudeLike = /^(claude|opus|sonnet|haiku|fable)\b/i.test(model);
   const geminiLike = /^gemini/i.test(model);
-  return agent === 'gemini' ? !claudeLike : !geminiLike;
+  return agent === 'antigravity' ? !claudeLike : !geminiLike;
 }
 
 /** Model ids and aliases are one token (`claude-opus-5-5`, `opus`, `claude-sonnet-5-5[1m]`). */
@@ -296,7 +307,7 @@ export interface Card {
   /** Agent for this card's runs; null = the default in the settings (D92). */
   agent: AgentId | null;
   dangerousAllowed: boolean;
-  /** Session of the card's last run, in the agent that ran it (Claude Code or Gemini CLI). */
+  /** Session of the card's last run, in the agent that ran it (Claude Code or Antigravity CLI). */
   claudeSessionId: string | null;
   /** Short name Claude gave the task on its first run; also the Claude Code session name. */
   sessionName: string | null;

@@ -351,4 +351,12 @@ ALTER TABLE cards ADD COLUMN agent TEXT;
 ALTER TABLE executions ADD COLUMN agent TEXT;
 `,
   },
+  {
+    // Antigravity CLI replaced Gemini CLI as the second agent (D93): a card set to Gemini goes to
+    // Antigravity. Runs keep 'gemini', the agent that really ran them.
+    version: 16,
+    sql: `
+UPDATE cards SET agent = 'antigravity' WHERE agent = 'gemini';
+`,
+  },
 ];

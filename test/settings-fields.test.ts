@@ -6,6 +6,8 @@ describe('settings tabs', () => {
     expect(FIELDS.map((f) => f.key).sort()).toEqual(
       [
         'agendaRefreshMinutes',
+        'antigravityBin',
+        'antigravityModel',
         'autoSplit',
         'claudeBin',
         'claudeHome',
@@ -15,9 +17,6 @@ describe('settings tabs', () => {
         'defaultEffort',
         'defaultModel',
         'defaultPermissionMode',
-        'geminiApprovalMode',
-        'geminiBin',
-        'geminiModel',
         'heartbeatSeconds',
         'jiraBaseUrl',
         'maxConcurrency',
@@ -53,9 +52,9 @@ describe('settings tabs', () => {
     expect(tabOf('defaultPermissionMode')).toBe('claude');
   });
 
-  it('puts the agent choice and the Gemini CLI settings on their own tab (D92)', () => {
+  it('puts the agent choice and the Antigravity CLI settings on their own tab (D93)', () => {
     const tabOf = (key: string) => FIELDS.find((f) => f.key === key)?.tab;
-    for (const key of ['defaultAgent', 'geminiModel', 'geminiApprovalMode', 'geminiBin']) expect(tabOf(key)).toBe('gemini');
+    for (const key of ['defaultAgent', 'antigravityModel', 'antigravityBin']) expect(tabOf(key)).toBe('antigravity');
   });
 });
 
