@@ -1,6 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import type { CardSummary } from '../src/shared/domain';
-import { todayHeading, todayItems } from '../src/ui/TodayView';
+import { PENDING_TAB_LABEL, showPendingTab, todayHeading, todayItems } from '../src/ui/TodayView';
+
+describe('aba Pendências do cabeçalho (card #170)', () => {
+  it('says just "Pendências"', () => expect(PENDING_TAB_LABEL).toBe('Pendências'));
+  it('shows with at least one item', () => {
+    expect(showPendingTab(1)).toBe(true);
+    expect(showPendingTab(12)).toBe(true);
+  });
+  it('hides with zero items, text included', () => expect(showPendingTab(0)).toBe(false));
+  it('hides before the board loads', () => expect(showPendingTab(null)).toBe(false));
+});
 
 const card = (id: number, priority: number, extra: Partial<CardSummary> = {}) =>
   ({ id, priority, status: 'review', owner: 'claude', updatedAt: '2026-11-18T10:00:00Z', dueDate: null, ...extra }) as CardSummary;

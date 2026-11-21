@@ -1,6 +1,7 @@
-import { forwardRef, type HTMLAttributes } from 'react';
+import { forwardRef, type HTMLAttributes, type KeyboardEvent, type MouseEvent } from 'react';
 import { STATUS_LABELS, STATUS_SHORT_LABELS, showsChecklistOnTile, type App, type CardSummary, type Label, type Repository } from '../shared/domain';
 import { fmtDate, isOverdue } from './api';
+import { toggleLabelsExpanded, useLabelsExpanded } from './label-display';
 
 /** Checklist items shown on the cover; the rest is summed up as "+N itens". */
 const MAX_ITEMS = 6;
@@ -13,14 +14,25 @@ interface Props extends HTMLAttributes<HTMLDivElement> {
   focused?: boolean;
   dragging?: boolean;
   overlay?: boolean;
+  /** A move of this card is on its way to the server (card #165). */
+  saving?: boolean;
 }
 
 export const CardTile = forwardRef<HTMLDivElement, Props>(function CardTile(
-  { card, apps, labels, repositories, focused, dragging, overlay, className, ...rest },
+  { card, apps, labels, repositories, focused, dragging, overlay, saving, className, ...rest },
   ref,
 ) {
   const app = card.appId ? apps.get(card.appId) : undefined;
   const cardLabels = card.labelIds.map((id) => labels.get(id)).filter((l): l is Label => !!l);
+  const labelsExpanded = useLabelsExpanded();
+  // The labels sit inside the clickable tile: the click toggles them and must not open the card.
+  const onLabelsClick = (e: MouseEvent) => {
+    e.stopPropagation();
+    toggleLabelsExpanded();
+  };
+  const onLabelsKeyDown = (e: KeyboardEvent) => {
+    if (e.key === 'Enter' || e.key === ' ') e.stopPropagation();
+  };
   const cardRepos = (card.repositoryIds ?? []).map((id) => repositories?.get(id)).filter((x): x is Repository => !!x);
   const pr = card.links.find((l) => l.kind === 'pr');
   const overdue = card.status !== 'done' && isOverdue(card.dueDate);
@@ -30,16 +42,28 @@ export const CardTile = forwardRef<HTMLDivElement, Props>(function CardTile(
     focused ? 'focused' : '',
     dragging ? 'dragging' : '',
     overlay ? 'overlay' : '',
+    saving ? 'is-saving' : '',
     className ?? '',
   ].join(' ');
   return (
-    <div ref={ref} className={classes} data-card-id={card.id} tabIndex={0} {...rest}>
+    <div ref={ref} className={classes} data-card-id={card.id} tabIndex={0} aria-busy={saving || undefined} {...rest}>
       {cardLabels.length > 0 && (
-        <div className="card-labels" aria-label={'Labels: ' + cardLabels.map((l) => l.name).join(', ')}>
+        <button
+          type="button"
+          className={'card-labels' + (labelsExpanded ? ' expanded' : '')}
+          aria-label={'Labels: ' + cardLabels.map((l) => l.name).join(', ')}
+          aria-pressed={labelsExpanded}
+          title={labelsExpanded ? 'Clique para recolher os nomes das labels' : 'Clique para mostrar os nomes das labels'}
+          tabIndex={overlay ? -1 : 0}
+          onClick={onLabelsClick}
+          onKeyDown={onLabelsKeyDown}
+        >
           {cardLabels.map((l) => (
-            <span key={l.id} className="label-pill" style={{ background: l.color }} />
+            <span key={l.id} className="label-pill" style={{ background: l.color }} title={l.name}>
+              {labelsExpanded ? l.name : null}
+            </span>
           ))}
-        </div>
+        </button>
       )}
       {card.parentId && (
         <div className="card-parent muted small" title={card.parentTitle ?? undefined}>
@@ -84,6 +108,11 @@ export const CardTile = forwardRef<HTMLDivElement, Props>(function CardTile(
         </ul>
       )}
       <div className="card-meta">
+        {saving && (
+          <span className="saving-badge" aria-label="Salvando">
+            <span className="spinner" /> salvando
+          </span>
+        )}
         {card.running && (
           <span className="badge" aria-label="Execução rodando">
             <span className="spinner" /> rodando
@@ -104,6 +133,11 @@ export const CardTile = forwardRef<HTMLDivElement, Props>(function CardTile(
         {card.commentCount > 0 && <span className="badge">💬 {card.commentCount}</span>}
         {card.dueDate && <span className={'badge' + (overdue ? ' overdue' : '')}>⏱ {fmtDate(card.dueDate, false).slice(0, 5)}</span>}
         {pr && <span className="badge">PR</span>}
+        {card.automationId !== null && (
+          <span className="badge" title="Criado por uma automação">
+            ⟳ automação
+          </span>
+        )}
         {card.status === 'triage' && card.suggestedStatus && (
           <span className="badge">
             sugere: {STATUS_LABELS[card.suggestedStatus]}
