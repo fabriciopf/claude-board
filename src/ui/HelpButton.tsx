@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef } from 'react';
 import { CloseIcon, HelpIcon } from './HeaderIcons';
-import { HELP_KEY, HELP_STEPS, HELP_TIPS, SHORTCUT_GROUPS } from './help';
+import { HELP_KEY, helpSteps, helpTips, shortcutGroups } from './help';
+import { t } from './i18n';
 
 /**
  * The "?" button at the right end of the header and its panel (card #181, D88): how a card moves
@@ -48,20 +49,20 @@ export function HelpButton({ open, setOpen }: { open: boolean; setOpen: (open: b
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-controls="help-panel"
-        aria-label="Ajuda"
-        title={`Ajuda e atalhos de teclado (${HELP_KEY})`}
+        aria-label={t('app.help.aria')}
+        title={t('app.help.buttonTitle', { key: HELP_KEY })}
         onClick={() => setOpen(!open)}
       >
         <HelpIcon />
       </button>
       {open && (
-        <div className="help-panel" id="help-panel" role="dialog" aria-label="Ajuda" tabIndex={-1} ref={panelRef}>
+        <div className="help-panel" id="help-panel" role="dialog" aria-label={t('app.help.aria')} tabIndex={-1} ref={panelRef}>
           <div className="help-panel-head">
-            <h2>Como o Board funciona</h2>
+            <h2>{t('app.help.heading')}</h2>
             <button
               className="btn small icon-btn"
-              aria-label="Fechar a ajuda"
-              title="Fechar (Esc)"
+              aria-label={t('app.help.closeAria')}
+              title={t('app.help.closeTitle')}
               onClick={() => {
                 // Hand the focus back before the panel unmounts, so it does not drop to the page.
                 buttonRef.current?.focus();
@@ -72,18 +73,18 @@ export function HelpButton({ open, setOpen }: { open: boolean; setOpen: (open: b
             </button>
           </div>
           <ol className="help-steps">
-            {HELP_STEPS.map((step) => (
+            {helpSteps().map((step) => (
               <li key={step}>{step}</li>
             ))}
           </ol>
           <ul className="help-tips">
-            {HELP_TIPS.map((tip) => (
+            {helpTips().map((tip) => (
               <li key={tip}>{tip}</li>
             ))}
           </ul>
-          <h3>Atalhos de teclado</h3>
+          <h3>{t('app.help.shortcuts')}</h3>
           <div className="help-shortcuts">
-            {SHORTCUT_GROUPS.map((group) => (
+            {shortcutGroups().map((group) => (
               <section key={group.title}>
                 <h4>{group.title}</h4>
                 <dl>

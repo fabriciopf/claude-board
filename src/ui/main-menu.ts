@@ -1,5 +1,7 @@
 // The header's menu button (card #161, D71): the secondary views live behind it, the daily ones stay as tabs.
 
+import { t } from './i18n';
+
 export type View = 'board' | 'today' | 'automations' | 'import' | 'archived' | 'settings';
 
 /** Views that stay visible as tabs: the ones used every day. */
@@ -10,12 +12,10 @@ export const MENU_VIEWS = ['automations', 'import', 'archived', 'settings'] as c
 
 export type MenuView = (typeof MENU_VIEWS)[number];
 
-export const MENU_LABELS: Record<MenuView, string> = {
-  automations: 'Automações',
-  import: 'Importação',
-  archived: 'Arquivados',
-  settings: 'Configurações',
-};
+/** Text of each menu item, in the current language (card #184, D90). */
+export function menuLabel(view: MenuView): string {
+  return t(`app.menu.${view}`);
+}
 
 export function isMenuView(view: View): view is MenuView {
   return (MENU_VIEWS as readonly View[]).includes(view);
@@ -23,7 +23,7 @@ export function isMenuView(view: View): view is MenuView {
 
 /** Accessible name of the menu button: says where you are when the current view is one of its items. */
 export function menuButtonLabel(view: View): string {
-  return isMenuView(view) ? `Menu (em ${MENU_LABELS[view]})` : 'Menu';
+  return isMenuView(view) ? t('app.menu.labelIn', { view: menuLabel(view) }) : t('app.menu.label');
 }
 
 /**

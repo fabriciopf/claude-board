@@ -1,5 +1,6 @@
 // Order of the cards inside each board column and in the "Minhas pendências" list (card #152).
 // Each view keeps its own choice in localStorage, because their default orders differ.
+import { t, type MessageKey } from './i18n';
 
 export type SortKey = 'manual' | 'smart' | 'entered' | 'created' | 'updated' | 'priority' | 'due';
 export type SortDir = 'desc' | 'asc';
@@ -20,19 +21,38 @@ interface SortOption {
   defaultDir: SortDir;
 }
 
-const DATE_DIRS: Record<SortDir, string> = { desc: 'Mais recente primeiro', asc: 'Mais antigo primeiro' };
+// Labels are getters, so they are read at render in the current language (card #184, D90).
+const dirs = (desc: MessageKey, asc: MessageKey): Record<SortDir, string> => ({
+  get desc() {
+    return t(desc);
+  },
+  get asc() {
+    return t(asc);
+  },
+});
+
+const option = (key: SortKey, label: MessageKey, defaultDir: SortDir, dirLabels?: Record<SortDir, string>): SortOption => ({
+  key,
+  get label() {
+    return t(label);
+  },
+  dirLabels,
+  defaultDir,
+});
+
+const DATE_DIRS = dirs('board.sort.newest', 'board.sort.oldest');
 
 const COMMON: SortOption[] = [
-  { key: 'entered', label: 'Entrada na coluna', dirLabels: DATE_DIRS, defaultDir: 'desc' },
-  { key: 'created', label: 'Criação do card', dirLabels: DATE_DIRS, defaultDir: 'desc' },
-  { key: 'updated', label: 'Última atualização', dirLabels: DATE_DIRS, defaultDir: 'desc' },
-  { key: 'priority', label: 'Prioridade', dirLabels: { asc: 'Alta primeiro', desc: 'Baixa primeiro' }, defaultDir: 'asc' },
-  { key: 'due', label: 'Prazo', dirLabels: { asc: 'Mais próximo primeiro', desc: 'Mais distante primeiro' }, defaultDir: 'asc' },
+  option('entered', 'board.sort.entered', 'desc', DATE_DIRS),
+  option('created', 'board.sort.created', 'desc', DATE_DIRS),
+  option('updated', 'board.sort.updated', 'desc', DATE_DIRS),
+  option('priority', 'board.sort.priority', 'asc', dirs('board.sort.priorityDesc', 'board.sort.priorityAsc')),
+  option('due', 'board.sort.due', 'asc', dirs('board.sort.dueDesc', 'board.sort.dueAsc')),
 ];
 
 export const SORT_OPTIONS: Record<SortView, SortOption[]> = {
-  board: [{ key: 'manual', label: 'Ordem do quadro', defaultDir: 'asc' }, ...COMMON],
-  today: [{ key: 'smart', label: 'Prioridade e ação', defaultDir: 'asc' }, ...COMMON],
+  board: [option('manual', 'board.sort.manual', 'asc'), ...COMMON],
+  today: [option('smart', 'board.sort.smart', 'asc'), ...COMMON],
 };
 
 export const DEFAULT_SORT: Record<SortView, CardSort> = {

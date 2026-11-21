@@ -1,4 +1,5 @@
 // Board filters survive a page reload: they are kept in localStorage, like the theme and the view.
+import { t } from './i18n';
 
 export interface BoardFilters {
   text: string;
@@ -15,16 +16,14 @@ export const FILTERS_STORE_KEY = 'cb:filters';
 
 export const EMPTY_FILTERS: BoardFilters = { text: '', appId: '', labelId: '', repositoryId: '', owner: '', due: '', priority: '' };
 
-/** Options of the priority filter, same wording as the selector in the card modal. */
-export const PRIORITY_FILTER_OPTIONS: readonly { value: string; label: string }[] = [
-  { value: 'high', label: 'Alta e média-alta' },
-  { value: '1', label: '1 · Alta' },
-  { value: '2', label: '2 · Média-alta' },
-  { value: '3', label: '3 · Normal' },
-  { value: '4', label: '4 · Baixa' },
-];
+const PRIORITY_FILTER_VALUES = ['high', '1', '2', '3', '4'] as const;
 
-const PRIORITY_VALUES = new Set(PRIORITY_FILTER_OPTIONS.map((o) => o.value));
+/** Options of the priority filter, same wording as the selector in the card modal; read at render, in the current language. */
+export function priorityFilterOptions(): { value: string; label: string }[] {
+  return PRIORITY_FILTER_VALUES.map((value) => ({ value, label: t(`board.priority.${value}`) }));
+}
+
+const PRIORITY_VALUES = new Set<string>(PRIORITY_FILTER_VALUES);
 
 /** Whether a card's priority passes the priority filter; an empty or unknown filter lets every card through. */
 export function matchesPriority(priority: number, filter: string): boolean {
@@ -82,6 +81,20 @@ export function countByStatus(cards: readonly { status: string }[]): Record<stri
  */
 export function columnCountText(shown: number, total: number | undefined): string {
   return total === undefined ? String(shown) : `${shown}/${total}`;
+}
+
+/**
+ * Accessible name of a folded column's strip (card #187). The button's aria-label replaces its
+ * content, so without the count here a screen reader heard only "Expandir a Concluída".
+ */
+export function collapsedStripLabel(name: string, shown: number, total: number | undefined): string {
+  const count =
+    total === undefined
+      ? shown === 1
+        ? t('board.column.stripOne')
+        : t('board.column.stripMany', { n: shown })
+      : t('board.column.stripFiltered', { shown, total });
+  return `${t('board.column.expand', { status: name })}, ${count}`;
 }
 
 /**

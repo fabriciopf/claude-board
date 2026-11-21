@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type { App, AppCandidate } from '../shared/domain';
 import { ActionButton } from './ActionButton';
 import { api } from './api';
+import { t } from './i18n';
 
 const DEFAULT_COLOR = '#64748b';
 
@@ -20,11 +21,11 @@ function AppRow({ app, notify }: { app: App; notify: (msg: string, error?: boole
 
   return (
     <div className="app-row small">
-      <input type="color" value={app.color} aria-label={'Cor de ' + app.name} onChange={(e) => void save({ color: e.target.value })} />
+      <input type="color" value={app.color} aria-label={t('settings.apps.colorOf', { name: app.name })} onChange={(e) => void save({ color: e.target.value })} />
       <input
         className="input app-name"
         value={name}
-        aria-label={'Nome de ' + app.name}
+        aria-label={t('settings.apps.nameOf', { name: app.name })}
         style={{ textDecoration: app.archived ? 'line-through' : undefined }}
         onChange={(e) => setName(e.target.value)}
         onBlur={() => name.trim() !== app.name && void save({ name }, () => setName(app.name))}
@@ -32,14 +33,14 @@ function AppRow({ app, notify }: { app: App; notify: (msg: string, error?: boole
       <input
         className="input app-path"
         value={folder}
-        placeholder="Pasta (opcional)"
-        aria-label={'Pasta de ' + app.name}
+        placeholder={t('settings.apps.folderOptional')}
+        aria-label={t('settings.apps.folderOf', { name: app.name })}
         title={folder}
         onChange={(e) => setFolder(e.target.value)}
         onBlur={() => folder.trim() !== (app.path ?? '') && void save({ path: folder.trim() || null }, () => setFolder(app.path ?? ''))}
       />
-      <ActionButton className="btn small" busyLabel={app.archived ? 'Reativando…' : 'Arquivando…'} onAction={() => save({ archived: !app.archived })}>
-        {app.archived ? 'Reativar' : 'Arquivar'}
+      <ActionButton className="btn small" busyLabel={app.archived ? t('settings.apps.reactivating') : t('settings.apps.archiving')} onAction={() => save({ archived: !app.archived })}>
+        {app.archived ? t('settings.apps.reactivate') : t('settings.apps.archive')}
       </ActionButton>
     </div>
   );
@@ -68,7 +69,7 @@ export function AppsPanel({ apps, notify }: { apps: App[]; notify: (msg: string,
     api
       .post('/api/apps', input)
       .then(() => {
-        notify(`Projeto "${input.name}" criado`);
+        notify(t('settings.apps.created', { name: input.name }));
         done?.();
       })
       .catch((err) => notify(err.message, true));
@@ -76,10 +77,8 @@ export function AppsPanel({ apps, notify }: { apps: App[]; notify: (msg: string,
 
   return (
     <div className="panel">
-      <h3>Projetos</h3>
-      <p className="muted small">
-        O produto ou projeto de que a tarefa trata. Cada card pode ter um projeto; a execução recebe o nome e a pasta dele.
-      </p>
+      <h3>{t('settings.apps.title')}</h3>
+      <p className="muted small">{t('settings.apps.intro')}</p>
       {apps.length > 0 ? (
         <div className="list">
           {apps.map((a) => (
@@ -87,39 +86,39 @@ export function AppsPanel({ apps, notify }: { apps: App[]; notify: (msg: string,
           ))}
         </div>
       ) : (
-        <p className="muted small">Nenhum projeto cadastrado.</p>
+        <p className="muted small">{t('settings.apps.none')}</p>
       )}
       <div className="actions">
-        <input type="color" value={draft.color} aria-label="Cor do novo projeto" onChange={(e) => setDraft({ ...draft, color: e.target.value })} />
-        <input className="input" placeholder="Novo projeto" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
-        <input className="input" placeholder="Pasta (opcional)" value={draft.path} onChange={(e) => setDraft({ ...draft, path: e.target.value })} />
+        <input type="color" value={draft.color} aria-label={t('settings.apps.newColor')} onChange={(e) => setDraft({ ...draft, color: e.target.value })} />
+        <input className="input" placeholder={t('settings.apps.new')} value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
+        <input className="input" placeholder={t('settings.apps.folderOptional')} value={draft.path} onChange={(e) => setDraft({ ...draft, path: e.target.value })} />
         <ActionButton
           className="btn"
           disabled={!draft.name.trim()}
-          busyLabel="Criando…"
+          busyLabel={t('settings.view.creating')}
           onAction={() => create({ ...draft, path: draft.path.trim() || null }, () => setDraft({ name: '', path: '', color: DEFAULT_COLOR }))}
         >
-          Criar projeto
+          {t('settings.apps.create')}
         </ActionButton>
       </div>
       {shown && shown.length > 0 && (
         <>
-          <h4 className="apps-suggest-title">Encontrados no workspace</h4>
-          <p className="muted small">Repositórios e apps de monorepo (pastas em apps/) que ainda não estão na lista. Adicione e renomeie à vontade.</p>
+          <h4 className="apps-suggest-title">{t('settings.apps.found')}</h4>
+          <p className="muted small">{t('settings.apps.foundIntro')}</p>
           <div className="list">
             {shown.map((c) => (
               <div key={c.path} className="app-suggest small">
-                <span className="pill">{c.kind === 'repo' ? 'repositório' : 'app'}</span>
+                <span className="pill">{c.kind === 'repo' ? t('settings.apps.kindRepo') : t('settings.apps.kindApp')}</span>
                 <span className="app-name">{c.name}</span>
                 <span className="muted app-path" title={c.path}>
                   {c.path}
                 </span>
                 <ActionButton
                   className="btn small"
-                  busyLabel="Adicionando…"
+                  busyLabel={t('settings.view.adding')}
                   onAction={() => create({ name: c.name, path: c.path, color: DEFAULT_COLOR }, () => setAdded((prev) => new Set(prev).add(c.path)))}
                 >
-                  Adicionar
+                  {t('settings.apps.add')}
                 </ActionButton>
               </div>
             ))}

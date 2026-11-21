@@ -1,12 +1,13 @@
 import { AUTO_CONCURRENCY, CONCURRENCY_PRESETS, UNLIMITED_CONCURRENCY, concurrencyOptionLabel, type ConcurrencyInfo } from '../shared/domain';
+import { t } from './i18n';
 
 /** Tooltip of the header counter, "rodando N de <seletor>" (D83). The automatic limit is never below one (MIN_RUNS). */
 export function concurrencyTitle(c: ConcurrencyInfo | undefined): string {
-  if (!c) return 'Execuções rodando agora';
-  if (c?.mode === 'auto') return `Execuções rodando agora. Automático: até ${c.limit} por vez (${c.reason}). Clique para escolher outro modo.`;
-  if (c?.mode === 'unlimited') return 'Execuções rodando agora. Sem limite: todo card da fila começa na hora. Clique para escolher outro modo.';
-  if (c?.limit === 0) return 'Execuções rodando agora. Em 0, nada novo sai da fila. Clique para escolher outro modo.';
-  return 'Execuções rodando agora. Clique para escolher quantas rodam ao mesmo tempo.';
+  if (!c) return t('settings.conc.titleNone');
+  if (c?.mode === 'auto') return t('settings.conc.titleAuto', { limit: String(c.limit), reason: c.reason });
+  if (c?.mode === 'unlimited') return t('settings.conc.titleUnlimited');
+  if (c?.limit === 0) return t('settings.conc.titleZero');
+  return t('settings.conc.titleFixed');
 }
 
 /** The setting the header selector shows as chosen (D83). */

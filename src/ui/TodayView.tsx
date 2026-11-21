@@ -1,13 +1,14 @@
-import { STATUS_LABELS, type App, type CardSummary } from '../shared/domain';
+import type { App, CardSummary } from '../shared/domain';
 import { fmtDate, isOverdue } from './api';
 import { DEFAULT_SORT, compareCards, type CardSort } from './card-sort';
 import { UnseenDot } from './CardTile';
+import { statusLabel, t } from './i18n';
 
 /** Name of the view (card #152; it was "Hoje"). The code keeps the 'today' id, also stored in cb:view. */
-export const PENDING_VIEW_NAME = 'Minhas pendências';
+export const pendingViewName = () => t('board.today.viewName');
 
 /** Text of the header tab (card #170); the count goes in an orange badge next to it. */
-export const PENDING_TAB_LABEL = 'Pendências';
+export const pendingTabLabel = () => t('board.today.tabLabel');
 
 /**
  * Whether the header shows the pending tab (card #170): only with at least one item. Before the
@@ -32,12 +33,12 @@ export function todayItems(cards: CardSummary[], sort: CardSort = DEFAULT_SORT.t
   const items: Item[] = [];
   for (const card of cards) {
     if (card.status === 'waiting_user') {
-      if (card.hasOpenQuestion) items.push({ card, reason: 'O Claude fez uma pergunta', tone: 'warn', rank: 0 });
-      else items.push({ card, reason: 'A execução parou e precisa de você', tone: 'danger', rank: 1 });
+      if (card.hasOpenQuestion) items.push({ card, reason: t('board.today.question'), tone: 'warn', rank: 0 });
+      else items.push({ card, reason: t('board.today.stopped'), tone: 'danger', rank: 1 });
     } else if (card.status === 'review') {
-      items.push({ card, reason: 'Pronto para revisar', tone: 'ok', rank: 2 });
+      items.push({ card, reason: t('board.today.review'), tone: 'ok', rank: 2 });
     } else if (card.owner === 'user' && card.status !== 'done' && isOverdue(card.dueDate)) {
-      items.push({ card, reason: `Prazo vencido (${fmtDate(card.dueDate, false)})`, tone: 'danger', rank: 3 });
+      items.push({ card, reason: t('board.today.overdue', { date: fmtDate(card.dueDate, false) }), tone: 'danger', rank: 3 });
     }
   }
   if (sort.key !== 'smart') return items.sort((a, b) => compareCards(a.card, b.card, sort) || a.rank - b.rank);
@@ -47,8 +48,14 @@ export function todayItems(cards: CardSummary[], sort: CardSort = DEFAULT_SORT.t
   );
 }
 
-/** Same wording as the priority selector in the card modal. */
-export const PRIORITY_LABELS: Record<number, string> = { 1: 'Alta', 2: 'Média-alta', 3: 'Normal', 4: 'Baixa' };
+/** Same wording as the priority selector in the card modal; '?' for a priority out of 1..4. */
+export function priorityLabel(priority: number): string {
+  if (priority === 1) return t('board.today.priority1');
+  if (priority === 2) return t('board.today.priority2');
+  if (priority === 3) return t('board.today.priority3');
+  if (priority === 4) return t('board.today.priority4');
+  return '?';
+}
 
 function priorityTone(priority: number): string {
   if (priority === 1) return 'danger';
@@ -61,15 +68,15 @@ function priorityTone(priority: number): string {
  * of the items it shows, so a short list is not read as "nothing else needs me".
  */
 export function todayHeading(shown: number, total: number | undefined): string {
-  return total === undefined ? PENDING_VIEW_NAME : `${PENDING_VIEW_NAME} · ${shown} de ${total}`;
+  return total === undefined ? pendingViewName() : t('board.today.heading', { name: pendingViewName(), shown, total });
 }
 
 /** Date shown under each item: the one the chosen sort reads, so the order can be checked at a glance. */
 export function rowDate(card: CardSummary, sort: CardSort | undefined): string {
-  if (sort?.key === 'entered') return `na lista desde ${fmtDate(card.enteredStatusAt)}`;
-  if (sort?.key === 'created') return `criado ${fmtDate(card.createdAt)}`;
-  if (sort?.key === 'due') return card.dueDate ? `prazo ${fmtDate(card.dueDate, false)}` : 'sem prazo';
-  return `atualizado ${fmtDate(card.updatedAt)}`;
+  if (sort?.key === 'entered') return t('board.today.enteredSince', { date: fmtDate(card.enteredStatusAt) });
+  if (sort?.key === 'created') return t('board.today.created', { date: fmtDate(card.createdAt) });
+  if (sort?.key === 'due') return card.dueDate ? t('board.today.due', { date: fmtDate(card.dueDate, false) }) : t('board.today.noDue');
+  return t('board.today.updated', { date: fmtDate(card.updatedAt) });
 }
 
 export function TodayView({
@@ -96,8 +103,8 @@ export function TodayView({
         {items.length === 0 ? (
           <p className="muted">
             {total
-              ? 'Nenhuma pendência bate com a busca e os filtros.'
-              : 'Nada precisa de você agora. O Claude segue com a fila.'}
+              ? t('board.today.noMatch')
+              : t('board.today.empty')}
           </p>
         ) : (
           <div className="list today-list">
@@ -105,8 +112,8 @@ export function TodayView({
               const app = card.appId ? appById.get(card.appId) : undefined;
               return (
                 <div key={card.id} className="list-row" role="button" tabIndex={0} onClick={() => onOpen(card.id)} onKeyDown={(e) => e.key === 'Enter' && onOpen(card.id)}>
-                  <span className={'pill today-priority ' + priorityTone(card.priority)} title="Prioridade">
-                    P{card.priority} · {PRIORITY_LABELS[card.priority] ?? '?'}
+                  <span className={'pill today-priority ' + priorityTone(card.priority)} title={t('board.today.priorityTitle')}>
+                    P{card.priority} · {priorityLabel(card.priority)}
                   </span>
                   <span className={'pill ' + tone}>{reason}</span>
                   <div className="grow">
@@ -115,7 +122,7 @@ export function TodayView({
                       <span className="muted small">#{card.id}</span> {card.title}
                     </div>
                     <div className="muted small">
-                      {STATUS_LABELS[card.status]}
+                      {statusLabel(card.status)}
                       {app ? ` · ${app.name}` : ''} · {rowDate(card, sort)}
                     </div>
                   </div>

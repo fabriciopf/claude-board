@@ -1,80 +1,81 @@
 import { useState, type ReactElement } from 'react';
-import {
-  EXECUTION_STATUS_LABELS,
-  STATUS_LABELS,
-  effortLabel,
-  modelLabel,
-  type BoardEvent,
-  type Comment,
-  type Execution,
-  type Status,
-} from '../shared/domain';
+import { effortLabel, modelLabel, STATUSES, type BoardEvent, type Comment, type CommentKind, type Execution, type Status } from '../shared/domain';
 import { ActionButton } from './ActionButton';
 import { OwnerAvatar } from './OwnerAvatar';
 import { api, fmtDate } from './api';
+import { executionStatusLabel, locale, statusLabel, t, type MessageKey } from './i18n';
 import { renderMarkdown } from './markdown';
 
-const AUTHOR = { user: 'Você', claude: 'Claude', system: 'Sistema' } as const;
-const KIND = { comment: '', question: 'pergunta', answer: 'resposta', run_summary: 'resumo da execução', adjustment: 'ajustes pedidos' };
+type Author = 'user' | 'claude' | 'system';
+const author = (a: Author) => t(`card.author.${a}`);
+/** Author at the start of an event line ("<author> <verb>"); in Spanish "Tú" would not agree with the verb. */
+const eventAuthor = (a: Author) => (a === 'user' ? t('card.eventAuthor.user') : author(a));
+const kindLabel = (k: CommentKind) => (k === 'comment' ? '' : t(`card.kind.${k}`));
 
-const FIELD_NAMES: Record<string, string> = {
-  title: 'o título',
-  descriptionMd: 'a descrição',
-  owner: 'o dono',
-  // The area field was removed (card #47); kept so old history entries still read well.
-  areaId: 'a área',
-  appId: 'o projeto',
-  priority: 'a prioridade',
-  dueDate: 'o prazo',
-  repoPath: 'o repositório',
-  baseBranch: 'a branch base',
-  permissionMode: 'o modo de permissão',
-  maxTurns: 'o máx. de turnos',
-  model: 'o modelo',
-  effort: 'o effort',
-  dangerousAllowed: 'o modo sem permissões',
-  suggestedStatus: 'a sugestão',
-};
+// The area field was removed (card #47); its name is kept so old history entries still read well.
+const FIELDS = [
+  'title',
+  'descriptionMd',
+  'owner',
+  'areaId',
+  'appId',
+  'priority',
+  'dueDate',
+  'repoPath',
+  'baseBranch',
+  'permissionMode',
+  'maxTurns',
+  'model',
+  'effort',
+  'dangerousAllowed',
+  'suggestedStatus',
+] as const;
+const fieldName = (f: string) => ((FIELDS as readonly string[]).includes(f) ? t(`card.field.${f as (typeof FIELDS)[number]}`) : f);
+const statusName = (s: unknown) => ((STATUSES as readonly unknown[]).includes(s) ? statusLabel(s as Status) : String(s));
 
 function eventText(e: BoardEvent): string | null {
   const p = e.payload as Record<string, any>;
   switch (e.type) {
     case 'created':
-      return `criou o card em ${STATUS_LABELS[p.status as Status] ?? p.status}${p.parentId ? ` como tarefa do card #${p.parentId}` : ''}`;
-    case 'split':
-      return `dividiu o card em ${(p.children as number[] | undefined)?.length ?? 0} tarefas: ${((p.children as number[] | undefined) ?? []).map((id) => `#${id}`).join(', ')}`;
+      return p.parentId
+        ? t('card.event.createdAsTask', { status: statusName(p.status), parent: p.parentId })
+        : t('card.event.created', { status: statusName(p.status) });
+    case 'split': {
+      const children = (p.children as number[] | undefined) ?? [];
+      return t('card.event.split', { count: children.length, ids: children.map((id) => `#${id}`).join(', ') });
+    }
     case 'moved':
-      return `moveu de ${STATUS_LABELS[p.from as Status] ?? p.from} para ${STATUS_LABELS[p.to as Status] ?? p.to}${p.reason ? ` (${p.reason})` : ''}`;
+      return t('card.event.moved', { from: statusName(p.from), to: statusName(p.to) }) + (p.reason ? ` (${p.reason})` : '');
     case 'owner':
-      return `passou o card para ${p.to === 'claude' ? 'o Claude' : 'você'}`;
+      return p.to === 'claude' ? t('card.event.ownerClaude') : t('card.event.ownerUser');
     case 'updated':
-      return `editou ${((p.fields as string[]) ?? []).map((f) => FIELD_NAMES[f] ?? f).join(', ')}`;
+      return t('card.event.updated', { fields: ((p.fields as string[]) ?? []).map(fieldName).join(', ') });
     case 'labels':
-      return 'mudou as labels';
+      return t('card.event.labels');
     case 'repositories':
-      return 'mudou os repositórios';
+      return t('card.event.repositories');
     case 'archived':
-      return 'arquivou o card';
+      return t('card.event.archived');
     case 'unarchived':
-      return 'desarquivou o card';
+      return t('card.event.unarchived');
     case 'link_added':
-      return `anexou ${p.kind}: ${p.title || p.value}`;
+      return t('card.event.linkAdded', { kind: p.kind, link: p.title || p.value });
     case 'link_removed':
-      return `removeu o link ${p.title || p.value}`;
+      return t('card.event.linkRemoved', { link: p.title || p.value });
     case 'checklist_added':
-      return `adicionou ao checklist: ${p.text}`;
+      return t('card.event.checklistAdded', { text: p.text });
     case 'checklist_checked':
-      return `concluiu: ${p.text}`;
+      return t('card.event.checklistChecked', { text: p.text });
     case 'checklist_unchecked':
-      return `reabriu: ${p.text}`;
+      return t('card.event.checklistUnchecked', { text: p.text });
     case 'checklist_removed':
-      return `removeu do checklist: ${p.text}`;
+      return t('card.event.checklistRemoved', { text: p.text });
     case 'app_inferred':
-      return `definiu o projeto ${p.name} pelo texto do card`;
+      return t('card.event.appInferred', { name: p.name });
     case 'renamed':
-      return `renomeou o card para "${p.to}" (nome da sessão)`;
+      return t('card.event.renamed', { to: p.to });
     case 'approved':
-      return 'aprovou o trabalho';
+      return t('card.event.approved');
     case 'answered':
       return null; // the answer itself is shown as a comment
     case 'viewed':
@@ -88,11 +89,11 @@ function eventText(e: BoardEvent): string | null {
     case 'execution_finished':
       return null;
     case 'execution_reattached':
-      return 'o Board reiniciou e voltou a acompanhar a execução em curso';
+      return t('card.event.reattached');
     case 'session_linked':
-      return `sessão interativa ${p.event === 'SessionStart' ? 'iniciada' : 'atualizada'} no VS Code`;
+      return p.event === 'SessionStart' ? t('card.event.sessionStarted') : t('card.event.sessionUpdated');
     case 'imported':
-      return `importou a sessão ${String(p.sessionId).slice(0, 8)}`;
+      return t('card.event.imported', { id: String(p.sessionId).slice(0, 8) });
     default:
       return e.type;
   }
@@ -119,20 +120,20 @@ function Transcript({ executionId }: { executionId: number }) {
   };
   if (!items && !error) {
     return (
-      <ActionButton className="btn small" busyLabel="Carregando o transcript…" onAction={load}>
-        Ver transcript
+      <ActionButton className="btn small" busyLabel={t('card.transcript.loading')} onAction={load}>
+        {t('card.transcript.show')}
       </ActionButton>
     );
   }
   if (error) return <div className="error-box">{error}</div>;
   return (
     <div className="transcript">
-      {items!.length === 0 && <div className="muted small">Transcript vazio.</div>}
+      {items!.length === 0 && <div className="muted small">{t('card.transcript.empty')}</div>}
       {items!.map((it, i) => {
         if (it.kind === 'text' || it.kind === 'user') {
           return (
             <div key={i} className={'tr-item ' + it.kind}>
-              <div className="muted small">{it.kind === 'user' ? 'Prompt' : 'Claude'}</div>
+              <div className="muted small">{it.kind === 'user' ? t('card.transcript.prompt') : 'Claude'}</div>
               <div className="md" style={{ padding: 0, background: 'transparent' }} dangerouslySetInnerHTML={{ __html: renderMarkdown(it.text ?? '') }} />
             </div>
           );
@@ -152,6 +153,10 @@ function Transcript({ executionId }: { executionId: number }) {
   );
 }
 
+const PROMPT_KINDS = ['reply', 'adjust', 'retry', 'requeue', 'moved'] as const;
+const promptKindLabel = (kind: string) =>
+  (PROMPT_KINDS as readonly string[]).includes(kind) ? t(`card.prompt.${kind}` as MessageKey) : kind;
+
 function ExecutionBlock({ exec }: { exec: Execution }) {
   const [open, setOpen] = useState(exec.status !== 'success');
   const tokens = exec.tokensIn + exec.tokensOut;
@@ -159,24 +164,26 @@ function ExecutionBlock({ exec }: { exec: Execution }) {
     <div className="exec">
       <div className="exec-head" onClick={() => setOpen(!open)} role="button" aria-expanded={open}>
         <span>{open ? '▾' : '▸'}</span>
-        <strong>Execução #{exec.id}</strong>
-        <span className={'exec-status ' + exec.status}>{EXECUTION_STATUS_LABELS[exec.status]}</span>
+        <strong>{t('card.exec.title', { id: exec.id })}</strong>
+        <span className={'exec-status ' + exec.status}>{executionStatusLabel(exec.status)}</span>
         <span className="muted small">{fmtDate(exec.startedAt)}</span>
-        <span className="muted small">
-          {exec.turns} turnos · {tokens.toLocaleString('pt-BR')} tokens
-        </span>
+        <span className="muted small">{t('card.exec.stats', { turns: exec.turns, tokens: tokens.toLocaleString(locale()) })}</span>
         {(exec.model || exec.effort) && (
-          <span className="muted small" title="Modelo e effort desta execução">
+          <span className="muted small" title={t('card.exec.modelEffort')}>
             {[exec.model && modelLabel(exec.model), exec.effort && effortLabel(exec.effort)].filter(Boolean).join(' · ')}
           </span>
         )}
-        {exec.promptKind && exec.promptKind !== 'first' && <span className="pill">{({ reply: 'retomada', adjust: 'ajustes', retry: 'nova tentativa', requeue: 'de volta à fila', moved: 'sessão nova' } as Record<string, string>)[exec.promptKind] ?? exec.promptKind}</span>}
+        {exec.promptKind && exec.promptKind !== 'first' && <span className="pill">{promptKindLabel(exec.promptKind)}</span>}
       </div>
       {open && (
         <div className="exec-body">
           {exec.errorMd && <div className="error-box">{exec.errorMd}</div>}
           {exec.summaryMd && <div className="md" dangerouslySetInnerHTML={{ __html: renderMarkdown(exec.summaryMd) }} />}
-          {exec.claudeSessionId && <div className="muted small" style={{ margin: '6px 0' }}>Sessão: {exec.claudeSessionId}</div>}
+          {exec.claudeSessionId && (
+            <div className="muted small" style={{ margin: '6px 0' }}>
+              {t('card.exec.session', { id: exec.claudeSessionId })}
+            </div>
+          )}
           {exec.transcriptPath && <Transcript executionId={exec.id} />}
         </div>
       )}
@@ -199,12 +206,12 @@ export function Timeline({ comments, events, executions }: { comments: Comment[]
               S
             </span>
           ) : (
-            <OwnerAvatar owner={c.author} label={AUTHOR[c.author]} style={{ marginLeft: 0 }} />
+            <OwnerAvatar owner={c.author} label={author(c.author)} style={{ marginLeft: 0 }} />
           )}
           <div className="tl-body">
             <div className="tl-head">
-              <strong>{AUTHOR[c.author]}</strong>
-              {KIND[c.kind] && <span className={'tl-kind ' + c.kind}>{KIND[c.kind]}</span>}
+              <strong>{author(c.author)}</strong>
+              {kindLabel(c.kind) && <span className={'tl-kind ' + c.kind}>{kindLabel(c.kind)}</span>}
               <span>{fmtDate(c.createdAt)}</span>
             </div>
             <div className="md" dangerouslySetInnerHTML={{ __html: renderMarkdown(c.bodyMd) }} />
@@ -221,14 +228,14 @@ export function Timeline({ comments, events, executions }: { comments: Comment[]
       key: 'e' + e.id,
       node: (
         <div className="tl-event">
-          <strong>{AUTHOR[e.author]}</strong> {text} · {fmtDate(e.createdAt)}
+          <strong>{eventAuthor(e.author)}</strong> {text} · {fmtDate(e.createdAt)}
         </div>
       ),
     });
   }
   for (const x of executions) entries.push({ at: x.startedAt, key: 'x' + x.id, node: <ExecutionBlock exec={x} /> });
   entries.sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0));
-  if (!entries.length) return <div className="muted small">Nenhuma atividade ainda.</div>;
+  if (!entries.length) return <div className="muted small">{t('card.timeline.empty')}</div>;
   return (
     <div className="timeline">
       {entries.map((e) => (

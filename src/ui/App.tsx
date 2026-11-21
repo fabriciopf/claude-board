@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { STATUS_LABELS, type Card, type CardSummary, type Status } from '../shared/domain';
+import type { Card, CardSummary, Status } from '../shared/domain';
+import { statusLabel, t } from './i18n';
+import { LanguageMenu } from './LanguageMenu';
 import { ActionButton } from './ActionButton';
 import { api, useServerEvents, type BoardData } from './api';
 import { Board, navigationGrid, readCollapsed } from './Board';
@@ -14,7 +16,7 @@ import { FILTERS_STORE_KEY, countByStatus, filterCards, hasActiveFilter, parseFi
 import { FilterBar } from './FilterBar';
 import { MODAL_SETTLE_MS, nextInColumn } from './next-card';
 import { SettingsView } from './SettingsView';
-import { PENDING_TAB_LABEL, PENDING_VIEW_NAME, TodayView, showPendingTab, todayItems } from './TodayView';
+import { TodayView, pendingTabLabel, pendingViewName, showPendingTab, todayItems } from './TodayView';
 import { SORT_STORE_KEYS, parseSort, type CardSort } from './card-sort';
 import { PublishBanner, publishLevel, publishVisible } from './PublishBanner';
 import type { Notice } from './notices';
@@ -33,7 +35,7 @@ import { isHelpKey } from './help';
 
 type Theme = 'system' | 'light' | 'dark';
 
-const THEME_LABELS: Record<Theme, string> = { system: 'Tema do sistema', light: 'Tema claro', dark: 'Tema escuro' };
+const themeLabel = (theme: Theme) => t(`app.theme.${theme}`);
 const NEXT_THEME: Record<Theme, Theme> = { system: 'light', light: 'dark', dark: 'system' };
 
 function readStore(key: string): string | null {
@@ -88,7 +90,7 @@ export function App() {
       setData(await api.get<BoardData>('/api/board'));
       if (view === 'archived') setArchived((await api.get<BoardData>('/api/board?archived=1')).cards);
     } catch (err) {
-      notify('Não consegui falar com o servidor do Board: ' + (err as Error).message, true);
+      notify(t('app.server.unreachable', { error: (err as Error).message }), true);
     }
   }, [notify, view]);
 
@@ -157,9 +159,10 @@ export function App() {
     if (kind) {
       if (soundRef.current) ring(kind);
       const card = cardsRef.current.find((c) => c.id === msg.cardId);
-      const title = card ? `#${card.id} ${card.title}` : `Card #${msg.cardId}`;
+      const title = card ? `#${card.id} ${card.title}` : t('app.notification.card', { id: String(msg.cardId) });
       const to = msg.data?.to;
-      const body = to === 'review' ? 'Pronto para revisão' : to === 'waiting_third_party' ? 'Aguardando terceiro' : 'O Claude precisa de você';
+      const body =
+        to === 'review' ? t('app.notification.review') : to === 'waiting_third_party' ? t('app.notification.thirdParty') : t('app.notification.needsYou');
       if ('Notification' in window && Notification.permission === 'granted' && document.visibilityState !== 'visible') {
         // The chime already rang: keep the system notification quiet.
         new Notification(body, { body: title, tag: `card-${msg.cardId}`, silent: soundRef.current });
@@ -281,7 +284,7 @@ export function App() {
     notices.push({
       key: 'paused',
       level: 'warning',
-      node: <div className="banner warning">O runner está pausado: nada sai da fila "{STATUS_LABELS.ready}" até você retomar.</div>,
+      node: <div className="banner warning">{t('app.banner.paused', { ready: statusLabel('ready') })}</div>,
     });
   }
   if (!runner?.paused && runner?.concurrency?.mode === 'fixed' && runner.concurrency.limit === 0 && readyCount > 0) {
@@ -290,7 +293,7 @@ export function App() {
       level: 'warning',
       node: (
         <div className="banner warning">
-          Execuções simultâneas em 0: nada sai da fila "{STATUS_LABELS.ready}" ({readyCount}) até você escolher outro valor no contador "rodando".
+          {t('app.banner.zero', { ready: statusLabel('ready'), count: readyCount })}
         </div>
       ),
     });
@@ -301,7 +304,7 @@ export function App() {
       level: 'warning',
       node: (
         <div className="banner warning">
-          Modo automático segurando a fila "{STATUS_LABELS.ready}" ({readyCount}): {runner.concurrency.reason}.
+          {t('app.banner.auto', { ready: statusLabel('ready'), count: readyCount, reason: runner.concurrency.reason })}
         </div>
       ),
     });
@@ -332,7 +335,7 @@ export function App() {
     if (!runner) return;
     try {
       await api.post('/api/runner/pause', { paused: !runner.paused });
-      notify(runner.paused ? 'Runner retomado' : 'Runner pausado');
+      notify(runner.paused ? t('app.runner.resumed') : t('app.runner.paused'));
       await load();
     } catch (err) {
       notify((err as Error).message, true);
@@ -349,7 +352,7 @@ export function App() {
           <button
             className="brand"
             onClick={() => setView('board')}
-            title="Ir para o Quadro"
+            title={t('app.brand.title')}
             aria-current={view === 'board' ? 'page' : undefined}
           >
             {/* Same drawing as the favicon in index.html, so the header and the browser tab match. */}
@@ -364,14 +367,14 @@ export function App() {
         {/* Pending tab only with something pending, text and count together (card #170).
             With no "Quadro" tab (D81) the nav exists only when this tab does. */}
         {showPendingTab(pendingCount) && (
-          <nav className="tabs" aria-label="Visões">
+          <nav className="tabs" aria-label={t('app.tabs.aria')}>
             <button
               className={'tab' + (view === 'today' ? ' active' : '')}
               onClick={() => setView('today')}
-              aria-label={`${PENDING_TAB_LABEL}: ${pendingCount}`}
-              title={PENDING_VIEW_NAME}
+              aria-label={`${pendingTabLabel()}: ${pendingCount}`}
+              title={pendingViewName()}
             >
-              {PENDING_TAB_LABEL}
+              {pendingTabLabel()}
               <span className="tab-badge" aria-hidden="true">
                 {pendingCount}
               </span>
@@ -383,7 +386,7 @@ export function App() {
             {/* Runs and the 5-hour session in one pill: the automatic mode paces the first by the second (D83). */}
             <span className="counter runner-usage">
               <span className="runner-part" title={concurrencyTitle(runner.concurrency)}>
-                {runner.running > 0 && <span className="spinner" />} rodando <strong>{runner.running}</strong>
+                {runner.running > 0 && <span className="spinner" />} {t('app.runner.running')} <strong>{runner.running}</strong>
                 {runner.concurrency && <ConcurrencySelect concurrency={runner.concurrency} onChanged={() => void load()} notify={notify} />}
               </span>
               <span className="counter-sep" aria-hidden="true" />
@@ -395,12 +398,8 @@ export function App() {
               className={'btn small icon-btn' + (runner.paused ? ' primary' : '')}
               busyLabel=""
               onAction={togglePause}
-              aria-label={runner.paused ? 'Retomar runner' : 'Pausar runner'}
-              title={
-                runner.paused
-                  ? 'Runner pausado. Clique para retomar a fila.'
-                  : 'Runner rodando. Clique para pausar: nada novo sai da fila.'
-              }
+              aria-label={runner.paused ? t('app.runner.resume') : t('app.runner.pause')}
+              title={runner.paused ? t('app.runner.pausedTitle') : t('app.runner.runningTitle')}
             >
               {runner.paused ? <PlayIcon /> : <PauseIcon />}
             </ActionButton>
@@ -408,28 +407,33 @@ export function App() {
               className="btn small icon-btn"
               onClick={toggleSound}
               aria-pressed={sound}
-              aria-label={sound ? 'Som ligado' : 'Som desligado'}
+              aria-label={sound ? t('app.sound.on') : t('app.sound.off')}
               title={
                 sound
-                  ? 'Som ligado: toca quando um card entra em "Aguardando você", "Aguardando terceiro" ou "Em revisão". Clique para silenciar.'
-                  : 'Som desligado. Clique para tocar um som quando um card entrar em "Aguardando" ou "Em revisão".'
+                  ? t('app.sound.onTitle', {
+                      waitingUser: statusLabel('waiting_user'),
+                      waitingThird: statusLabel('waiting_third_party'),
+                      review: statusLabel('review'),
+                    })
+                  : t('app.sound.offTitle', { review: statusLabel('review') })
               }
             >
               {sound ? <SoundOnIcon /> : <SoundOffIcon />}
             </button>
             {'Notification' in window && Notification.permission === 'default' && (
               <button className="btn small" onClick={() => void Notification.requestPermission().then(() => load())}>
-                Ativar notificações
+                {t('app.notification.enable')}
               </button>
             )}
             <button
               className="btn small icon-btn"
               onClick={() => setTheme(NEXT_THEME[theme])}
-              aria-label={`${THEME_LABELS[theme]}. Mudar para ${THEME_LABELS[NEXT_THEME[theme]].toLowerCase()}`}
-              title={`${THEME_LABELS[theme]}. Clique para ${THEME_LABELS[NEXT_THEME[theme]].toLowerCase()}.`}
+              aria-label={t('app.theme.aria', { current: themeLabel(theme), next: themeLabel(NEXT_THEME[theme]).toLowerCase() })}
+              title={t('app.theme.title', { current: themeLabel(theme), next: themeLabel(NEXT_THEME[theme]).toLowerCase() })}
             >
               {theme === 'light' ? <SunIcon /> : theme === 'dark' ? <MoonIcon /> : <MonitorIcon />}
             </button>
+            <LanguageMenu />
             <HelpButton open={helpOpen} setOpen={setHelpOpen} />
           </div>
         )}
@@ -505,14 +509,14 @@ export function App() {
       {view === 'archived' && data && (
         <div className="page">
           <div className="page-inner">
-            <h2 style={{ margin: '8px 0 12px' }}>Arquivados</h2>
+            <h2 style={{ margin: '8px 0 12px' }}>{t('app.archived.title')}</h2>
             {archived.length === 0 ? (
-              <p className="muted">Nenhum card arquivado.</p>
+              <p className="muted">{t('app.archived.empty')}</p>
             ) : (
               <div className="list">
                 {archived.map((c) => (
                   <div key={c.id} className="list-row" role="button" tabIndex={0} onClick={() => setOpenId(c.id)}>
-                    <span className="pill">{STATUS_LABELS[c.status]}</span>
+                    <span className="pill">{statusLabel(c.status)}</span>
                     <div className="grow">
                       <span className="muted small">#{c.id}</span> {c.title}
                     </div>

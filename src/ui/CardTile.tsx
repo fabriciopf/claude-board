@@ -1,12 +1,13 @@
 import { forwardRef, type HTMLAttributes, type KeyboardEvent, type MouseEvent } from 'react';
-import { STATUS_LABELS, STATUS_SHORT_LABELS, showsChecklistOnTile, type App, type CardSummary, type Label, type Repository } from '../shared/domain';
+import { showsChecklistOnTile, type App, type CardSummary, type Label, type Repository } from '../shared/domain';
 import { fmtDate, isOverdue } from './api';
 import { toggleLabelsExpanded, useLabelsExpanded } from './label-display';
 import { OwnerAvatar } from './OwnerAvatar';
+import { statusLabel, statusShortLabel, t } from './i18n';
 
 /** Small dot on a card in "Em revisão" not opened since it got there (D84). */
 export function UnseenDot() {
-  return <span className="unseen-dot" role="img" aria-label="Não visto" title="Ainda não aberto desde que chegou em Em revisão" />;
+  return <span className="unseen-dot" role="img" aria-label={t('board.tile.unseen')} title={t('board.tile.unseenTitle', { status: statusLabel('review') })} />;
 }
 
 /** Checklist items shown on the cover; the rest is summed up as "+N itens". */
@@ -58,9 +59,9 @@ export const CardTile = forwardRef<HTMLDivElement, Props>(function CardTile(
         <button
           type="button"
           className={'card-labels' + (labelsExpanded ? ' expanded' : '')}
-          aria-label={'Labels: ' + cardLabels.map((l) => l.name).join(', ')}
+          aria-label={t('board.tile.labels', { names: cardLabels.map((l) => l.name).join(', ') })}
           aria-pressed={labelsExpanded}
-          title={labelsExpanded ? 'Clique para recolher os nomes das labels' : 'Clique para mostrar os nomes das labels'}
+          title={labelsExpanded ? t('board.tile.labelsCollapse') : t('board.tile.labelsExpand')}
           tabIndex={overlay ? -1 : 0}
           onClick={onLabelsClick}
           onKeyDown={onLabelsKeyDown}
@@ -74,7 +75,7 @@ export const CardTile = forwardRef<HTMLDivElement, Props>(function CardTile(
       )}
       {card.parentId && (
         <div className="card-parent muted small" title={card.parentTitle ?? undefined}>
-          ↳ tarefa de #{card.parentId}
+          {t('board.tile.parent', { id: card.parentId })}
           {card.parentTitle ? ` ${card.parentTitle}` : ''}
         </div>
       )}
@@ -85,7 +86,7 @@ export const CardTile = forwardRef<HTMLDivElement, Props>(function CardTile(
       {card.subtasks.length > 0 && (
         <ul
           className="card-checklist card-subtasks"
-          aria-label={`Tarefas: ${card.subtasks.filter((t) => t.status === 'done').length} de ${card.subtasks.length} concluídas`}
+          aria-label={t('board.tile.subtasks', { done: card.subtasks.filter((s) => s.status === 'done').length, total: card.subtasks.length })}
         >
           {card.subtasks.slice(0, MAX_ITEMS).map((t) => (
             <li key={t.id} className={t.status === 'done' ? 'done' : ''}>
@@ -95,14 +96,14 @@ export const CardTile = forwardRef<HTMLDivElement, Props>(function CardTile(
               <span className="text">
                 #{t.id} {t.title}
               </span>
-              <span className={`sub-status s-${t.status}`}>{STATUS_SHORT_LABELS[t.status]}</span>
+              <span className={`sub-status s-${t.status}`}>{statusShortLabel(t.status)}</span>
             </li>
           ))}
-          {card.subtasks.length > MAX_ITEMS && <li className="more">+{card.subtasks.length - MAX_ITEMS} tarefas</li>}
+          {card.subtasks.length > MAX_ITEMS && <li className="more">{card.subtasks.length - MAX_ITEMS === 1 ? t('board.tile.moreTask') : t('board.tile.moreTasks', { count: card.subtasks.length - MAX_ITEMS })}</li>}
         </ul>
       )}
       {showsChecklistOnTile(card) && (
-        <ul className="card-checklist" aria-label={`Checklist: ${card.checklistDone} de ${card.checklistTotal} feitos`}>
+        <ul className="card-checklist" aria-label={t('board.tile.checklist', { done: card.checklistDone, total: card.checklistTotal })}>
           {card.checklist.slice(0, MAX_ITEMS).map((item, i) => (
             <li key={i} className={item.done ? 'done' : ''}>
               <span className="check" aria-hidden="true">
@@ -111,29 +112,29 @@ export const CardTile = forwardRef<HTMLDivElement, Props>(function CardTile(
               <span className="text">{item.text}</span>
             </li>
           ))}
-          {card.checklist.length > MAX_ITEMS && <li className="more">+{card.checklist.length - MAX_ITEMS} itens</li>}
+          {card.checklist.length > MAX_ITEMS && <li className="more">{card.checklist.length - MAX_ITEMS === 1 ? t('board.tile.moreItem') : t('board.tile.moreItems', { count: card.checklist.length - MAX_ITEMS })}</li>}
         </ul>
       )}
       <div className="card-meta">
         {saving && (
-          <span className="saving-badge" aria-label="Salvando">
-            <span className="spinner" /> salvando
+          <span className="saving-badge" aria-label={t('board.tile.savingLabel')}>
+            <span className="spinner" /> {t('board.tile.saving')}
           </span>
         )}
         {card.running && (
-          <span className="badge" aria-label="Execução rodando">
-            <span className="spinner" /> rodando
+          <span className="badge" aria-label={t('board.tile.runningLabel')}>
+            <span className="spinner" /> {t('board.tile.running')}
           </span>
         )}
-        {card.hasOpenQuestion && <span className="badge question">? pergunta</span>}
+        {card.hasOpenQuestion && <span className="badge question">{t('board.tile.question')}</span>}
         {app && (
-          <span className="app-chip" title={app.path ? `Projeto: ${app.name} (${app.path})` : `Projeto: ${app.name}`}>
+          <span className="app-chip" title={app.path ? t('board.tile.appWithPath', { name: app.name, path: app.path }) : t('board.tile.app', { name: app.name })}>
             <span className="app-mark" style={{ background: app.color }} aria-hidden="true" />
             {app.name}
           </span>
         )}
         {cardRepos.map((x) => (
-          <span key={x.id} className="repo-chip" title={`Repositório: ${x.name}`}>
+          <span key={x.id} className="repo-chip" title={t('board.tile.repository', { name: x.name })}>
             {x.name}
           </span>
         ))}
@@ -141,13 +142,13 @@ export const CardTile = forwardRef<HTMLDivElement, Props>(function CardTile(
         {card.dueDate && <span className={'badge' + (overdue ? ' overdue' : '')}>⏱ {fmtDate(card.dueDate, false).slice(0, 5)}</span>}
         {pr && <span className="badge">PR</span>}
         {card.automationId !== null && (
-          <span className="badge" title="Criado por uma automação">
-            ⟳ automação
+          <span className="badge" title={t('board.tile.automationTitle')}>
+            {t('board.tile.automation')}
           </span>
         )}
         {card.status === 'triage' && card.suggestedStatus && (
           <span className="badge">
-            sugere: {STATUS_LABELS[card.suggestedStatus]}
+            {t('board.tile.suggests', { status: statusLabel(card.suggestedStatus) })}
             {card.suggestionConfidence != null ? ` (${Math.round(card.suggestionConfidence * 100)}%)` : ''}
           </span>
         )}

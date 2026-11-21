@@ -4,7 +4,7 @@ A local, Trello-style task board that Claude Code works through on its own. You 
 
 Everything runs on `127.0.0.1`, with no login and no cloud: one process serves the API, the web UI, the runner and an MCP server.
 
-> **Language:** the UI, the prompts the runner sends to Claude, and the CLI messages are in Brazilian Portuguese. The list names below are given in English with the Portuguese label the UI shows.
+> **Language:** the UI speaks Brazilian Portuguese, English and Spanish: pick one with the globe button in the header (by default, the browser's language). The prompts the runner sends to Claude, the CLI messages and the texts the server writes (system comments, error messages) stay in Brazilian Portuguese. The list names below are given in English with the Portuguese label the UI shows.
 
 ## Requirements
 
