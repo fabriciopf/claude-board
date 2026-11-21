@@ -1,4 +1,4 @@
-import { STATUS_LABELS, STATUSES, type Actor, type Owner, type Status } from '../shared/domain.js';
+import { STATUS_LABELS, STATUSES, type Actor, type Status } from '../shared/domain.js';
 
 /** A business rule refused the operation. `code` is stable for the UI and MCP clients. */
 export class RuleError extends Error {
@@ -29,12 +29,14 @@ export interface MoveCheckInput {
   from: Status;
   to: Status;
   actor: Actor;
-  owner: Owner;
   hasRunningExecution: boolean;
 }
 
-/** Throws a RuleError when the move breaks a rule of section 4 of the spec. */
-export function checkMove({ from, to, actor, owner, hasRunningExecution }: MoveCheckInput): void {
+/**
+ * Throws a RuleError when the move breaks a rule of section 4 of the spec. The owner plays no part:
+ * it says who created the card, and a card of the user's runs like any other (D86).
+ */
+export function checkMove({ from, to, actor, hasRunningExecution }: MoveCheckInput): void {
   if (from === to) return; // reorder inside the same list
   if (to === 'done' && actor !== 'user') {
     throw new RuleError(
@@ -49,11 +51,5 @@ export function checkMove({ from, to, actor, owner, hasRunningExecution }: MoveC
   }
   if (hasRunningExecution && actor !== 'system') {
     throw new RuleError('card_running', 'O Claude está executando este card. Use "Parar" antes de movê-lo.');
-  }
-  if (to === 'ready' && owner === 'user') {
-    throw new RuleError(
-      'owner_is_user',
-      'Este card é seu (dono = você), então não entra na fila do Claude. Passe o card para o Claude antes de movê-lo.',
-    );
   }
 }

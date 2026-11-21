@@ -5,6 +5,7 @@ import type { EventBus } from './server/bus.js';
 import type { BoardService } from './service/board.js';
 import type { UsageTracker } from './service/usage.js';
 import type { AgendaWatcher } from './service/agenda.js';
+import type { AutomationEngine, AutomationService } from './service/automations.js';
 import type { PublishState } from './shared/domain.js';
 
 /** What the runner exposes to the API and the MCP server. Filled in by M3. */
@@ -35,6 +36,9 @@ export interface AppContext {
   usage?: UsageTracker;
   /** Next calendar commitments for the header (D62). */
   agenda?: AgendaWatcher;
+  /** Recurring tasks that create cards (D72). */
+  automations?: AutomationService;
+  automationEngine?: AutomationEngine;
   /** Publication of the Board's own improvements (D42). */
   publisher?: PublisherControl;
   /** Arguments of the running `claude-board start`, reused by the restart after a publication. */

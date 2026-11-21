@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import type { App, CardDetail, CardSummary, Comment, Label, PublishState, Repository, RunnerState, UsageSnapshot } from '../shared/domain';
 import type { AgendaState } from '../shared/agenda';
+import { requests } from './pending';
 
 export class ApiError extends Error {
   constructor(
@@ -24,12 +25,16 @@ async function request<T>(method: string, url: string, body?: unknown): Promise<
   return data as T;
 }
 
+// Writes are what the user waits on after a click; reads also run on their own (SSE reloads) and
+// would keep the progress bar on for nothing.
 export const api = {
   get: <T>(url: string) => request<T>('GET', url),
-  post: <T>(url: string, body: unknown = {}) => request<T>('POST', url, body),
-  patch: <T>(url: string, body: unknown) => request<T>('PATCH', url, body),
-  put: <T>(url: string, body: unknown) => request<T>('PUT', url, body),
-  del: <T>(url: string) => request<T>('DELETE', url),
+  post: <T>(url: string, body: unknown = {}) => requests.track(request<T>('POST', url, body)),
+  patch: <T>(url: string, body: unknown) => requests.track(request<T>('PATCH', url, body)),
+  put: <T>(url: string, body: unknown) => requests.track(request<T>('PUT', url, body)),
+  del: <T>(url: string) => requests.track(request<T>('DELETE', url)),
+  /** A write the user did not click for (marking a card as seen, D84): no progress bar. */
+  quietPost: <T>(url: string, body: unknown = {}) => request<T>('POST', url, body),
 };
 
 export interface BoardData {

@@ -87,6 +87,7 @@ export function rowToCard(r: Row, labelIds: number[] = [], repositoryIds: number
     originalTitle: r.original_title ?? null,
     originalDescriptionMd: r.original_description_md ?? null,
     parentId: r.parent_id ?? null,
+    automationId: r.automation_id ?? null,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
     completedAt: r.completed_at ?? null,
@@ -175,6 +176,8 @@ export interface CardInput {
   suggestedStatus?: Status | null;
   suggestionConfidence?: number | null;
   suggestionEvidence?: string | null;
+  /** The automation creating the card (D72). */
+  automationId?: number | null;
 }
 
 export interface CardPatch {
@@ -230,7 +233,6 @@ export interface CardFilter {
 export interface MoveInput {
   status: Status;
   position?: number;
-  owner?: Owner;
   reason?: string;
 }
 
@@ -243,6 +245,21 @@ export const DEFAULT_LABELS: [string, string][] = [
 ];
 
 /** All reads and writes of the board, with the rules of the spec applied here (not only in the UI). */
+/**
+ * 1 while a card in "Em revisão" was not opened since it entered the list (D84): its last move into
+ * "review" was made by Claude or the runner and no `viewed` event came after it. A move the user made
+ * on their own counts as seen; leaving the list drops the mark, since the status no longer matches.
+ * Expects the card table aliased as `c`.
+ */
+const REVIEW_UNSEEN_SQL = `CASE WHEN c.status = 'review' THEN COALESCE((
+    SELECT CASE
+      WHEN m.author = 'user' THEN 0
+      WHEN EXISTS (SELECT 1 FROM events v WHERE v.card_id = c.id AND v.type = 'viewed' AND v.id > m.id) THEN 0
+      ELSE 1 END
+    FROM events m
+    WHERE m.card_id = c.id AND m.type = 'moved' AND json_extract(m.payload_json, '$.to') = 'review'
+    ORDER BY m.id DESC LIMIT 1), 0) ELSE 0 END`;
+
 export class BoardService {
   constructor(
     private db: Db,
@@ -436,6 +453,19 @@ export class BoardService {
 
   // ---------- events ----------
 
+  /**
+   * The user opened the card (D84). Clears the "not seen yet" mark of a card in "Em revisão": records
+   * a `viewed` event only when the mark is on, so opening a card again writes nothing.
+   */
+  markSeen(id: number): { cleared: boolean } {
+    this.getCard(id);
+    const row = this.db.prepare(`SELECT ${REVIEW_UNSEEN_SQL} AS review_unseen FROM cards c WHERE c.id = ?`).get(id) as Row | undefined;
+    if (row?.review_unseen !== 1) return { cleared: false };
+    this.recordEvent(id, 'viewed', {}, 'user');
+    this.changed(id);
+    return { cleared: true };
+  }
+
   recordEvent(cardId: number, type: string, payload: Record<string, unknown>, author: Actor): void {
     this.db
       .prepare('INSERT INTO events (card_id, type, payload_json, author, created_at) VALUES (?, ?, ?, ?, ?)')
@@ -509,7 +539,8 @@ export class BoardService {
           (SELECT MAX(e.created_at) FROM events e
             WHERE e.card_id = c.id AND e.type = 'moved' AND json_extract(e.payload_json, '$.to') = c.status),
           c.created_at
-        ) AS entered_status_at
+        ) AS entered_status_at,
+        ${REVIEW_UNSEEN_SQL} AS review_unseen
       FROM cards c
       ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
       ORDER BY c.position ASC, c.id ASC
@@ -540,6 +571,7 @@ export class BoardService {
         parentTitle: card.parentId ? (titles.get(card.parentId) ?? null) : null,
         subtasks: subtasks.get(card.id) ?? [],
         enteredStatusAt: r.entered_status_at,
+        unseenInReview: r.review_unseen === 1,
       };
     });
   }
@@ -612,10 +644,11 @@ export class BoardService {
   private insertCard(input: CardInput, actor: Actor, origin: Origin, extra: { parentId?: number; dangerousAllowed?: boolean } = {}): number {
     const title = input.title?.trim();
     if (!title) throw new RuleError('invalid_card', 'O card precisa de um título.', 400);
+    // The owner is who created the card (D86): only the user changes it later, by hand.
     const owner: Owner = input.owner ?? (actor === 'claude' ? 'claude' : 'user');
     const status = input.status ? assertStatus(input.status) : 'backlog';
     // Creating directly into a list obeys the same rules as moving into it.
-    if (status !== 'backlog') checkMove({ from: 'backlog', to: status, actor, owner, hasRunningExecution: false });
+    if (status !== 'backlog') checkMove({ from: 'backlog', to: status, actor, hasRunningExecution: false });
     if (input.priority !== undefined && (input.priority < 1 || input.priority > 4)) {
       throw new RuleError('invalid_priority', 'Prioridade vai de 1 (alta) a 4 (baixa).', 400);
     }
@@ -627,8 +660,8 @@ export class BoardService {
         `INSERT INTO cards (title, description_md, status, position, owner, app_id, priority, due_date, origin,
            repo_path, base_branch, permission_mode, max_turns, model, effort, links_json,
            suggested_status, suggestion_confidence, suggestion_evidence, created_at, updated_at, completed_at,
-           parent_id, dangerous_allowed)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           parent_id, dangerous_allowed, automation_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         title,
@@ -655,6 +688,7 @@ export class BoardService {
         status === 'done' ? now : null,
         extra.parentId ?? null,
         extra.dangerousAllowed ? 1 : 0,
+        input.automationId ?? null,
       );
     const cardId = Number(r.lastInsertRowid);
     for (const labelId of input.labelIds ?? []) {
@@ -763,8 +797,9 @@ export class BoardService {
         if (actor !== 'user') throw new RuleError('target_not_allowed', 'Só o usuário libera o modo sem permissões.', 403);
         value = value ? 1 : 0;
       }
-      if (key === 'owner' && value === 'user' && card.status === 'ready') {
-        throw new RuleError('owner_is_user', 'Tire o card de "Pronta para o Claude" antes de passá-lo para você.');
+      // Only the user changes the owner, by hand (D86); no move, reply or automation touches it.
+      if (key === 'owner' && actor !== 'user' && value !== card.owner) {
+        throw new RuleError('owner_user_only', 'Só o usuário troca o dono de um card, pelo campo "Dono".', 403);
       }
       sets.push(`${column} = ?`);
       params.push(value as string | number | null);
@@ -775,7 +810,10 @@ export class BoardService {
     params.push(nowIso(), id);
     tx(this.db, () => {
       this.db.prepare(`UPDATE cards SET ${sets.join(', ')} WHERE id = ?`).run(...params);
-      this.recordEvent(id, 'updated', { fields: changedFields }, actor);
+      // A change of owner gets its own event, with both values ("passou o card para…").
+      const fields = changedFields.filter((f) => f !== 'owner');
+      if (fields.length) this.recordEvent(id, 'updated', { fields }, actor);
+      if (patch.owner && patch.owner !== card.owner) this.recordEvent(id, 'owner', { from: card.owner, to: patch.owner }, actor);
     });
     this.changed(id);
     return this.getCard(id);
@@ -811,8 +849,8 @@ export class BoardService {
   moveCard(id: number, input: MoveInput, actor: Actor): Card {
     const card = this.getCard(id);
     const to = assertStatus(input.status);
-    const owner = input.owner ?? card.owner;
-    checkMove({ from: card.status, to, actor, owner, hasRunningExecution: this.hasRunningExecution(id) });
+    // A move never changes the owner (D86).
+    checkMove({ from: card.status, to, actor, hasRunningExecution: this.hasRunningExecution(id) });
     // Changing lists into a newest-first one always lands on top, even from a drag that dropped it lower (D58).
     const position =
       card.status !== to && NEWEST_FIRST_STATUSES.includes(to)
@@ -821,9 +859,8 @@ export class BoardService {
     const now = nowIso();
     tx(this.db, () => {
       this.db
-        .prepare('UPDATE cards SET status = ?, position = ?, owner = ?, updated_at = ?, completed_at = ? WHERE id = ?')
-        .run(to, position, owner, now, to === 'done' ? (card.completedAt ?? now) : null, id);
-      if (owner !== card.owner) this.recordEvent(id, 'owner', { from: card.owner, to: owner }, actor);
+        .prepare('UPDATE cards SET status = ?, position = ?, updated_at = ?, completed_at = ? WHERE id = ?')
+        .run(to, position, now, to === 'done' ? (card.completedAt ?? now) : null, id);
       if (card.status !== to) this.recordEvent(id, 'moved', { from: card.status, to, reason: input.reason ?? null }, actor);
     });
     // `actor` lets the UI chime only for moves it did not make itself (D48).
@@ -969,9 +1006,9 @@ export class BoardService {
 
   // ---------- user actions on the flow ----------
 
-  /** Backlog/any card → "Pronta para o Claude", passing ownership to Claude. */
+  /** Backlog/any card → "Pronta para o Claude". The owner stays as it is (D86). */
   sendToClaude(id: number, actor: Actor): Card {
-    return this.moveCard(id, { status: 'ready', owner: 'claude' }, actor);
+    return this.moveCard(id, { status: 'ready' }, actor);
   }
 
   /** Answer to an open question: card goes back to the queue and the runner resumes the same session. */
@@ -982,7 +1019,7 @@ export class BoardService {
     this.addComment(id, { author: 'user', bodyMd: text, kind: 'answer' });
     this.setNextPrompt(id, text.trim(), 'reply');
     this.recordEvent(id, 'answered', {}, 'user');
-    return this.moveCard(id, { status: 'ready', owner: 'claude', reason: 'resposta do usuário' }, 'user');
+    return this.moveCard(id, { status: 'ready', reason: 'resposta do usuário' }, 'user');
   }
 
   /** "Pedir ajustes" on a card in review. */
@@ -992,7 +1029,7 @@ export class BoardService {
     if (!text?.trim()) throw new RuleError('invalid_comment', 'Descreva os ajustes.', 400);
     this.addComment(id, { author: 'user', bodyMd: text, kind: 'adjustment' });
     this.setNextPrompt(id, text.trim(), 'adjust');
-    return this.moveCard(id, { status: 'ready', owner: 'claude', reason: 'ajustes pedidos' }, 'user');
+    return this.moveCard(id, { status: 'ready', reason: 'ajustes pedidos' }, 'user');
   }
 
   /**
@@ -1006,7 +1043,7 @@ export class BoardService {
     if (!REOPEN_ON_COMMENT.includes(card.status) || card.archived || this.hasRunningExecution(id)) return { comment, card };
     this.setNextPrompt(id, text.trim(), 'comment');
     this.recordEvent(id, 'reopened_by_comment', { from: card.status }, 'user');
-    return { comment, card: this.moveCard(id, { status: 'ready', owner: 'claude', reason: 'comentário do usuário' }, 'user') };
+    return { comment, card: this.moveCard(id, { status: 'ready', reason: 'comentário do usuário' }, 'user') };
   }
 
   approve(id: number): Card {
@@ -1021,7 +1058,7 @@ export class BoardService {
     const card = this.getCard(id);
     if (card.status !== 'waiting_user') throw new RuleError('wrong_status', 'Só se tenta de novo um card em "Aguardando você".');
     if (card.claudeSessionId) this.setNextPrompt(id, 'Continue a tarefa de onde parou. A execução anterior foi interrompida.', 'retry');
-    return this.moveCard(id, { status: 'ready', owner: 'claude', reason: 'tentar de novo' }, 'user');
+    return this.moveCard(id, { status: 'ready', reason: 'tentar de novo' }, 'user');
   }
 
   /** Keeps the title and description as the user wrote them, once, before the first run. */
@@ -1056,7 +1093,7 @@ export class BoardService {
     const r = this.db
       .prepare(
         `SELECT c.* FROM cards c
-         WHERE c.status = 'ready' AND c.owner = 'claude' AND c.archived = 0
+         WHERE c.status = 'ready' AND c.archived = 0
            AND NOT EXISTS (SELECT 1 FROM executions e WHERE e.card_id = c.id AND e.status = 'running')
          ORDER BY c.priority ASC, c.position ASC, c.id ASC LIMIT 1`,
       )

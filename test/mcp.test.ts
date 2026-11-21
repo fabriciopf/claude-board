@@ -39,6 +39,9 @@ describe('MCP over HTTP', () => {
     const names = (await c.listTools()).tools.map((t) => t.name).sort();
     expect(names).toEqual(
       [
+        'automation_create',
+        'automation_list',
+        'automation_update',
         'board_list_cards',
         'card_ask_user',
         'card_checklist_add',
@@ -150,10 +153,20 @@ describe('MCP over HTTP', () => {
     expect(own.isError).toBe(true);
     expect(text(own)).toMatch(/card_running/);
 
+    // A card of the user enters the queue and stays with the user (D86).
     const users = ctx.service.createCard({ title: 'Do usuário', owner: 'user' }, 'user', 'manual');
-    const refused = await c.callTool({ name: 'card_move', arguments: { id: users.id, status: 'ready' } });
-    expect(refused.isError).toBe(true);
-    expect(text(refused)).toMatch(/owner_is_user/);
+    const queuedUsers = await c.callTool({ name: 'card_move', arguments: { id: users.id, status: 'ready' } });
+    expect(queuedUsers.isError).toBeFalsy();
+    expect(ctx.service.getCard(users.id)).toMatchObject({ status: 'ready', owner: 'user' });
+
+    // Claude creates cards as their owner, unless it says the task is the user's; it never changes the owner later.
+    const plain = JSON.parse(text(await c.callTool({ name: 'card_create', arguments: { title: 'Criado pelo Claude' } }))).created;
+    expect(ctx.service.getCard(plain.id).owner).toBe('claude');
+    const forUser = JSON.parse(text(await c.callTool({ name: 'card_create', arguments: { title: 'Tarefa sua', owner: 'user' } }))).created;
+    expect(ctx.service.getCard(forUser.id).owner).toBe('user');
+    const update = await c.callTool({ name: 'card_update', arguments: { id: users.id, owner: 'claude', title: 'Renomeado' } });
+    expect(update.isError).toBeFalsy();
+    expect(ctx.service.getCard(users.id)).toMatchObject({ title: 'Renomeado', owner: 'user' });
     await c.close();
   });
 

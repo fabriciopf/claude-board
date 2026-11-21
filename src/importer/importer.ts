@@ -434,7 +434,7 @@ export class Importer implements ImporterControl {
     const card = service.getCard(cardId);
     if (card.status !== 'triage') throw new RuleError('wrong_status', 'O card não está na Triagem.');
     const target: Status = status ?? (card.suggestedStatus && card.suggestedStatus !== 'triage' ? card.suggestedStatus : 'backlog');
-    service.moveCard(cardId, { status: target, owner: target === 'ready' ? 'claude' : card.owner, reason: 'aceito da triagem' }, 'user');
+    service.moveCard(cardId, { status: target, reason: 'aceito da triagem' }, 'user');
     this.ctx.db.prepare("UPDATE imported_sessions SET decision = 'accepted' WHERE card_id = ?").run(cardId);
   }
 

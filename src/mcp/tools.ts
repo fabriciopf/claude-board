@@ -4,7 +4,9 @@ import type { AppContext } from '../context.js';
 import { nowIso } from '../db/index.js';
 import { MAX_SPLIT_TASKS, rowToExecution, type CardFilter } from '../service/board.js';
 import { RuleError } from '../service/rules.js';
-import { AUTO_CONCURRENCY, EFFORT_LEVELS, STATUS_LABELS, STATUSES, type Card, type EffortLevel, type Status } from '../shared/domain.js';
+import { automationsOf } from '../service/automations.js';
+import { describeTrigger, WATCH_MIN_MINUTES, type Automation, type AutomationDraft } from '../shared/automation.js';
+import { AUTO_CONCURRENCY, UNLIMITED_CONCURRENCY, EFFORT_LEVELS, STATUS_LABELS, STATUSES, type Card, type EffortLevel, type Status } from '../shared/domain.js';
 
 const EFFORT_ENUM = EFFORT_LEVELS as [EffortLevel, ...EffortLevel[]];
 import { VERSION } from '../version.js';
@@ -107,7 +109,7 @@ export function createMcpServer(ctx: AppContext, session: McpSession): McpServer
     }
     // A split card waits for its tasks in "Aguardando terceiro".
     const target: Status = outcome === 'question' ? 'waiting_user' : outcome === 'review' ? 'review' : 'waiting_third_party';
-    s.moveCard(cardId, { status: target, owner: 'claude', reason: String(payload.reason ?? '') || undefined }, 'claude');
+    s.moveCard(cardId, { status: target, reason: String(payload.reason ?? '') || undefined }, 'claude');
     // Inside a run the runner does this when the process ends; here the delivery is immediate (D42).
     const queued = outcome === 'review' ? ctx.publisher?.onDelivered(cardId) : null;
     return `Card movido para "${STATUS_LABELS[target]}".${queued ? ' A branch entrou na fila de publicação do Board.' : ''}`;
@@ -182,7 +184,7 @@ export function createMcpServer(ctx: AppContext, session: McpSession): McpServer
     'card_create',
     {
       description:
-        'Cria um card. Uso típico: "transforma isso num card". Por padrão o card nasce em "backlog" (Não iniciada) com dono = usuário.',
+        'Cria um card. Uso típico: "transforma isso num card". Por padrão o card nasce em "backlog" (Não iniciada) com dono = Claude, porque foi o Claude que o criou; o dono não muda depois, só o usuário o troca à mão.',
       inputSchema: {
         title: z.string().min(1),
         description: z.string().optional().describe('Markdown: o que deve ser feito, contexto e critério de pronto'),
@@ -192,7 +194,10 @@ export function createMcpServer(ctx: AppContext, session: McpSession): McpServer
           .array(z.string())
           .optional()
           .describe('Repositórios a que o card se refere, um ou vários, entre os cadastrados (hdb, ignite, sms de início). Não é a pasta de trabalho (repoPath)'),
-        owner: z.enum(['user', 'claude']).optional(),
+        owner: z
+          .enum(['user', 'claude'])
+          .optional()
+          .describe('Quem criou o card, mostrado na capa (ícone de pessoa ou do Claude). Padrão: claude. Use "user" só para tarefa que o próprio usuário vai fazer'),
         status: z.enum(['backlog', 'ready', 'waiting_third_party']).optional(),
         repoPath: z.string().optional().describe('Caminho local do repositório git, quando a tarefa mexe em código'),
         dueDate: z.string().optional().describe('AAAA-MM-DD'),
@@ -203,7 +208,7 @@ export function createMcpServer(ctx: AppContext, session: McpSession): McpServer
     },
     (args) =>
       guard(() => {
-        const owner = args.owner ?? (args.status === 'ready' ? 'claude' : 'user');
+        const owner = args.owner ?? 'claude';
         const card = s.createCard(
           {
             title: args.title,
@@ -223,7 +228,7 @@ export function createMcpServer(ctx: AppContext, session: McpSession): McpServer
           'mcp',
         );
         // Interactive sessions and runner executions alike may queue a card (D09, revised 2026-11-17).
-        const final = args.status === 'ready' ? s.moveCard(card.id, { status: 'ready', owner: 'claude' }, 'claude') : card;
+        const final = args.status === 'ready' ? s.moveCard(card.id, { status: 'ready' }, 'claude') : card;
         if (final.status === 'ready') ctx.runner?.nudge();
         return ok({ created: compact(final) });
       }),
@@ -232,7 +237,7 @@ export function createMcpServer(ctx: AppContext, session: McpSession): McpServer
   server.registerTool(
     'card_update',
     {
-      description: 'Edita título, descrição, prioridade, prazo, projeto, pasta do repositório (repoPath), repositórios relacionados, dono, modelo ou effort de um card.',
+      description: 'Edita título, descrição, prioridade, prazo, projeto, pasta do repositório (repoPath), repositórios relacionados, modelo ou effort de um card. O dono não: só o usuário o troca, à mão.',
       inputSchema: {
         id: cardIdArg,
         title: z.string().optional(),
@@ -245,7 +250,6 @@ export function createMcpServer(ctx: AppContext, session: McpSession): McpServer
           .array(z.string())
           .optional()
           .describe('Substitui a lista de repositórios relacionados (nomes cadastrados, ex.: ["hdb", "sms"]); [] limpa'),
-        owner: z.enum(['user', 'claude']).optional(),
         model: z.string().nullable().optional().describe('Modelo das execuções deste card (ex.: claude-opus-5-5, claude-sonnet-5-5, claude-haiku-5-5); vazio ou null = o padrão da configuração'),
         effort: z.enum(EFFORT_ENUM).nullable().optional().describe('Effort das execuções deste card; null = o padrão da configuração'),
       },
@@ -264,7 +268,6 @@ export function createMcpServer(ctx: AppContext, session: McpSession): McpServer
             dueDate: args.dueDate,
             appId: resolveApp(args.app),
             repoPath: args.repoPath,
-            owner: args.owner,
             model: args.model,
             effort: args.effort,
           },
@@ -438,10 +441,14 @@ export function createMcpServer(ctx: AppContext, session: McpSession): McpServer
         const { children } = s.splitCard(id, { tasks: args.tasks, context: args.context }, 'claude');
         const list = children.map((c) => `- #${c.id} ${c.title}`).join('\n');
         const setting = ctx.config.maxConcurrency;
-        const slots = setting === AUTO_CONCURRENCY ? null : Math.max(1, Number(setting) || 1);
+        const slots = setting === AUTO_CONCURRENCY || setting === UNLIMITED_CONCURRENCY ? null : Math.max(0, Number(setting) || 0);
         const pace =
-          slots === null
+          setting === UNLIMITED_CONCURRENCY
+            ? 'Elas rodam todas em paralelo: Execuções simultâneas está em ∞.'
+            : slots === null
             ? 'Elas rodam em paralelo no modo automático: o Board abre quantas couberem no ritmo do uso da sessão de 5h.'
+            : slots === 0
+              ? 'Execuções simultâneas está em 0, então elas esperam na fila até você escolher outro valor no cabeçalho ou em Configurações.'
             : slots > 1
               ? `Elas rodam em paralelo, até ${slots} por vez.`
               : 'Execuções simultâneas está em 1, então elas rodam uma de cada vez; aumente em Configurações para rodar em paralelo.';
@@ -452,6 +459,91 @@ export function createMcpServer(ctx: AppContext, session: McpSession): McpServer
         ctx.runner?.nudge();
         const next = finishWith(id, 'split', { children: children.map((c) => c.id) });
         return ok({ tasks: children.map(compact), next });
+      }),
+  );
+
+  // ---------- automations (D72) ----------
+
+  const triggerArg = z
+    .object({
+      kind: z.enum(['schedule', 'watch', 'webhook']).describe('schedule = agenda (cron); watch = verificar uma fonte de tempos em tempos; webhook = só pela URL'),
+      cron: z.string().optional().describe('schedule: cron de 5 campos no horário local do Board, domingo = 0 (ex.: "0 9 * * 1" = toda segunda às 9h)'),
+      source: z.string().optional().describe('watch: gmail, slack, google calendar, google drive, jira ou notion'),
+      query: z.string().optional().describe('watch: o que conta como item novo, na sintaxe de busca da fonte (ex.: "from:fulano@x.com is:unread") ou em palavras'),
+      everyMinutes: z.number().int().min(WATCH_MIN_MINUTES).optional().describe('watch: minutos entre verificações (padrão 15)'),
+    })
+    .describe('Quando a automação dispara');
+  const automationView = (a: Automation) => ({
+    id: a.id,
+    name: a.name,
+    enabled: a.enabled,
+    when: describeTrigger(a.trigger),
+    trigger: a.trigger,
+    instruction: a.instruction,
+    nextRunAt: a.nextRunAt,
+    lastResult: a.lastResult,
+    lastCardId: a.lastCardId,
+  });
+
+  server.registerTool(
+    'automation_list',
+    {
+      description: 'Lista as automações do Board: tarefas recorrentes que criam cards para o Claude (por agenda, por verificação de uma fonte ou por URL).',
+      inputSchema: {},
+      annotations: { readOnlyHint: true },
+    },
+    () => guard(() => ok(automationsOf(ctx).list().map(automationView))),
+  );
+
+  server.registerTool(
+    'automation_create',
+    {
+      description:
+        'Cria uma automação: a cada disparo o Board cria um card em "Pronta para o Claude" com a instrução. Interprete você mesmo o pedido do usuário em gatilho e instrução. ' +
+        'Use quando o usuário pedir algo recorrente ("toda segunda...", "quando chegar e-mail de..."). A instrução precisa ser autossuficiente: é tudo o que a execução vai receber.',
+      inputSchema: {
+        name: z.string().min(1).max(80).describe('Nome curto, em português'),
+        instruction: z.string().min(1).describe('O que o Claude deve fazer a cada disparo'),
+        trigger: triggerArg,
+        request: z.string().optional().describe('O pedido do usuário nas palavras dele, guardado para edição'),
+        app: z.union([z.string(), z.number()]).nullable().optional().describe('Projeto dos cards criados'),
+        priority: z.number().int().min(1).max(4).optional(),
+        enabled: z.boolean().optional().describe('Padrão: true'),
+      },
+    },
+    (args) =>
+      guard(() => {
+        const draft: AutomationDraft = { name: args.name, instruction: args.instruction, trigger: args.trigger, appId: resolveApp(args.app) ?? null, priority: args.priority };
+        const a = automationsOf(ctx).create({ request: args.request ?? '', draft, enabled: args.enabled });
+        return ok({ created: automationView(a), webhookPath: `/api/automations/hook/${a.token}` });
+      }),
+  );
+
+  server.registerTool(
+    'automation_update',
+    {
+      description: 'Liga, desliga ou altera uma automação existente (só os campos informados mudam).',
+      inputSchema: {
+        automationId: z.number().int().positive(),
+        enabled: z.boolean().optional(),
+        name: z.string().min(1).max(80).optional(),
+        instruction: z.string().min(1).optional(),
+        trigger: triggerArg.optional(),
+        priority: z.number().int().min(1).max(4).optional(),
+      },
+    },
+    (args) =>
+      guard(() => {
+        const store = automationsOf(ctx);
+        const cur = store.get(args.automationId);
+        const draft: AutomationDraft = {
+          name: args.name ?? cur.name,
+          instruction: args.instruction ?? cur.instruction,
+          trigger: args.trigger ?? cur.trigger,
+          appId: cur.appId,
+          priority: args.priority ?? cur.priority,
+        };
+        return ok({ updated: automationView(store.update(args.automationId, { draft, enabled: args.enabled })) });
       }),
   );
 
