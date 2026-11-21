@@ -1,6 +1,6 @@
 import type { ReactNode, RefObject } from 'react';
 import type { App, Label, Repository } from '../shared/domain';
-import { EMPTY_FILTERS, PRIORITY_FILTER_OPTIONS, hasActiveFilter, type BoardFilters } from './board-filters';
+import { EMPTY_FILTERS, PRIORITY_FILTER_OPTIONS, filterClass, hasActiveFilter, type BoardFilters } from './board-filters';
 import { SORT_OPTIONS, pickSort, sortOption, type CardSort, type SortView } from './card-sort';
 
 /**
@@ -44,13 +44,13 @@ export function FilterBar({
       <input
         ref={searchRef}
         type="search"
-        className="input"
+        className={filterClass(filters.text)}
         placeholder="Buscar ( / )"
         value={filters.text}
         onChange={(e) => setFilters({ ...filters, text: e.target.value })}
       />
       {activeApps.length > 0 && (
-        <select className="input" aria-label="Projeto" value={filters.appId} onChange={(e) => setFilters({ ...filters, appId: e.target.value })}>
+        <select className={filterClass(filters.appId)} aria-label="Projeto" value={filters.appId} onChange={(e) => setFilters({ ...filters, appId: e.target.value })}>
           <option value="">Todos os projetos</option>
           {activeApps.map((a) => (
             <option key={a.id} value={a.id}>
@@ -59,7 +59,7 @@ export function FilterBar({
           ))}
         </select>
       )}
-      <select className="input" aria-label="Label" value={filters.labelId} onChange={(e) => setFilters({ ...filters, labelId: e.target.value })}>
+      <select className={filterClass(filters.labelId)} aria-label="Label" value={filters.labelId} onChange={(e) => setFilters({ ...filters, labelId: e.target.value })}>
         <option value="">Todas as labels</option>
         {labels.map((l) => (
           <option key={l.id} value={l.id}>
@@ -69,7 +69,7 @@ export function FilterBar({
       </select>
       {repositories.length > 0 && (
         <select
-          className="input"
+          className={filterClass(filters.repositoryId)}
           aria-label="Repositório"
           value={filters.repositoryId}
           onChange={(e) => setFilters({ ...filters, repositoryId: e.target.value })}
@@ -82,18 +82,18 @@ export function FilterBar({
           ))}
         </select>
       )}
-      <select className="input" aria-label="Dono" value={filters.owner} onChange={(e) => setFilters({ ...filters, owner: e.target.value })}>
+      <select className={filterClass(filters.owner)} aria-label="Dono" value={filters.owner} onChange={(e) => setFilters({ ...filters, owner: e.target.value })}>
         <option value="">Qualquer dono</option>
         <option value="user">Você</option>
         <option value="claude">Claude</option>
       </select>
-      <select className="input" aria-label="Prazo" value={filters.due} onChange={(e) => setFilters({ ...filters, due: e.target.value })}>
+      <select className={filterClass(filters.due)} aria-label="Prazo" value={filters.due} onChange={(e) => setFilters({ ...filters, due: e.target.value })}>
         <option value="">Qualquer prazo</option>
         <option value="overdue">Vencidos</option>
         <option value="week">Próximos 7 dias</option>
         <option value="none">Sem prazo</option>
       </select>
-      <select className="input" aria-label="Prioridade" value={filters.priority} onChange={(e) => setFilters({ ...filters, priority: e.target.value })}>
+      <select className={filterClass(filters.priority)} aria-label="Prioridade" value={filters.priority} onChange={(e) => setFilters({ ...filters, priority: e.target.value })}>
         <option value="">Qualquer prioridade</option>
         {PRIORITY_FILTER_OPTIONS.map((o) => (
           <option key={o.value} value={o.value}>

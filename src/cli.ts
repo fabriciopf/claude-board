@@ -11,6 +11,7 @@ import { hooksStatus, installHooks, uninstallHooks } from './hooks/install.js';
 import { Importer } from './importer/importer.js';
 import { UsageTracker } from './service/usage.js';
 import { AgendaWatcher } from './service/agenda.js';
+import { AutomationEngine, automationsOf } from './service/automations.js';
 import { Publisher } from './publish/publisher.js';
 import { relaunch } from './publish/relaunch.js';
 import { claudeHomeDir } from './config.js';
@@ -111,6 +112,9 @@ async function start(args: string[]): Promise<void> {
   const agenda = new AgendaWatcher(ctx);
   ctx.agenda = agenda;
   agenda.start();
+  const automationEngine = new AutomationEngine(ctx, automationsOf(ctx));
+  ctx.automationEngine = automationEngine;
+  automationEngine.start();
   console.log(`Claude Board em http://${host === '0.0.0.0' ? '127.0.0.1' : host}:${port}`);
   let stopping = false;
   const stop = async () => {
@@ -118,6 +122,7 @@ async function start(args: string[]): Promise<void> {
     stopping = true;
     console.log('Encerrando. As execuções em andamento continuam; o próximo "claude-board start" volta a acompanhá-las.');
     agenda.close();
+    automationEngine.close();
     await runner.close();
     await app.close();
     ctx.db.close();
