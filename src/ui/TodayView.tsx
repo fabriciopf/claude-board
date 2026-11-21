@@ -1,9 +1,21 @@
 import { STATUS_LABELS, type App, type CardSummary } from '../shared/domain';
 import { fmtDate, isOverdue } from './api';
 import { DEFAULT_SORT, compareCards, type CardSort } from './card-sort';
+import { UnseenDot } from './CardTile';
 
 /** Name of the view (card #152; it was "Hoje"). The code keeps the 'today' id, also stored in cb:view. */
 export const PENDING_VIEW_NAME = 'Minhas pendências';
+
+/** Text of the header tab (card #170); the count goes in an orange badge next to it. */
+export const PENDING_TAB_LABEL = 'Pendências';
+
+/**
+ * Whether the header shows the pending tab (card #170): only with at least one item. Before the
+ * board loads (count null) it stays hidden too, so it does not flash in and out.
+ */
+export function showPendingTab(count: number | null): count is number {
+  return count !== null && count > 0;
+}
 
 interface Item {
   card: CardSummary;
@@ -99,6 +111,7 @@ export function TodayView({
                   <span className={'pill ' + tone}>{reason}</span>
                   <div className="grow">
                     <div>
+                      {card.unseenInReview && <UnseenDot />}
                       <span className="muted small">#{card.id}</span> {card.title}
                     </div>
                     <div className="muted small">

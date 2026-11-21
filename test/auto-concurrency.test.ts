@@ -2,7 +2,20 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { DEFAULT_CONFIG, loadConfig, saveConfig } from '../src/config.js';
-import { BurnMeter, LEAD, MIN_RUNS, SAFE_CAP, START_RUNS, WINDOW_MINUTES, decideAuto } from '../src/runner/auto-concurrency.js';
+import {
+  BurnMeter,
+  DEFAULT_RUN_MINUTES,
+  LEAD,
+  MIN_RUNS,
+  RESERVE_SLACK,
+  RUN_MARGIN,
+  SAFE_CAP,
+  START_RUNS,
+  WINDOW_MINUTES,
+  shareUntilReset,
+  decideAuto,
+  typicalRunMinutes,
+} from '../src/runner/auto-concurrency.js';
 import { Runner } from '../src/runner/runner.js';
 import { AUTO_CONCURRENCY, MAX_CONCURRENCY, type UsageSnapshot } from '../src/shared/domain.js';
 import { makeContext, tempDir } from './helpers.js';
@@ -102,6 +115,93 @@ describe('decideAuto', () => {
   });
 });
 
+describe('share of the window until the reset (card #53, comment of 2026-11-21)', () => {
+  it('a typical run is the 75th percentile of the finished ones, or the default with too few', () => {
+    expect(typicalRunMinutes([1, 2, 3])).toBe(DEFAULT_RUN_MINUTES);
+    expect(typicalRunMinutes([1, 2, 3, 4, 5, 6, 7, 8, 9])).toBe(7);
+    expect(typicalRunMinutes([0, -1, NaN, 2, 2, 2, 2, 2])).toBe(2);
+  });
+
+  it('pays for the runs in progress until they finish, keeps one run with slack, and fits new ones in the rest', () => {
+    const b = shareUntilReset(0.5, 120, 0.001, { ages: [10, 10], typicalMinutes: 60 });
+    // Each run in progress still has 50 of its 60 minutes.
+    expect(b.committed).toBeCloseTo(2 * 0.05 * (1 + RUN_MARGIN), 9);
+    // After the runs started now finish (60 min), there are 60 min left: room for one more, with slack.
+    expect(b.reserve).toBeCloseTo(0.06 * (1 + RESERVE_SLACK), 9);
+    expect(b.perNewRun).toBeCloseTo(0.06 * (1 + RUN_MARGIN), 9);
+    expect(b.newRuns).toBe(3);
+    expect(b.committed + b.reserve + b.newRuns * b.perNewRun).toBeLessThanOrEqual(b.left);
+    expect(b.committed + b.reserve + (b.newRuns + 1) * b.perNewRun).toBeGreaterThan(b.left);
+  });
+
+  it('counts only what is spent before the reset, and keeps no reserve when no other run fits before it', () => {
+    const b = shareUntilReset(0.2, 10, 0.001, { ages: [0], typicalMinutes: 30 });
+    expect(b.committed).toBeCloseTo(0.01 * (1 + RUN_MARGIN), 9);
+    expect(b.perNewRun).toBeCloseTo(0.01 * (1 + RUN_MARGIN), 9);
+    expect(b.reserve).toBe(0);
+  });
+
+  it('a run past its typical length still counts half of it', () => {
+    const b = shareUntilReset(0.5, 200, 0.001, { ages: [90], typicalMinutes: 20 });
+    expect(b.committed).toBeCloseTo(0.01 * (1 + RUN_MARGIN), 9);
+  });
+
+  it('the share left caps the limit when it is tighter than the pace, and says so', () => {
+    const d = decideAuto({
+      usage: snap(0.5, 0.6),
+      now: NOW,
+      rate: { perRun: 0.001, avgRuns: 4 },
+      runs: { ages: [10, 10], typicalMinutes: 60 },
+    });
+    expect(d.limit).toBe(5);
+    expect(d.reason).toMatch(/Pelo saldo cabem 5, pelo ritmo \d+ \(o saldo decide\)/);
+    expect(d.reason).toMatch(/as 2 em andamento devem gastar/);
+    expect(d.reason).toMatch(/reserva de .* para mais 1 com folga/);
+  });
+
+  it('whatever the runs in progress and the reading, the limit never plans past what is left of the window', () => {
+    let capped = 0;
+    let over = 0;
+    for (const rate of [
+      { perRun: 0.002, avgRuns: 20 },
+      { perRun: 0.004, avgRuns: 20 },
+    ])
+    for (const typicalMinutes of [12, 60])
+    for (const [u, e] of [
+      [0.1, 0.2],
+      [0.4, 0.45],
+      [0.6, 0.9],
+      [0.85, 0.8],
+    ]) {
+      for (const ages of [[], [1], [5, 5, 5], [30, 2]]) {
+        const runs = { ages, typicalMinutes };
+        const remaining = (1 - e) * WINDOW_MINUTES;
+        const { limit } = decideAuto({ usage: snap(u, e), now: NOW, rate, runs });
+        const b = shareUntilReset(1 - u, remaining, rate.perRun, runs);
+        const fresh = Math.max(0, limit - ages.length);
+        const label = `perRun=${rate.perRun} run=${typicalMinutes}min u=${u} e=${e} ages=${ages}`;
+        if (b.committed + b.reserve > b.left) {
+          over++;
+          expect(limit, label).toBe(MIN_RUNS);
+        } else if (limit > MIN_RUNS) {
+          // Above the minimum of one, every run the limit lets in is paid for, with the reserve kept.
+          expect(b.committed + b.reserve + fresh * b.perNewRun, label).toBeLessThanOrEqual(b.left + 1e-9);
+          if (limit === ages.length + b.newRuns) capped++;
+        }
+      }
+    }
+    // The sweep must reach both cases, or it proves nothing.
+    expect(over).toBeGreaterThan(0);
+    expect(capped).toBeGreaterThan(0);
+  });
+
+  it('with the runs in progress and the reserve already over what is left, keeps to one run', () => {
+    const d = decideAuto({ usage: snap(0.85, 0.8), now: NOW, rate: { perRun: 0.002, avgRuns: 3 }, runs: { ages: [1, 1, 1], typicalMinutes: 30 } });
+    expect(d.limit).toBe(MIN_RUNS);
+    expect(d.reason).toMatch(/já tomam o saldo/);
+  });
+});
+
 describe('BurnMeter', () => {
   it('learns the cost of one run from readings and run-minutes', () => {
     const m = new BurnMeter();
@@ -158,7 +258,12 @@ describe('config', () => {
       expect(saveConfig(base, { maxConcurrency: 'auto' }).maxConcurrency).toBe('auto');
       expect(saveConfig(base, { maxConcurrency: '7' as never }).maxConcurrency).toBe(7);
       expect(JSON.parse(fs.readFileSync(path.join(home, 'config.json'), 'utf8')).maxConcurrency).toBe(7);
-      for (const bad of ['automatico', '', 0, 21, 2.5]) {
+      // 0 and ∞ are choices since D83; the infinity sign is saved as "unlimited".
+      expect(saveConfig(base, { maxConcurrency: 0 }).maxConcurrency).toBe(0);
+      expect(saveConfig(base, { maxConcurrency: '0' as never }).maxConcurrency).toBe(0);
+      expect(saveConfig(base, { maxConcurrency: 'unlimited' }).maxConcurrency).toBe('unlimited');
+      expect(saveConfig(base, { maxConcurrency: '∞' as never }).maxConcurrency).toBe('unlimited');
+      for (const bad of ['automatico', '', -1, 21, 2.5, 'infinito']) {
         expect(() => saveConfig(base, { maxConcurrency: bad as never }), String(bad)).toThrow(/automático/);
       }
     } finally {
@@ -203,5 +308,45 @@ describe('runner in automatic mode', () => {
     ctx.config.maxConcurrency = 4;
     expect(runner.concurrency()).toEqual({ mode: 'fixed', limit: 4, reason: '' });
     ctx.config.maxConcurrency = AUTO_CONCURRENCY;
+  });
+});
+
+describe('runner reads the runs in progress and the typical run length from its own history', () => {
+  const ctx = makeContext({ claudeBin: 'claude-board-no-such-binary', heartbeatSeconds: 3600 });
+  let runner: Runner;
+  beforeAll(() => {
+    runner = new Runner(ctx);
+    ctx.runner = runner;
+  });
+  afterAll(async () => {
+    await runner.close();
+  });
+
+  it('pays for the run in progress and keeps the reserve, with the length of its finished runs', () => {
+    const now = Date.now();
+    const iso = (minAgo: number) => new Date(now - minAgo * MIN).toISOString();
+    const card = ctx.service.createCard({ title: 'Histórico', owner: 'claude' }, 'user', 'manual');
+    const insert = ctx.db.prepare('INSERT INTO executions (card_id, started_at, ended_at, status) VALUES (?, ?, ?, ?)');
+    // Six finished runs of 10 minutes, and one going for 4 minutes.
+    for (let i = 0; i < 6; i++) insert.run(card.id, iso(200 - i * 20), iso(190 - i * 20), 'success');
+    insert.run(card.id, iso(4), null, 'running');
+
+    const resetsAt = Math.round((now + 0.5 * WINDOW_MINUTES * MIN) / 1000);
+    const reading = (u: number, minAgo: number): UsageSnapshot => ({
+      fiveHour: { utilization: u, resetsAt, status: 'allowed' },
+      sevenDay: null,
+      observedAt: iso(minAgo),
+    });
+    ctx.service.setSetting('usageSnapshot', reading(0.4, 0));
+    const meter = (runner as unknown as { meter: BurnMeter }).meter;
+    meter.setRunning(1, now - 10 * MIN);
+    meter.sample(reading(0.38, 10), now - 10 * MIN);
+    meter.sample(reading(0.4, 0), now);
+
+    const c = runner.concurrency(now);
+    expect(c.mode).toBe('auto');
+    expect(c.reason).toMatch(/execução típica de 10 min/);
+    expect(c.reason).toMatch(/as 1 em andamento devem gastar/);
+    expect(c.reason).toMatch(/reserva de .* para mais 1 com folga/);
   });
 });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { FIELDS, SETTINGS_TABS, dirtyKeys, toPatchValue } from '../src/ui/settings-fields';
+import { FIELDS, SETTINGS_TABS, dirtyKeys, followLiveValue, toPatchValue } from '../src/ui/settings-fields';
 
 describe('settings tabs', () => {
   it('keeps every config field the screen had before the tabs', () => {
@@ -80,5 +80,26 @@ describe('toPatchValue', () => {
     expect(toPatchValue(field('workspaceDir'), '')).toBeNull();
     expect(toPatchValue(field('worktreeRoot'), '')).toBeNull();
     expect(toPatchValue(field('defaultBaseBranch'), '')).toBe('');
+  });
+});
+
+describe('simultaneous runs in Settings (D83)', () => {
+  const field = FIELDS.find((f) => f.key === 'maxConcurrency')!;
+
+  it('offers the same choices as the header selector: auto, 0, 1, 2, 4, 8 and ∞', () => {
+    expect(field.options).toEqual(['auto', '0', '1', '2', '4', '8', 'unlimited']);
+    expect(field.optionLabels?.unlimited).toMatch(/^∞/);
+  });
+
+  it('follows a change made in the header, and keeps an edit of its own', () => {
+    const config = { maxConcurrency: 4, autoSplit: true };
+    expect(followLiveValue('maxConcurrency', config, config, '4')).toBeNull();
+    const clean = followLiveValue('maxConcurrency', config, { ...config }, 'unlimited')!;
+    expect(clean.config.maxConcurrency).toBe('unlimited');
+    expect(clean.draft.maxConcurrency).toBe('unlimited');
+    expect(dirtyKeys(clean.config, clean.draft)).toEqual([]);
+    const edited = followLiveValue('maxConcurrency', config, { ...config, maxConcurrency: '8' }, '0')!;
+    expect(edited.config.maxConcurrency).toBe('0');
+    expect(edited.draft.maxConcurrency).toBe('8');
   });
 });
