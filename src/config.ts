@@ -11,14 +11,12 @@ export interface Config {
   claudeArgsPrefix: string[];
   /** Agent of every run whose card does not choose one (D92). */
   defaultAgent: AgentId;
-  /** Gemini CLI executable. */
-  geminiBin: string;
-  /** Extra arguments placed before every Gemini CLI argument (used by the fake gemini in tests). */
-  geminiArgsPrefix: string[];
-  /** Model of every Gemini run whose card does not choose one; '' = Gemini CLI's own default. */
-  geminiModel: string;
-  /** --approval-mode of Gemini runs: yolo (no confirmation, as a headless run needs), auto_edit, default or plan. */
-  geminiApprovalMode: 'yolo' | 'auto_edit' | 'default' | 'plan';
+  /** Antigravity CLI executable (D93). */
+  antigravityBin: string;
+  /** Extra arguments placed before every Antigravity CLI argument (used by the fake agy in tests). */
+  antigravityArgsPrefix: string[];
+  /** Model of every Antigravity run whose card does not choose one; '' = Antigravity CLI's own default. */
+  antigravityModel: string;
   claudeHome: string;
   /** VS Code workspace root: runs start here to load the same CLAUDE.md, skills, settings and memory. */
   workspaceDir: string | null;
@@ -81,10 +79,9 @@ export const DEFAULT_CONFIG: Config = {
   claudeBin: 'claude',
   claudeArgsPrefix: [],
   defaultAgent: 'claude',
-  geminiBin: 'gemini',
-  geminiArgsPrefix: [],
-  geminiModel: '',
-  geminiApprovalMode: 'yolo',
+  antigravityBin: 'agy',
+  antigravityArgsPrefix: [],
+  antigravityModel: '',
   claudeHome: '~/.claude',
   workspaceDir: null,
   heartbeatSeconds: 30,
@@ -175,6 +172,8 @@ export function loadConfig(): Config {
   // `runModel` (before card #23): a model chosen there carries over; the old empty value takes the new default.
   const legacyModel = (stored as { runModel?: unknown }).runModel;
   if (!('defaultModel' in known) && typeof legacyModel === 'string' && legacyModel.trim()) known.defaultModel = legacyModel.trim();
+  // Gemini CLI (D92) gave way to Antigravity CLI (D93): a saved "gemini" default becomes Antigravity; the gemini* keys drop out above.
+  if ((known as { defaultAgent?: unknown }).defaultAgent === 'gemini') known.defaultAgent = 'antigravity';
   return { ...DEFAULT_CONFIG, ...known };
 }
 
@@ -209,11 +208,10 @@ export function saveConfig(current: Config, patch: Partial<Config>): Config {
   if (next.defaultModel && !isValidModelId(next.defaultModel)) throw new Error(`Modelo inválido: ${next.defaultModel}`);
   next.defaultEffort = String(next.defaultEffort ?? '').trim();
   if (next.defaultEffort && !isEffortLevel(next.defaultEffort)) throw new Error('Effort: use low, medium, high, xhigh ou max.');
-  if (!isAgentId(next.defaultAgent)) throw new Error('Agente padrão: use claude ou gemini.');
-  next.geminiBin = String(next.geminiBin ?? '').trim() || DEFAULT_CONFIG.geminiBin;
-  next.geminiModel = String(next.geminiModel ?? '').trim();
-  if (next.geminiModel && !isValidModelId(next.geminiModel)) throw new Error(`Modelo do Gemini inválido: ${next.geminiModel}`);
-  if (!['yolo', 'auto_edit', 'default', 'plan'].includes(next.geminiApprovalMode)) throw new Error('Aprovação do Gemini: use yolo, auto_edit, default ou plan.');
+  if (!isAgentId(next.defaultAgent)) throw new Error('Agente padrão: use claude ou antigravity.');
+  next.antigravityBin = String(next.antigravityBin ?? '').trim() || DEFAULT_CONFIG.antigravityBin;
+  next.antigravityModel = String(next.antigravityModel ?? '').trim();
+  if (next.antigravityModel && !isValidModelId(next.antigravityModel)) throw new Error(`Modelo do Antigravity inválido: ${next.antigravityModel}`);
   if (!['', 'window', 'background'].includes(next.publishRestartMode)) throw new Error('publishRestartMode: use "", "window" ou "background".');
   next.publishBranch = String(next.publishBranch ?? '').trim() || DEFAULT_CONFIG.publishBranch;
   next.runnerEntrypoint = String(next.runnerEntrypoint ?? '').trim();
