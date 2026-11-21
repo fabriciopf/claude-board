@@ -9,6 +9,8 @@ import { handleHook, type HookInput } from '../hooks/handler.js';
 import type { Importer } from '../importer/importer.js';
 import { hooksStatus, installHooks, setCleanupPeriodDays, uninstallHooks } from '../hooks/install.js';
 import { discoverApps } from '../service/apps.js';
+import { interpretRequest } from '../service/automation-nl.js';
+import { automationsOf } from '../service/automations.js';
 import { registerImages } from './images.js';
 import { runnerState } from '../service/runner-state.js';
 import { RuleError } from '../service/rules.js';
@@ -222,6 +224,58 @@ export async function registerApi(app: FastifyInstance, ctx: AppContext): Promis
   app.delete<{ Params: Params }>('/api/repositories/:id', async (req) => {
     s.deleteRepository(num(req.params.id));
     return { ok: true };
+  });
+
+  // ---------- automations (D72) ----------
+
+  const automations = () => automationsOf(ctx);
+  const listAutomations = () => ({ automations: automations().list(), checkingId: ctx.automationEngine?.checkingId() ?? null, runs: automations().listRuns(50) });
+
+  app.get('/api/automations', async () => listAutomations());
+  // Reads a request in plain words without saving it: the screen shows what was understood.
+  app.post('/api/automations/interpret', async (req) => interpretRequest(ctx.config, String((req.body as Body)?.text ?? ''), s.listApps()));
+  app.post('/api/automations', async (req) => {
+    const b = (req.body ?? {}) as Body;
+    const request = String(b.request ?? '').trim();
+    const { draft, by } = b.draft ? { draft: b.draft, by: 'given' } : await interpretRequest(ctx.config, request, s.listApps());
+    return { automation: automations().create({ request, draft, enabled: b.enabled }), by };
+  });
+  app.patch<{ Params: Params }>('/api/automations/:id', async (req) => {
+    const id = num(req.params.id);
+    const b = (req.body ?? {}) as Body;
+    let draft = b.draft;
+    let by = draft ? 'given' : null;
+    // New words without a draft: read them again.
+    if (!draft && typeof b.request === 'string' && b.request.trim() !== automations().get(id).request) {
+      ({ draft, by } = await interpretRequest(ctx.config, b.request, s.listApps()));
+    }
+    const automation = automations().update(id, { request: b.request, draft, enabled: b.enabled, appId: b.appId, priority: b.priority });
+    return { automation, by };
+  });
+  app.delete<{ Params: Params }>('/api/automations/:id', async (req) => {
+    automations().delete(num(req.params.id));
+    return { ok: true };
+  });
+  // "Rodar agora": a watch looks at its source; the others create their card.
+  app.post<{ Params: Params }>('/api/automations/:id/run', async (req) => {
+    const id = num(req.params.id);
+    const a = automations().get(id);
+    if (a.trigger.kind === 'watch') {
+      if (!ctx.automationEngine) throw new RuleError('engine_off', 'As verificações só rodam com o Board iniciado por "claude-board start".', 409);
+      const r = await ctx.automationEngine.check(id);
+      return { cardIds: r.created, error: r.error ?? null };
+    }
+    const r = automations().fire(id, 'manual');
+    return { cardIds: r.card ? [r.card.id] : [], error: r.skipped ?? null };
+  });
+  app.post<{ Params: Params }>('/api/automations/:id/rotate-token', async (req) => automations().rotateToken(num(req.params.id)));
+  // The automation's URL, for n8n, scripts and other systems. The token is the only key: no other route needed.
+  app.post<{ Params: { token: string } }>('/api/automations/hook/:token', async (req, reply) => {
+    const a = automations().byToken(req.params.token);
+    if (!a) return reply.code(404).send({ error: 'not_found', message: 'URL de automação desconhecida.' });
+    if (!a.enabled) return reply.code(409).send({ error: 'disabled', message: `A automação "${a.name}" está desligada.` });
+    const r = automations().fire(a.id, 'webhook', { payload: req.body });
+    return { ok: true, cardId: r.card?.id ?? null };
   });
 
   // ---------- config & doctor ----------

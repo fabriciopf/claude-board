@@ -277,4 +277,53 @@ CREATE TABLE card_repositories (
 INSERT INTO repositories (name) VALUES ('hdb'), ('ignite'), ('sms');
 `,
   },
+  {
+    // Automations (D72): recurring tasks, fired by a schedule, by a look at a connector or by a URL, that
+    // create cards for Claude. A card remembers the automation that created it.
+    version: 12,
+    sql: `
+CREATE TABLE automations (
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL,
+  request TEXT NOT NULL DEFAULT '',
+  instruction TEXT NOT NULL,
+  trigger_json TEXT NOT NULL,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  app_id INTEGER REFERENCES apps(id) ON DELETE SET NULL,
+  priority INTEGER NOT NULL DEFAULT 3,
+  token TEXT NOT NULL,
+  next_run_at TEXT,
+  last_fired_at TEXT,
+  last_checked_at TEXT,
+  last_result TEXT,
+  last_card_id INTEGER,
+  fire_count INTEGER NOT NULL DEFAULT 0,
+  seen_json TEXT NOT NULL DEFAULT '[]',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE UNIQUE INDEX automations_token ON automations(token);
+ALTER TABLE cards ADD COLUMN automation_id INTEGER REFERENCES automations(id) ON DELETE SET NULL;
+`,
+  },
+  {
+    // History of automation firings (card #160, D72): one row per firing, skipped turn or failed one. A watch
+    // that keeps finding nothing updates its last row instead of adding one every few minutes.
+    version: 13,
+    sql: `
+CREATE TABLE automation_runs (
+  id INTEGER PRIMARY KEY,
+  automation_id INTEGER REFERENCES automations(id) ON DELETE SET NULL,
+  automation_name TEXT NOT NULL,
+  at TEXT NOT NULL,
+  last_at TEXT NOT NULL,
+  repeat_count INTEGER NOT NULL DEFAULT 1,
+  reason TEXT NOT NULL,
+  outcome TEXT NOT NULL,
+  card_id INTEGER REFERENCES cards(id) ON DELETE SET NULL,
+  detail TEXT
+);
+CREATE INDEX automation_runs_last_at ON automation_runs(last_at);
+`,
+  },
 ];
