@@ -32,6 +32,9 @@ describe('agent and model choice', () => {
     expect(resolveModel({ model: 'claude-opus-5-5' }, config, 'antigravity')).toBe('gemini-3.8-flash-high');
     expect(resolveModel({ model: 'gemini-4-neon-high' }, config, 'antigravity')).toBe('gemini-4-neon-high');
     expect(resolveModel({ model: null }, { ...config, antigravityModel: '' }, 'antigravity')).toBeNull();
+    // agy serves Claude models under its own ids (`agy models`, card #193): those do go to agy.
+    expect(modelFitsAgent('claude-sonnet-4-6', 'antigravity')).toBe(true);
+    expect(resolveModel({ model: 'claude-opus-4-6-thinking' }, config, 'antigravity')).toBe('claude-opus-4-6-thinking');
   });
 
   it('names and resume commands, including the Gemini runs of D92', () => {
@@ -179,7 +182,8 @@ describe('runner with the fake agy (ACP)', () => {
     expect(d.comments.map((c) => c.bodyMd)).toEqual(expect.arrayContaining(['Antigravity trabalhando.', 'O Antigravity escreveu o documento.']));
     const x = d.executions[0];
     // Effort is Claude Code's alone: agy is not given it, so the run does not claim one (card #191).
-    expect(x).toMatchObject({ status: 'success', agent: 'antigravity', model: 'gemini-4-neon-high', effort: null, tokensIn: 400, tokensOut: 100 });
+    // agy's inputTokens leave the cache out, as Claude Code's input_tokens do: 400 + 300 read from cache.
+    expect(x).toMatchObject({ status: 'success', agent: 'antigravity', model: 'gemini-4-neon-high', effort: null, tokensIn: 700, tokensOut: 100 });
     // The session id is agy's own, learned from the stream.
     const call = prompts().at(-1);
     expect(d.card.claudeSessionId).toBe(call.sessionId);
@@ -250,6 +254,28 @@ describe('runner with the fake agy (ACP)', () => {
     const d = ctx.service.getCardDetail(card.id);
     expect(d.card.status).toBe('review');
     expect(d.comments.at(-1)?.bodyMd).toMatch(/push: negado; status: nothing to commit/);
+    // agy fails a refused call with empty output: the transcript says the Board refused it, and the
+    // shell call shows its command (rawInput.CommandLine of run_command, measured in card #193).
+    // agy stopped the turn at the refusal; the client told it why in a second prompt of the same session.
+    const nudge = prompts().at(-1);
+    expect(nudge.prompt).toMatch(/recusou o comando `git push origin main` pela regra de push/);
+    expect(nudge.sessionId).toBe(d.card.claudeSessionId);
+    const items = transcriptItems(fs.readFileSync(d.executions[0].transcriptPath!, 'utf8'));
+    expect(items.some((i) => i.kind === 'tool_use' && i.title === 'run_command: cd repo && git push origin main')).toBe(true);
+    expect(items.some((i) => i.kind === 'tool_result' && /Recusado pelo Board \(regra de push\): git push origin main/.test(i.text ?? ''))).toBe(true);
+  });
+
+  it('agy without a signed-in account fails the run asking for the login in the terminal', async () => {
+    process.env.FAKE_AGY_AUTH = '0';
+    try {
+      const card = queue('Sem login', 'Faça. [fake:success]', { agent: 'antigravity' });
+      await runOnce();
+      const x = ctx.service.getCardDetail(card.id).executions[0];
+      expect(x.status).not.toBe('success');
+      expect(x.errorMd ?? '').toMatch(/não está com login feito[\s\S]*rode "agy"[\s\S]*Authentication required/);
+    } finally {
+      delete process.env.FAKE_AGY_AUTH;
+    }
   });
 
   it('falls back to the stdio MCP server when agy has no HTTP MCP', async () => {

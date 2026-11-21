@@ -242,11 +242,17 @@ export function resumeCommand(agent: string | null | undefined, sessionId: strin
   return `claude --resume ${sessionId}`;
 }
 
-/** Antigravity CLI models offered on the card and in the settings (`agy models` lists the rest); any other id is also accepted. */
+/**
+ * Antigravity CLI models offered on the card and in the settings: what `agy models` listed on
+ * agy 1.5.14 (card #193). Any other id is also accepted; agy refuses an unknown one with its message.
+ */
 export const ANTIGRAVITY_MODEL_OPTIONS: { id: string; label: string }[] = [
   { id: 'gemini-3.8-flash-high', label: 'Gemini 3.8 Flash (high)' },
-  { id: 'gemini-4-neon-high', label: 'Gemini 4 Neon (high)' },
-  { id: 'gemini-pro-orchestrator', label: 'Gemini Pro Orchestrator' },
+  { id: 'gemini-3.8-flash-medium', label: 'Gemini 3.8 Flash (medium)' },
+  { id: 'gemini-3.8-flash-low', label: 'Gemini 3.8 Flash (low)' },
+  { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6 (Antigravity)' },
+  { id: 'claude-opus-4-6-thinking', label: 'Claude Opus 4.6 Thinking (Antigravity)' },
+  { id: 'gpt-oss-120b-medium', label: 'GPT-OSS 120B (medium)' },
 ];
 
 /** Model options of an agent. */
@@ -261,7 +267,9 @@ export function modelOptionsFor(agent: AgentId): { id: string; label: string }[]
 export function modelFitsAgent(model: string, agent: AgentId): boolean {
   const claudeLike = /^(claude|opus|sonnet|haiku|fable)\b/i.test(model);
   const geminiLike = /^gemini/i.test(model);
-  return agent === 'antigravity' ? !claudeLike : !geminiLike;
+  // agy also serves Claude models under its own ids (claude-sonnet-4-6…): those fit Antigravity.
+  if (agent === 'antigravity') return !claudeLike || ANTIGRAVITY_MODEL_OPTIONS.some((o) => o.id === model);
+  return !geminiLike;
 }
 
 /** Model ids and aliases are one token (`claude-opus-5-5`, `opus`, `claude-sonnet-5-5[1m]`). */
