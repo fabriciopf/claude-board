@@ -4,7 +4,7 @@ import { ActionButton, ActionGroup } from './ActionButton';
 import { api } from './api';
 import { AppsPanel } from './AppsPanel';
 import { HooksPanel } from './HooksPanel';
-import { FIELDS, SETTINGS_TABS, dirtyKeys, toPatchValue, type Config, type Field, type SettingsTab } from './settings-fields';
+import { FIELDS, SETTINGS_TABS, dirtyKeys, followLiveValue, toPatchValue, type Config, type Field, type SettingsTab } from './settings-fields';
 
 interface DoctorCheck {
   name: string;
@@ -48,7 +48,7 @@ function FieldInput({ f, draft, setDraft }: { f: Field; draft: Config; setDraft:
     return (
       <select id={id} className="input" value={draft[f.key] ?? ''} onChange={(e) => set(e.target.value)}>
         {/* A value typed into config.json by hand (an alias like "opus") still shows. */}
-        {[...f.options!, ...(draft[f.key] && !f.options!.includes(draft[f.key]) ? [draft[f.key] as string] : [])].map((o) => (
+        {[...f.options!, ...(draft[f.key] && !f.options!.includes(String(draft[f.key])) ? [String(draft[f.key])] : [])].map((o) => (
           <option key={o} value={o}>
             {f.optionLabels?.[o] ?? (o || 'herdar do Claude Code')}
           </option>
@@ -141,11 +141,14 @@ export function SettingsView({
   labels,
   repositories = [],
   notify,
+  liveConcurrency,
 }: {
   apps: App[];
   labels: Label[];
   repositories?: Repository[];
   notify: (msg: string, error?: boolean) => void;
+  /** maxConcurrency as the runner has it now: the header selector may change it while this screen is open (D83). */
+  liveConcurrency?: string;
 }) {
   const [tab, setTab] = useState<SettingsTab>(readTab);
   const [config, setConfig] = useState<Config | null>(null);
@@ -164,6 +167,16 @@ export function SettingsView({
   }, []);
 
   useEffect(() => writeTab(tab), [tab]);
+
+  useEffect(() => {
+    if (!config || liveConcurrency === undefined) return;
+    const next = followLiveValue('maxConcurrency', config, draft, liveConcurrency);
+    if (next) {
+      setConfig(next.config);
+      setDraft(next.draft);
+    }
+    // Only a change of the live value (or the first load) matters; the draft is read, not watched.
+  }, [liveConcurrency, config === null]);
 
   const dirty = dirtyKeys(config, draft);
 

@@ -16,10 +16,12 @@ import { MODAL_SETTLE_MS, nextInColumn } from './next-card';
 import { SettingsView } from './SettingsView';
 import { PENDING_TAB_LABEL, PENDING_VIEW_NAME, TodayView, showPendingTab, todayItems } from './TodayView';
 import { SORT_STORE_KEYS, parseSort, type CardSort } from './card-sort';
-import { PublishChip } from './PublishChip';
-import { concurrencySuffix, concurrencyTitle } from './runner-label';
+import { PublishBanner, publishVisible } from './PublishBanner';
+import { concurrencyTitle, concurrencyValue } from './runner-label';
+import { ConcurrencySelect } from './ConcurrencySelect';
 import { UsageChip } from './UsageChip';
-import { AgendaChip } from './AgendaChip';
+import { AgendaBanner, AgendaChip, useNow } from './AgendaChip';
+import { currentEvents } from '../shared/agenda';
 import { AutomationChip } from './AutomationChip';
 import { UpdateBanner, useUiUpdate } from './UpdateBanner';
 import { BannerDock } from './BannerDock';
@@ -254,6 +256,8 @@ export function App() {
 
   const runner = data?.runner;
   const readyCount = data ? data.cards.filter((c) => c.status === 'ready').length : 0;
+  const agendaNow = useNow(30000);
+  const ongoing = data?.agenda?.available ? currentEvents(data.agenda.events, agendaNow) : [];
 
   const togglePause = async () => {
     if (!runner) return;
@@ -309,12 +313,11 @@ export function App() {
           <div className="counters">
             <span className="counter" title={concurrencyTitle(runner.concurrency)}>
               {runner.running > 0 && <span className="spinner" />} rodando <strong>{runner.running}</strong>
-              {runner.concurrency && <span className="muted small">{concurrencySuffix(runner.concurrency)}</span>}
+              {runner.concurrency && <ConcurrencySelect concurrency={runner.concurrency} onChanged={() => void load()} notify={notify} />}
             </span>
             <AgendaChip agenda={data?.agenda ?? null} />
             <AutomationChip tick={automationsTick} onOpen={() => setView('automations')} />
             <UsageChip usage={data?.usage ?? null} />
-            <PublishChip publish={data?.publish ?? null} running={runner.running} onOpen={(id) => setOpenId(id)} notify={notify} reload={load} />
             <ActionButton
               className={'btn small icon-btn' + (runner.paused ? ' primary' : '')}
               busyLabel=""
@@ -457,28 +460,45 @@ export function App() {
         <ImportView triage={data.cards.filter((c) => c.status === 'triage')} onOpen={setOpenId} notify={notify} />
       )}
 
-      {view === 'settings' && data && <SettingsView apps={data.apps} labels={data.labels} repositories={data.repositories} notify={notify} />}
+      {view === 'settings' && data && (
+        <SettingsView
+          apps={data.apps}
+          labels={data.labels}
+          repositories={data.repositories}
+          notify={notify}
+          liveConcurrency={runner?.concurrency ? concurrencyValue(runner.concurrency) : undefined}
+        />
+      )}
 
       {/* Board-wide warnings live in a strip at the foot of the window, outside the scrolling area (card #173). */}
       <BannerDock>
         {uiUpdate.update && <UpdateBanner update={uiUpdate.update} dismiss={uiUpdate.dismiss} onOpen={(id) => setOpenId(id)} />}
-        {runner?.held && (
-          <div className="banner">
-            {runner.running === 0
-              ? 'Publicando o Board: o servidor reinicia em seguida e a página volta sozinha.'
-              : `Publicando o Board: o servidor reinicia em seguida e a página volta sozinha. ${runner.running === 1 ? 'A execução em curso continua' : `As ${runner.running} execuções em curso continuam`}; nenhuma nova começa até lá.`}
-          </div>
+        {publishVisible(data?.publish ?? null, !!runner?.held) && (
+          <PublishBanner
+            publish={data?.publish ?? null}
+            held={!!runner?.held}
+            running={runner?.running ?? 0}
+            onOpen={(id) => setOpenId(id)}
+            notify={notify}
+            reload={load}
+          />
         )}
         {runner?.paused && (
           <div className="banner">
             O runner está pausado: nada sai da fila "{STATUS_LABELS.ready}" até você retomar.
           </div>
         )}
-        {!runner?.paused && runner?.concurrency?.mode === 'auto' && runner.concurrency.limit <= runner.running && readyCount > 0 && (
+        {!runner?.paused && runner?.concurrency?.mode === 'fixed' && runner.concurrency.limit === 0 && readyCount > 0 && (
+          <div className="banner">
+            Execuções simultâneas em 0: nada sai da fila "{STATUS_LABELS.ready}" ({readyCount}) até você escolher outro valor no contador "rodando".
+          </div>
+        )}
+        {!runner?.paused && runner?.concurrency?.mode === 'auto' && (runner.concurrency.limit ?? Infinity) <= runner.running && readyCount > 0 && (
           <div className="banner">
             Modo automático segurando a fila "{STATUS_LABELS.ready}" ({readyCount}): {runner.concurrency.reason}.
           </div>
         )}
+        {ongoing.length > 0 && <AgendaBanner events={ongoing} now={agendaNow} />}
       </BannerDock>
 
       {openId !== null && data && (

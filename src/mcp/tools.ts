@@ -6,7 +6,7 @@ import { MAX_SPLIT_TASKS, rowToExecution, type CardFilter } from '../service/boa
 import { RuleError } from '../service/rules.js';
 import { automationsOf } from '../service/automations.js';
 import { describeTrigger, WATCH_MIN_MINUTES, type Automation, type AutomationDraft } from '../shared/automation.js';
-import { AUTO_CONCURRENCY, EFFORT_LEVELS, STATUS_LABELS, STATUSES, type Card, type EffortLevel, type Status } from '../shared/domain.js';
+import { AUTO_CONCURRENCY, UNLIMITED_CONCURRENCY, EFFORT_LEVELS, STATUS_LABELS, STATUSES, type Card, type EffortLevel, type Status } from '../shared/domain.js';
 
 const EFFORT_ENUM = EFFORT_LEVELS as [EffortLevel, ...EffortLevel[]];
 import { VERSION } from '../version.js';
@@ -440,10 +440,14 @@ export function createMcpServer(ctx: AppContext, session: McpSession): McpServer
         const { children } = s.splitCard(id, { tasks: args.tasks, context: args.context }, 'claude');
         const list = children.map((c) => `- #${c.id} ${c.title}`).join('\n');
         const setting = ctx.config.maxConcurrency;
-        const slots = setting === AUTO_CONCURRENCY ? null : Math.max(1, Number(setting) || 1);
+        const slots = setting === AUTO_CONCURRENCY || setting === UNLIMITED_CONCURRENCY ? null : Math.max(0, Number(setting) || 0);
         const pace =
-          slots === null
+          setting === UNLIMITED_CONCURRENCY
+            ? 'Elas rodam todas em paralelo: Execuções simultâneas está em ∞.'
+            : slots === null
             ? 'Elas rodam em paralelo no modo automático: o Board abre quantas couberem no ritmo do uso da sessão de 5h.'
+            : slots === 0
+              ? 'Execuções simultâneas está em 0, então elas esperam na fila até você escolher outro valor no cabeçalho ou em Configurações.'
             : slots > 1
               ? `Elas rodam em paralelo, até ${slots} por vez.`
               : 'Execuções simultâneas está em 1, então elas rodam uma de cada vez; aumente em Configurações para rodar em paralelo.';

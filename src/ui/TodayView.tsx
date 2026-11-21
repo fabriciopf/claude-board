@@ -1,6 +1,7 @@
 import { STATUS_LABELS, type App, type CardSummary } from '../shared/domain';
 import { fmtDate, isOverdue } from './api';
 import { DEFAULT_SORT, compareCards, type CardSort } from './card-sort';
+import { UnseenDot } from './CardTile';
 
 /** Name of the view (card #152; it was "Hoje"). The code keeps the 'today' id, also stored in cb:view. */
 export const PENDING_VIEW_NAME = 'Minhas pendências';
@@ -110,6 +111,7 @@ export function TodayView({
                   <span className={'pill ' + tone}>{reason}</span>
                   <div className="grow">
                     <div>
+                      {card.unseenInReview && <UnseenDot />}
                       <span className="muted small">#{card.id}</span> {card.title}
                     </div>
                     <div className="muted small">

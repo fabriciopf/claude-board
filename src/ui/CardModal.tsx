@@ -96,6 +96,13 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
     void load();
   }, [cardId]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Opening a card in "Em revisão" clears its "not seen yet" mark, also when it arrives there while
+  // open (D84). The server writes nothing when there is no mark to clear.
+  const status = detail?.card.id === cardId ? detail.card.status : undefined;
+  useEffect(() => {
+    if (status === 'review') void api.quietPost(`/api/cards/${cardId}/seen`).catch(() => undefined);
+  }, [cardId, status]);
+
   useServerEvents((msg) => {
     // A task moving changes the list of a split card; the card it came from changes a task's header.
     const related = msg.cardId !== undefined && (msg.cardId === detail?.parent?.id || !!detail?.subtasks.some((t) => t.id === msg.cardId));
@@ -154,10 +161,17 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
   const approve = () => track('approve', () => leaveColumn(() => api.post(`/api/cards/${cardId}/approve`), 'Aprovado'));
   const archive = () => leaveColumn(() => api.post(`/api/cards/${cardId}/archive`, { archived: true }), 'Arquivado');
 
-  const sendReply = (text: string) =>
-    track('reply', () => run(() => api.post(`/api/cards/${cardId}/reply`, { text }), 'Resposta enviada').then((ok) => ok && setReply('')));
-  const sendComment = () =>
-    track('comment', () => run(() => api.post(`/api/cards/${cardId}/comments`, { body: comment })).then((ok) => ok && setComment('')));
+  // Sending a comment or a reply, by Ctrl+Enter or by the button, lets go of the focus (card #176, D82):
+  // the field or button keeps no caret or ring, and the modal's shortcuts (e, a, d) work again.
+  const releaseFocus = () => (document.activeElement as HTMLElement | null)?.blur();
+  const sendReply = (text: string) => {
+    releaseFocus();
+    return track('reply', () => run(() => api.post(`/api/cards/${cardId}/reply`, { text }), 'Resposta enviada').then((ok) => ok && setReply('')));
+  };
+  const sendComment = () => {
+    releaseFocus();
+    return track('comment', () => run(() => api.post(`/api/cards/${cardId}/comments`, { body: comment })).then((ok) => ok && setComment('')));
+  };
   const sendAdjust = () =>
     track('adjust', () =>
       run(() => api.post(`/api/cards/${cardId}/adjust`, { text: adjust }), 'Ajustes enviados').then((ok) => {

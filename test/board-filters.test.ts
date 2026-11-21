@@ -16,10 +16,11 @@ describe('a filter with an option chosen stands out (card #172)', () => {
     expect(src).not.toMatch(/filterSelectClass\(sort/);
   });
 
-  it('the highlight is orange text, not a background', () => {
+  it('the highlight is orange text and border, not a background', () => {
     const css = readFileSync(new URL('../src/ui/styles.css', import.meta.url), 'utf8');
     const rule = css.match(/\.toolbar select\.filter-on \{([^}]*)\}/)?.[1] ?? '';
-    expect(rule).toContain('color: var(--accent)');
+    expect(rule).toMatch(/(^|[^-])color: var\(--accent\)/);
+    expect(rule).toContain('border-color: var(--accent)');
     expect(rule).not.toContain('background');
   });
 });

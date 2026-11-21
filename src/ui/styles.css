@@ -262,8 +262,8 @@ pre {
   font-weight: 600;
 }
 
-/* Count of the pending tab (card #170): white number in an orange ball, same in both themes
-   (#c2410c with white is 5.2:1). */
+/* Count of the pending tab (card #170): same orange and text color as the primary button
+   ("Enviar ajustes ao Claude"), in both themes. */
 .tab-badge {
   display: inline-flex;
   align-items: center;
@@ -273,8 +273,8 @@ pre {
   padding: 0 5px;
   margin-left: 6px;
   border-radius: 9px;
-  background: #c2410c;
-  color: #ffffff;
+  background: var(--accent);
+  color: var(--on-accent);
   font-size: 11px;
   font-weight: 700;
   line-height: 1;
@@ -304,6 +304,45 @@ pre {
 
 .counter strong {
   font-variant-numeric: tabular-nums;
+}
+
+/* "de <modo>" of the runner counter: a selector that reads as text until hovered (D83). */
+.concurrency-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-muted);
+  font-size: 12.5px;
+}
+
+.concurrency-select select {
+  font: inherit;
+  color: var(--text);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 0 2px;
+  /* As wide as the chosen option ("0", "∞"), not the longest one ("auto · 12"). */
+  field-sizing: content;
+  cursor: pointer;
+}
+
+.concurrency-select select:hover,
+.concurrency-select select:focus-visible {
+  border-color: var(--border);
+  background: var(--surface);
+}
+
+.concurrency-select select:disabled {
+  cursor: progress;
+  opacity: 0.6;
+}
+
+.concurrency-select option {
+  color: var(--text);
+  background: var(--surface);
 }
 
 .counter.attention {
@@ -357,9 +396,10 @@ pre {
   width: 220px;
 }
 
-/* A filter with an option chosen shows its text in orange (card #172); the open list keeps the normal color. */
+/* A filter with an option chosen gets orange text and border, no background (card #172); the open list keeps the normal color. */
 .toolbar select.filter-on {
   color: var(--accent);
+  border-color: var(--accent);
   font-weight: 600;
 }
 
@@ -662,6 +702,28 @@ textarea.input {
 
 .card:hover {
   background: var(--surface-2);
+}
+
+/* Not opened since it got to "Em revisão" (D84): a small dot, no text. */
+.unseen-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  vertical-align: middle;
+}
+
+.card > .unseen-dot {
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  margin: 0;
+}
+
+.card:has(> .unseen-dot) .card-title {
+  padding-right: 10px;
 }
 
 .card.focused {
@@ -1983,10 +2045,8 @@ html[data-busy] body::before {
     flex: none;
   }
 
-  /* The counters strip scrolls, so the publication pop-over cannot hang from it. */
-  .publish-pop {
-    position: fixed;
-    top: 96px;
+  /* More specific than the base rule below, which comes later in the file. */
+  .publish .publish-pop {
     left: 8px;
     right: 8px;
     width: auto;
@@ -2133,6 +2193,28 @@ html[data-busy] body::before {
   text-decoration: underline;
 }
 
+.agenda-banner {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+}
+
+.agenda-now {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.agenda-now > span:first-child {
+  flex: 1;
+  min-width: 0;
+}
+
+.agenda-now a.btn {
+  text-decoration: none;
+}
+
 .counter.agenda-chip.attention {
   color: var(--warn);
 }
@@ -2143,8 +2225,35 @@ html[data-busy] body::before {
   text-overflow: ellipsis;
 }
 
-.counter.publish-chip {
+/* Publication strip in the warnings dock (card #173): the whole strip is the button that opens the details. */
+.banner.publish-banner {
+  width: 100%;
+  border: 0;
+  font: inherit;
+  text-align: left;
   cursor: pointer;
+  justify-content: space-between;
+}
+
+.banner.publish-banner:hover {
+  filter: brightness(0.97);
+}
+
+.banner.publish-banner:focus-visible {
+  outline: 2px solid var(--info);
+  outline-offset: 1px;
+}
+
+.publish-banner-text {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.publish-banner-toggle {
+  flex: none;
+  font-weight: 600;
+  white-space: nowrap;
 }
 
 .counter.info {
@@ -2153,13 +2262,14 @@ html[data-busy] body::before {
   font-weight: 600;
 }
 
+/* Opens upward from the dock at the foot; fixed, so the dock's own scroll does not clip it. */
 .publish-pop {
-  position: absolute;
-  right: 0;
-  top: calc(100% + 6px);
+  position: fixed;
+  right: 16px;
+  bottom: calc(var(--dock-h, 0px) + 6px);
   z-index: 50;
   width: min(460px, 90vw);
-  max-height: 70vh;
+  max-height: min(70vh, calc(100dvh - var(--dock-h, 0px) - 80px));
   overflow: auto;
   padding: 12px;
   border-radius: 8px;

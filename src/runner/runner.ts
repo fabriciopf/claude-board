@@ -4,7 +4,7 @@ import path from 'node:path';
 import { DEFAULT_CONFIG, paths, protectedBranchList, type Config } from '../config.js';
 import type { AppContext, RunnerControl } from '../context.js';
 import { nowIso } from '../db/index.js';
-import { AUTO_CONCURRENCY, type Card, type ConcurrencyInfo, type ExecutionStatus, type Status } from '../shared/domain.js';
+import { AUTO_CONCURRENCY, UNLIMITED_CONCURRENCY, type Card, type ConcurrencyInfo, type ExecutionStatus, type Status } from '../shared/domain.js';
 import { CARD_HEADER, EXECUTION_HEADER } from '../mcp/http.js';
 import { BurnMeter, decideAuto, typicalRunMinutes, type RunTiming } from './auto-concurrency.js';
 import { isAlive, killTree, processStartTimes, spawnDetached } from './process.js';
@@ -188,10 +188,11 @@ export class Runner implements RunnerControl {
 
   // ---------- heartbeat ----------
 
-  /** How many runs may be going now: the fixed number from settings, or the automatic pace (D47). */
+  /** How many runs may be going now: the fixed number from settings (0 included), no ceiling, or the automatic pace (D47, D83). */
   concurrency(now = Date.now()): ConcurrencyInfo {
     const setting = this.ctx.config.maxConcurrency;
-    if (setting !== AUTO_CONCURRENCY) return { mode: 'fixed', limit: Math.max(1, Number(setting) || 1), reason: '' };
+    if (setting === UNLIMITED_CONCURRENCY) return { mode: 'unlimited', limit: null, reason: '' };
+    if (setting !== AUTO_CONCURRENCY) return { mode: 'fixed', limit: Math.max(0, Math.floor(Number(setting)) || 0), reason: '' };
     return decideAuto({ usage: this.ctx.usage?.get() ?? null, now, rate: this.meter.measure(now), runs: this.runTiming(now) });
   }
 
@@ -221,7 +222,7 @@ export class Runner implements RunnerControl {
     // A publication holds new runs apart from the user's pause, so it never undoes a pause of theirs.
     if (this.isPaused() || this.ctx.service.getSetting('publishHold', false)) return 0;
     let started = 0;
-    while (this.active.size < limit) {
+    while (limit === null || this.active.size < limit) {
       const card = this.ctx.service.nextReadyCard();
       if (!card || this.active.has(card.id)) break;
       this.launch(card);

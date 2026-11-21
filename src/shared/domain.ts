@@ -93,17 +93,33 @@ export const EXECUTION_STATUS_LABELS: Record<ExecutionStatus, string> = {
 export type PermissionMode = 'acceptEdits' | 'auto' | 'manual' | 'dontAsk' | 'plan' | 'bypassPermissions';
 export const PERMISSION_MODES: PermissionMode[] = ['acceptEdits', 'auto', 'manual', 'dontAsk', 'plan', 'bypassPermissions'];
 
-/** Highest number of runs the Board keeps going at the same time (settings screen and config.json). */
+/** Highest fixed number of runs config.json accepts (the presets stop at 8; "unlimited" has no ceiling). */
 export const MAX_CONCURRENCY = 20;
 
 /** `maxConcurrency` value that lets the Board pace runs by the 5-hour usage (D47). */
 export const AUTO_CONCURRENCY = 'auto';
-export type ConcurrencySetting = number | typeof AUTO_CONCURRENCY;
+/** `maxConcurrency` value with no ceiling: every card in the queue starts at once (D83). */
+export const UNLIMITED_CONCURRENCY = 'unlimited';
+export type ConcurrencySetting = number | typeof AUTO_CONCURRENCY | typeof UNLIMITED_CONCURRENCY;
+
+/**
+ * The choices offered in the header selector and in Settings (D83). 0 stops the queue without the
+ * pause button; a number typed into config.json by hand (3, 12) still works and shows as an extra option.
+ */
+export const CONCURRENCY_PRESETS: string[] = [AUTO_CONCURRENCY, '0', '1', '2', '4', '8', UNLIMITED_CONCURRENCY];
+
+/** Text of each choice: the numbers as they are, auto and the infinity sign. */
+export function concurrencyOptionLabel(value: string): string {
+  if (value === AUTO_CONCURRENCY) return 'auto';
+  if (value === UNLIMITED_CONCURRENCY) return '∞';
+  return value;
+}
 
 /** How many runs the Board allows right now, and why (shown in the header). */
 export interface ConcurrencyInfo {
-  mode: 'auto' | 'fixed';
-  limit: number;
+  mode: 'auto' | 'fixed' | 'unlimited';
+  /** null = no ceiling (mode "unlimited"); 0 = the queue does not move. */
+  limit: number | null;
   /** One line in pt-BR; in fixed mode, empty. */
   reason: string;
 }
@@ -265,6 +281,8 @@ export interface CardSummary extends Card {
   subtasks: CardRef[];
   /** When the card last entered its current list: the last "moved" event into it, else its creation (card #152). */
   enteredStatusAt: string;
+  /** In "Em revisão" and not opened since Claude or the runner put it there (D84). */
+  unseenInReview: boolean;
 }
 
 export interface Comment {
