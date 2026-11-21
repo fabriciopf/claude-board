@@ -39,6 +39,7 @@ function commandsOf(toolCall) {
 }
 
 const denials = [];
+const deniedCalls = new Map();
 function refused(toolCall) {
   for (const command of commandsOf(toolCall)) {
     for (const part of commandParts(command)) {
@@ -78,6 +79,8 @@ let turn = 0;
 let inTurn = false;
 let text = '';
 let lastText = null;
+/** The command of a refused call when nothing came after it: agy stopped the turn there. */
+let refusedLast = null;
 let cancelled = null;
 
 function startTurn() {
@@ -98,16 +101,24 @@ function flush() {
   text = '';
 }
 
-/** The Board's own tools keep Claude Code's name (mcp__claude-board__x), so the card shows them the same way. */
+/**
+ * A tool call as Claude Code would name it. Measured on agy 1.5.14 (card #193): the tool is in
+ * `name` (`run_command`, `mcp_<server>_<tool>`), its arguments loose in `rawInput` next to agy's own
+ * `toolSummary`, and the shell command in `rawInput.CommandLine`. The Board's own tools keep Claude
+ * Code's name (mcp__claude-board__x), so the card shows them the same way.
+ */
 function toolOf(update) {
-  const raw = update.rawInput ?? {};
-  const server = raw.ServerName ?? raw.serverName ?? raw.server;
-  const tool = raw.ToolName ?? raw.toolName ?? raw.tool;
-  if (server && tool) {
-    const args = raw.Arguments ?? raw.arguments ?? raw.args ?? {};
-    return { name: server === cfg.mcp.name ? `mcp__claude-board__${tool}` : `mcp__${server}__${tool}`, input: typeof args === 'object' && args ? args : { args } };
-  }
-  return { name: update.kind || 'tool', input: { ...raw, ...(update.title ? { title: update.title } : {}) } };
+  const { toolSummary, ...input } = update.rawInput ?? {};
+  const name = typeof update.name === 'string' ? update.name : '';
+  const boardPrefix = `mcp_${cfg.mcp.name}_`;
+  if (name.startsWith(boardPrefix)) return { name: `mcp__claude-board__${name.slice(boardPrefix.length)}`, input };
+  // Another MCP server: the split between server and tool is a guess when the server name has "_".
+  if (name.startsWith('mcp_')) return { name: `mcp__${name.slice(4).replace('_', '__')}`, input };
+  const command = commandsOf(update)[0];
+  return {
+    name: name || update.kind || 'tool',
+    input: { ...input, ...(update.kind === 'execute' && command ? { command } : {}), ...(update.title ? { title: update.title } : {}) },
+  };
 }
 
 function contentText(content, rawOutput) {
@@ -128,11 +139,13 @@ function onUpdate(update) {
     case 'agent_message_chunk':
       if (update.content?.type === 'text') {
         startTurn();
+        refusedLast = null;
         text += update.content.text;
       }
       return;
     case 'tool_call': {
       startTurn();
+      refusedLast = null;
       flush();
       const { name, input } = toolOf(update);
       emit({ type: 'assistant', session_id: sessionId, message: { id: `agy-turn-${turn}`, role: 'assistant', content: [{ type: 'tool_use', id: update.toolCallId, name, input }] } });
@@ -144,10 +157,14 @@ function onUpdate(update) {
       reported.add(update.toolCallId);
       flush();
       inTurn = false;
+      // agy ends a refused call as "failed" with empty output: the card says why.
+      const denied = deniedCalls.get(update.toolCallId);
+      const output = contentText(update.content, update.rawOutput) || (denied ? `Recusado pelo Board (regra de push): ${denied}` : '');
+      refusedLast = denied ?? null;
       emit({
         type: 'user',
         session_id: sessionId,
-        message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: update.toolCallId, content: contentText(update.content, update.rawOutput), is_error: update.status === 'failed' }] },
+        message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: update.toolCallId, content: output, is_error: update.status === 'failed' }] },
       });
       return;
     }
@@ -163,7 +180,8 @@ function answerPermission(params) {
   const pick = (...kinds) => options.find((o) => kinds.includes(o.kind)) ?? null;
   const blocked = refused(params?.toolCall);
   if (blocked) {
-    denials.push({ tool_name: params?.toolCall?.kind ?? 'execute', command: blocked });
+    denials.push({ tool_name: params?.toolCall?.name ?? params?.toolCall?.kind ?? 'execute', command: blocked });
+    if (params?.toolCall?.toolCallId) deniedCalls.set(params.toolCall.toolCallId, blocked);
     emit({ type: 'system', subtype: 'permission_denied', session_id: sessionId, command: blocked });
     const reject = pick('reject_once', 'reject_always');
     return reject ? { outcome: { outcome: 'selected', optionId: reject.optionId } } : { outcome: { outcome: 'cancelled' } };
@@ -206,7 +224,11 @@ function finish(subtype, resultText, usage, exitCode) {
     is_error: subtype !== 'success',
     result: resultText,
     num_turns: turn,
-    usage: { input_tokens: usage?.inputTokens ?? usage?.input_tokens ?? 0, output_tokens: usage?.outputTokens ?? usage?.output_tokens ?? 0 },
+    usage: {
+      input_tokens: usage?.inputTokens ?? usage?.input_tokens ?? 0,
+      output_tokens: usage?.outputTokens ?? usage?.output_tokens ?? 0,
+      cache_read_input_tokens: usage?.cachedReadTokens ?? 0,
+    },
     permission_denials: denials,
   });
   try {
@@ -235,7 +257,9 @@ async function main() {
     clientInfo: { name: 'claude-board', version: '1' },
   });
   const caps = init.agentCapabilities ?? {};
-  const http = !!caps.mcpCapabilities?.http;
+  // agy 1.5.14 announces no mcpCapabilities, yet takes HTTP servers (measured, card #193): HTTP
+  // keeps the card and run headers, which the stdio fallback can only pass as environment.
+  const http = caps.mcpCapabilities?.http ?? /antigravity/i.test(init.agentInfo?.name ?? '');
   const mcpServers = [
     http
       ? { type: 'http', name: cfg.mcp.name, url: cfg.mcp.url, headers: Object.entries(cfg.mcp.headers).map(([name, value]) => ({ name, value })) }
@@ -255,11 +279,41 @@ async function main() {
   if (cfg.model) await request('session/set_model', { sessionId, modelId: cfg.model });
   if (cfg.mode) await request('session/set_mode', { sessionId, modeId: cfg.mode });
   emit({ type: 'system', subtype: 'init', session_id: sessionId, model: cfg.model ?? 'padrão do Antigravity CLI', cwd: cfg.cwd, agent: 'antigravity', mcp: http ? 'http' : 'stdio' });
-  const result = await request('session/prompt', { sessionId, prompt: [{ type: 'text', text: cfg.prompt }] });
+  let result = await request('session/prompt', { sessionId, prompt: [{ type: 'text', text: cfg.prompt }] });
+  let usage = result.usage;
+  // agy takes a refused permission as "stop": it ends the turn on the spot, with no text and no
+  // report to the card (measured in card #193). Claude Code goes on with the reason, so agy is told it.
+  for (let nudges = 0; result.stopReason === 'end_turn' && refusedLast && nudges < MAX_REFUSAL_NUDGES && !cancelled; nudges++) {
+    const command = refusedLast;
+    refusedLast = null;
+    result = await request('session/prompt', { sessionId, prompt: [{ type: 'text', text: refusalNudge(command) }] });
+    usage = addUsage(usage, result.usage);
+  }
   const stop = result.stopReason;
-  if (cancelled === 'max_turns' || stop === 'max_turn_requests') return finish('error_max_turns', `Limite de turnos atingido (${stop}).`, result.usage, 1);
-  if (stop === 'end_turn') return finish('success', lastText ?? '', result.usage, 0);
-  return finish('error_during_execution', `O Antigravity parou: ${stop ?? 'sem motivo'}.`, result.usage, 1);
+  if (cancelled === 'max_turns' || stop === 'max_turn_requests') return finish('error_max_turns', `Limite de turnos atingido (${stop}).`, usage, 1);
+  if (stop === 'end_turn') return finish('success', lastText ?? '', usage, 0);
+  return finish('error_during_execution', `O Antigravity parou: ${stop ?? 'sem motivo'}.`, usage, 1);
 }
 
-main().catch((err) => fail(err.message));
+const MAX_REFUSAL_NUDGES = 2;
+
+function refusalNudge(command) {
+  return [
+    `O Claude Board recusou o comando \`${command}\` pela regra de push do card (prPolicy); não foi você que errou.`,
+    'Não tente esse comando de novo nem outro caminho para o mesmo efeito.',
+    'Continue a tarefa sem ele e termine como as regras do Board pedem: card_submit_for_review dizendo o que ficou sem fazer, ou card_ask_user se precisar de uma decisão.',
+  ].join(' ');
+}
+
+function addUsage(a, b) {
+  const keys = ['inputTokens', 'outputTokens', 'cachedReadTokens'];
+  return Object.fromEntries(keys.map((k) => [k, (a?.[k] ?? 0) + (b?.[k] ?? 0)]));
+}
+
+/** agy answers -32000 "Authentication required" to session/new when nobody signed in (measured, card #193). */
+function explain(err) {
+  if (!/authenticat|sign in|log ?in/i.test(err.message)) return err.message;
+  return `O Antigravity CLI não está com login feito. Abra um terminal, rode "agy", entre com a conta Google e tente de novo. (${err.message})`;
+}
+
+main().catch((err) => fail(explain(err)));
