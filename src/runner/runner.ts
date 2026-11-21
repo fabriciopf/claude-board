@@ -9,7 +9,7 @@ import { agentName, buildLaunch, resolveAgent, type Launch } from './agents.js';
 import { BurnMeter, decideAuto, typicalRunMinutes, type RunTiming } from './auto-concurrency.js';
 import { isAlive, killTree, processStartTimes, spawnDetached } from './process.js';
 import { buildSystemPrompt, buildUserPrompt, splitCandidate, type PromptKind } from './prompt.js';
-import { applyEvent, emptyState, StreamReader, type StreamState } from './stream.js';
+import { applyEvent, emptyState, parseLine, type StreamState } from './stream.js';
 import { FileTail, readTail } from './tail.js';
 import { ensureWorkdir } from './worktree.js';
 
@@ -42,25 +42,20 @@ export const PID_MATCH_MS = 15000;
 
 const stderrFile = (executionId: number) => path.join(paths.runs(), String(executionId), 'stderr.log');
 
-/**
- * The stream state up to a byte offset of the transcript, rebuilt silently (no live-view lines), and
- * the reader that read it: following the run from that offset goes on with the same reader, which may
- * hold the start of a Gemini CLI answer. Without an offset the whole transcript is read and ended.
- */
-function replayState(transcriptPath: string, upTo?: number): { state: StreamState; reader: StreamReader } {
+/** The stream state up to a byte offset of the transcript, rebuilt silently (no live-view lines). */
+function replayState(transcriptPath: string, upTo?: number): StreamState {
   const state = emptyState();
-  const reader = new StreamReader();
   let raw: Buffer;
   try {
     raw = fs.readFileSync(transcriptPath);
   } catch {
-    return { state, reader };
+    return state;
   }
   for (const line of raw.subarray(0, upTo ?? raw.length).toString('utf8').split(/\r?\n/)) {
-    for (const ev of reader.push(line)) applyEvent(state, ev);
+    const ev = parseLine(line);
+    if (ev) applyEvent(state, ev);
   }
-  if (upTo == null) for (const ev of reader.end()) applyEvent(state, ev);
-  return { state, reader };
+  return state;
 }
 
 /** Tools a run may never use, by git policy. Prefix patterns are best effort, see DECISIONS.md. */
@@ -271,20 +266,15 @@ export class Runner implements RunnerControl {
    * Reads what the run's process appends to the transcript, from `offset`, until the process ends
    * (true) or the Board closes (false). The offset read so far is saved, so a restart resumes there.
    */
-  private async follow(
-    run: ActiveRun,
-    state: StreamState,
-    transcriptPath: string,
-    offset: number,
-    ended: () => boolean,
-    reader = new StreamReader(),
-  ): Promise<boolean> {
+  private async follow(run: ActiveRun, state: StreamState, transcriptPath: string, offset: number, ended: () => boolean): Promise<boolean> {
     const { db, bus } = this.ctx;
     const updateProgress = db.prepare('UPDATE executions SET turns = ?, tokens_in = ?, tokens_out = ?, claude_session_id = COALESCE(?, claude_session_id) WHERE id = ?');
     const saveOffset = db.prepare('UPDATE executions SET stream_offset = ? WHERE id = ?');
     const tail = new FileTail(transcriptPath, offset);
     let saved = offset;
-    const handle = (ev: Record<string, any>) => {
+    const handle = (line: string) => {
+      const ev = parseLine(line);
+      if (!ev) return;
       const human = applyEvent(state, ev);
       if (ev.type === 'assistant' || ev.type === 'result' || (ev.type === 'system' && ev.subtype === 'init')) {
         updateProgress.run(state.turns, state.tokensIn, state.tokensOut, state.sessionId, run.executionId);
@@ -293,8 +283,7 @@ export class Runner implements RunnerControl {
       if (ev.type === 'rate_limit_event' && this.ctx.usage?.update(ev.rate_limit_info)) this.meter.sample(this.ctx.usage.get());
     };
     const drainLines = (all: boolean) => {
-      for (const line of tail.read(all)) for (const ev of reader.push(line)) handle(ev);
-      if (all) for (const ev of reader.end()) handle(ev);
+      for (const line of tail.read(all)) handle(line);
       if (tail.offset !== saved) {
         saveOffset.run(tail.offset, run.executionId);
         saved = tail.offset;
@@ -332,7 +321,7 @@ export class Runner implements RunnerControl {
     if (workdir.baseNote) {
       service.addComment(card.id, { author: 'system', kind: 'comment', executionId: run.executionId, bodyMd: workdir.baseNote });
     }
-    // The card's agent (D92): Claude Code unless the card or the settings choose Gemini CLI.
+    // The card's agent (D92, D93): Claude Code unless the card or the settings choose Antigravity CLI.
     const agent = resolveAgent(card, config);
     // A session only exists under the folder it started in, and only in the agent that started it.
     // When the starting folder changed (the workspace was configured after the card first ran), or the
@@ -373,6 +362,8 @@ export class Runner implements RunnerControl {
       branch: workdir.branch,
       split: kind === 'first' ? splitCandidate(detail, config) : null,
       siblings: detail.parent ? service.subtasksOf(detail.parent.id).filter((t) => t.id !== card.id) : [],
+      // A resumed session already saw the comments from before its previous run (D94).
+      commentsSince: resumeId ? (detail.executions.filter((e) => e.id !== run.executionId).at(-1)?.startedAt ?? null) : null,
     };
     const systemPrompt = buildSystemPrompt(promptInput);
     const userPrompt = buildUserPrompt(kind, promptInput, nextPrompt);
@@ -387,6 +378,7 @@ export class Runner implements RunnerControl {
       executionId: run.executionId,
       runDir,
       boardUrl,
+      cwd: workdir.cwd,
       systemPrompt,
       userPrompt,
       resumeId,
@@ -399,8 +391,11 @@ export class Runner implements RunnerControl {
 
     const transcriptPath = path.join(paths.transcripts(), `${run.executionId}.jsonl`);
     fs.writeFileSync(transcriptPath, JSON.stringify({ type: 'claude_board_prompt', kind, prompt: userPrompt, at: nowIso() }) + '\n');
-    db.prepare('UPDATE executions SET transcript_path = ?, claude_session_id = ? WHERE id = ?').run(transcriptPath, sessionId, run.executionId);
-    service.setRunFields(card.id, { claudeSessionId: sessionId });
+    // An agent that picks its own session id (Antigravity CLI) reports it in the stream; until then the
+    // card holds no session, so a run that dies before starting one is not resumed with another agent's id.
+    const knownSession = launch.presetSession || resumeId ? sessionId : null;
+    db.prepare('UPDATE executions SET transcript_path = ?, claude_session_id = ? WHERE id = ?').run(transcriptPath, knownSession, run.executionId);
+    service.setRunFields(card.id, { claudeSessionId: knownSession });
 
     const env = launchEnv(process.env, launch, {
       CLAUDE_BOARD_CARD_ID: String(card.id),
@@ -465,8 +460,8 @@ export class Runner implements RunnerControl {
       | { outcome: string | null; summary_md: string | null; agent: string | null }
       | undefined;
     const outcome = row?.outcome ?? null;
-    // Messages name the agent that ran: "o Claude" for Claude Code (every run before D92), "o Gemini" otherwise.
-    const who = row?.agent === 'gemini' ? 'o Gemini' : 'o Claude';
+    // Messages name the agent that ran: "o Claude" for Claude Code (every run before D92), else that agent.
+    const who = row?.agent === 'antigravity' ? 'o Antigravity' : row?.agent === 'gemini' ? 'o Gemini' : 'o Claude';
     const Who = who.charAt(0).toUpperCase() + who.slice(1);
     let status: ExecutionStatus;
     let target: Status;
@@ -579,7 +574,7 @@ export class Runner implements RunnerControl {
         bus.publish({ type: 'execution.progress', cardId: r.card_id, executionId: r.id, data: { line: 'O Board reiniciou; a execução continua.' } });
         continue;
       }
-      const state = r.transcript_path ? replayState(r.transcript_path).state : emptyState();
+      const state = r.transcript_path ? replayState(r.transcript_path) : emptyState();
       if (state.result) {
         this.finish(run, state, { exitCode: null, stderr: r.transcript_path ? this.collectStderr(r.id, r.transcript_path) : '' });
         continue;
@@ -603,9 +598,9 @@ export class Runner implements RunnerControl {
 
   /** Follows a run started by an earlier Board until its process ends. */
   private async reattach(run: ActiveRun, transcriptPath: string, offset: number, spawnedAtMs: number): Promise<void> {
-    const { state, reader } = replayState(transcriptPath, offset);
+    const state = replayState(transcriptPath, offset);
     this.armTimeout(run, spawnedAtMs);
-    if (!(await this.follow(run, state, transcriptPath, offset, () => !run.pid || !isAlive(run.pid), reader))) return;
+    if (!(await this.follow(run, state, transcriptPath, offset, () => !run.pid || !isAlive(run.pid)))) return;
     if (run.timer) clearTimeout(run.timer);
     this.finish(run, state, { exitCode: null, stderr: this.collectStderr(run.executionId, transcriptPath) });
   }

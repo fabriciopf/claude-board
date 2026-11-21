@@ -154,6 +154,22 @@ describe('runner with the fake claude', () => {
     expect(arg(calls().at(-1)!, '--resume')).toBe(d.card.claudeSessionId);
   });
 
+  it('(c2) a resumed run gets only the user comments since the previous run; a new one gets all (D94)', async () => {
+    const card = queue('Tarefa com conversa', 'Trabalho. [fake:max_turns]');
+    for (let i = 1; i <= 10; i++) ctx.service.addComment(card.id, { author: 'user', bodyMd: `antes ${i}`, kind: 'comment' });
+    await runOnce();
+    const first = calls().at(-1)!;
+    for (let i = 1; i <= 10; i++) expect(first.prompt).toContain(`antes ${i}`);
+
+    ctx.service.addUserComment(card.id, 'depois da falha');
+    ctx.service.retry(card.id);
+    await runOnce();
+    const resumed = calls().at(-1)!;
+    expect(arg(resumed, '--resume')).toBe(ctx.service.getCard(card.id).claudeSessionId);
+    expect(resumed.prompt).toContain('depois da falha');
+    expect(resumed.prompt).not.toMatch(/antes \d/);
+  });
+
   it('(d) "Parar" kills the whole process tree and parks the card', async () => {
     const pidsFile = path.join(ctx.home, 'pids.json');
     process.env.FAKE_CLAUDE_PIDS = pidsFile;
