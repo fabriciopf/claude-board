@@ -9,6 +9,15 @@ export const settings = defineMessages(
     'tab.organization': 'Projetos, labels e repositórios',
     'tab.git': 'Workspace e Git',
     'tab.claude': 'Claude Code',
+    'tab.gemini': 'Gemini CLI',
+    'f.defaultAgent': 'Agente padrão das execuções',
+    'h.defaultAgent': 'vale para todo card que não escolhe o próprio agente; skills, conectores do claude.ai e o Artifact só existem no Claude Code',
+    'f.geminiModel': 'Modelo padrão do Gemini',
+    'h.geminiModel': 'vale para os cards do Gemini CLI que não escolhem o próprio modelo',
+    'opt.geminiDefault': 'padrão do Gemini CLI',
+    'f.geminiApprovalMode': 'Aprovação do Gemini',
+    'h.geminiApprovalMode': 'yolo = sem pedir confirmação, que é o que uma execução sem ninguém olhando precisa; os git push proibidos continuam bloqueados',
+    'f.geminiBin': 'Executável do Gemini CLI',
 
     // Fields (label "f." and hint "h.")
     'f.maxConcurrency': 'Execuções simultâneas',
@@ -178,6 +187,15 @@ export const settings = defineMessages(
       'tab.organization': 'Projects, labels and repositories',
       'tab.git': 'Workspace and Git',
       'tab.claude': 'Claude Code',
+      'tab.gemini': 'Gemini CLI',
+      'f.defaultAgent': 'Default agent for runs',
+      'h.defaultAgent': 'applies to every card that does not pick its own agent; skills, claude.ai connectors and Artifact exist only in Claude Code',
+      'f.geminiModel': 'Default Gemini model',
+      'h.geminiModel': 'applies to Gemini CLI cards that do not pick their own model',
+      'opt.geminiDefault': 'Gemini CLI default',
+      'f.geminiApprovalMode': 'Gemini approval',
+      'h.geminiApprovalMode': 'yolo = no confirmation prompts, which an unattended run needs; forbidden git pushes stay blocked',
+      'f.geminiBin': 'Gemini CLI executable',
 
       'f.maxConcurrency': 'Simultaneous runs',
       'h.maxConcurrency':
@@ -340,6 +358,15 @@ export const settings = defineMessages(
       'tab.organization': 'Proyectos, etiquetas y repositorios',
       'tab.git': 'Workspace y Git',
       'tab.claude': 'Claude Code',
+      'tab.gemini': 'Gemini CLI',
+      'f.defaultAgent': 'Agente por defecto de las ejecuciones',
+      'h.defaultAgent': 'vale para toda tarjeta que no elige su propio agente; skills, conectores de claude.ai y Artifact solo existen en Claude Code',
+      'f.geminiModel': 'Modelo por defecto de Gemini',
+      'h.geminiModel': 'vale para las tarjetas de Gemini CLI que no eligen su propio modelo',
+      'opt.geminiDefault': 'predeterminado de Gemini CLI',
+      'f.geminiApprovalMode': 'Aprobación de Gemini',
+      'h.geminiApprovalMode': 'yolo = sin pedir confirmación, que es lo que necesita una ejecución sin nadie mirando; los git push prohibidos siguen bloqueados',
+      'f.geminiBin': 'Ejecutable de Gemini CLI',
 
       'f.maxConcurrency': 'Ejecuciones simultáneas',
       'h.maxConcurrency':

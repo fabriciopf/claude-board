@@ -1,15 +1,15 @@
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { DEFAULT_CONFIG, paths, protectedBranchList, type Config } from '../config.js';
+import { paths } from '../config.js';
 import type { AppContext, RunnerControl } from '../context.js';
 import { nowIso } from '../db/index.js';
-import { AUTO_CONCURRENCY, UNLIMITED_CONCURRENCY, type Card, type ConcurrencyInfo, type ExecutionStatus, type Status } from '../shared/domain.js';
-import { CARD_HEADER, EXECUTION_HEADER } from '../mcp/http.js';
+import { AUTO_CONCURRENCY, UNLIMITED_CONCURRENCY, type AgentId, type Card, type ConcurrencyInfo, type ExecutionStatus, type Status } from '../shared/domain.js';
+import { agentName, buildLaunch, resolveAgent, type Launch } from './agents.js';
 import { BurnMeter, decideAuto, typicalRunMinutes, type RunTiming } from './auto-concurrency.js';
 import { isAlive, killTree, processStartTimes, spawnDetached } from './process.js';
 import { buildSystemPrompt, buildUserPrompt, splitCandidate, type PromptKind } from './prompt.js';
-import { applyEvent, emptyState, parseLine, type StreamState } from './stream.js';
+import { applyEvent, emptyState, StreamReader, type StreamState } from './stream.js';
 import { FileTail, readTail } from './tail.js';
 import { ensureWorkdir } from './worktree.js';
 
@@ -42,20 +42,25 @@ export const PID_MATCH_MS = 15000;
 
 const stderrFile = (executionId: number) => path.join(paths.runs(), String(executionId), 'stderr.log');
 
-/** The stream state up to a byte offset of the transcript, rebuilt silently (no live-view lines). */
-function replayState(transcriptPath: string, upTo?: number): StreamState {
+/**
+ * The stream state up to a byte offset of the transcript, rebuilt silently (no live-view lines), and
+ * the reader that read it: following the run from that offset goes on with the same reader, which may
+ * hold the start of a Gemini CLI answer. Without an offset the whole transcript is read and ended.
+ */
+function replayState(transcriptPath: string, upTo?: number): { state: StreamState; reader: StreamReader } {
   const state = emptyState();
+  const reader = new StreamReader();
   let raw: Buffer;
   try {
     raw = fs.readFileSync(transcriptPath);
   } catch {
-    return state;
+    return { state, reader };
   }
   for (const line of raw.subarray(0, upTo ?? raw.length).toString('utf8').split(/\r?\n/)) {
-    const ev = parseLine(line);
-    if (ev) applyEvent(state, ev);
+    for (const ev of reader.push(line)) applyEvent(state, ev);
   }
-  return state;
+  if (upTo == null) for (const ev of reader.end()) applyEvent(state, ev);
+  return { state, reader };
 }
 
 /** Tools a run may never use, by git policy. Prefix patterns are best effort, see DECISIONS.md. */
@@ -69,6 +74,13 @@ const samePath = (a: string, b: string) => {
  * Environment of a run. CLAUDE_CODE_ENTRYPOINT is set after the spread so the run does not depend on
  * where the Board was started: `claude -p` alone reports `sdk-cli`, which hides the Artifact tool (D60).
  */
+/** Environment of a run of any agent: the Board's own, the launch's additions and removals, then the Board variables. */
+export function launchEnv(base: NodeJS.ProcessEnv, launch: Pick<Launch, 'env' | 'unsetEnv'>, extra: Record<string, string>): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...base, ...extra, ...launch.env };
+  for (const key of launch.unsetEnv) if (!(key in launch.env)) delete env[key];
+  return env;
+}
+
 export function runEnv(base: NodeJS.ProcessEnv, entrypoint: string, extra: Record<string, string>): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...base, ...extra };
   if (entrypoint) env.CLAUDE_CODE_ENTRYPOINT = entrypoint;
@@ -76,31 +88,7 @@ export function runEnv(base: NodeJS.ProcessEnv, entrypoint: string, extra: Recor
   return env;
 }
 
-/** Branches no run pushes to come from the protectedBranches setting (the prompt names the same list). */
-export function disallowedTools(policy: Config['prPolicy'], protectedBranches: string[] = protectedBranchList(DEFAULT_CONFIG.protectedBranches)): string[] {
-  const force = [
-    'git push --force *',
-    'git push -f *',
-    'git push * --force*',
-    'git push * -f *',
-    'git push * +*',
-    'git push --mirror*',
-    'git push * --mirror*',
-    'git push --delete *',
-    'git push * --delete *',
-    'git push * -d *',
-    'git push * :*',
-    // "origin main" and any refspec whose destination is a protected branch (HEAD:main, HEAD:refs/heads/main).
-    ...protectedBranches.flatMap((b) => [`git push origin ${b}`, `git push origin ${b} *`, `git push * *:${b}`, `git push * *:refs/heads/${b}`]),
-  ];
-  const rules =
-    policy === 'none'
-      ? ['git push', 'git push *', 'gh pr create *']
-      : policy === 'push_branch'
-        ? [...force, 'gh pr create *']
-        : force;
-  return rules.flatMap((r) => [`Bash(${r})`, `PowerShell(${r})`]);
-}
+export { disallowedTools } from './agents.js';
 
 export class Runner implements RunnerControl {
   private timer: NodeJS.Timeout | null = null;
@@ -283,15 +271,20 @@ export class Runner implements RunnerControl {
    * Reads what the run's process appends to the transcript, from `offset`, until the process ends
    * (true) or the Board closes (false). The offset read so far is saved, so a restart resumes there.
    */
-  private async follow(run: ActiveRun, state: StreamState, transcriptPath: string, offset: number, ended: () => boolean): Promise<boolean> {
+  private async follow(
+    run: ActiveRun,
+    state: StreamState,
+    transcriptPath: string,
+    offset: number,
+    ended: () => boolean,
+    reader = new StreamReader(),
+  ): Promise<boolean> {
     const { db, bus } = this.ctx;
     const updateProgress = db.prepare('UPDATE executions SET turns = ?, tokens_in = ?, tokens_out = ?, claude_session_id = COALESCE(?, claude_session_id) WHERE id = ?');
     const saveOffset = db.prepare('UPDATE executions SET stream_offset = ? WHERE id = ?');
     const tail = new FileTail(transcriptPath, offset);
     let saved = offset;
-    const handle = (line: string) => {
-      const ev = parseLine(line);
-      if (!ev) return;
+    const handle = (ev: Record<string, any>) => {
       const human = applyEvent(state, ev);
       if (ev.type === 'assistant' || ev.type === 'result' || (ev.type === 'system' && ev.subtype === 'init')) {
         updateProgress.run(state.turns, state.tokensIn, state.tokensOut, state.sessionId, run.executionId);
@@ -300,7 +293,8 @@ export class Runner implements RunnerControl {
       if (ev.type === 'rate_limit_event' && this.ctx.usage?.update(ev.rate_limit_info)) this.meter.sample(this.ctx.usage.get());
     };
     const drainLines = (all: boolean) => {
-      for (const line of tail.read(all)) handle(line);
+      for (const line of tail.read(all)) for (const ev of reader.push(line)) handle(ev);
+      if (all) for (const ev of reader.end()) handle(ev);
       if (tail.offset !== saved) {
         saveOffset.run(tail.offset, run.executionId);
         saved = tail.offset;
@@ -338,27 +332,34 @@ export class Runner implements RunnerControl {
     if (workdir.baseNote) {
       service.addComment(card.id, { author: 'system', kind: 'comment', executionId: run.executionId, bodyMd: workdir.baseNote });
     }
-    // A session only exists under the folder it started in. When the starting folder changed (the
-    // workspace was configured after the card first ran), resuming would fail or run outside the
-    // workspace: start a new session there instead, carrying the card history in the prompt.
+    // The card's agent (D92): Claude Code unless the card or the settings choose Gemini CLI.
+    const agent = resolveAgent(card, config);
+    // A session only exists under the folder it started in, and only in the agent that started it.
+    // When the starting folder changed (the workspace was configured after the card first ran), or the
+    // card moved to another agent, resuming would fail: start a new session instead, carrying the card
+    // history in the prompt.
     let resumeId = card.claudeSessionId;
     if (resumeId) {
       const prev = db
-        .prepare('SELECT cwd FROM executions WHERE card_id = ? AND id != ? AND cwd IS NOT NULL ORDER BY id DESC LIMIT 1')
-        .get(card.id, run.executionId) as { cwd: string } | undefined;
-      if (prev?.cwd && !samePath(prev.cwd, workdir.cwd)) {
+        .prepare('SELECT cwd, agent FROM executions WHERE card_id = ? AND id != ? AND cwd IS NOT NULL ORDER BY id DESC LIMIT 1')
+        .get(card.id, run.executionId) as { cwd: string; agent: string | null } | undefined;
+      const prevAgent = prev ? ((prev.agent as AgentId | null) ?? 'claude') : agent;
+      let why: string | null = null;
+      if (prev?.cwd && !samePath(prev.cwd, workdir.cwd)) why = `a pasta de partida mudou de \`${prev.cwd}\` para \`${workdir.cwd}\``;
+      else if (prevAgent !== agent) why = `o agente mudou de ${agentName(prevAgent)} para ${agentName(agent)}`;
+      if (why) {
         resumeId = null;
         kind = 'moved';
         service.addComment(card.id, {
           author: 'system',
           kind: 'comment',
           executionId: run.executionId,
-          bodyMd: `Sessão nova: a pasta de partida mudou de \`${prev.cwd}\` para \`${workdir.cwd}\`. O histórico do card vai no prompt.`,
+          bodyMd: `Sessão nova: ${why}. O histórico do card vai no prompt.`,
         });
         db.prepare('UPDATE executions SET prompt_kind = ? WHERE id = ?').run(kind, run.executionId);
       }
     }
-    db.prepare('UPDATE executions SET cwd = ? WHERE id = ?').run(workdir.cwd, run.executionId);
+    db.prepare('UPDATE executions SET cwd = ?, agent = ? WHERE id = ?').run(workdir.cwd, agent, run.executionId);
 
     const detail = service.getCardDetail(card.id);
     const promptInput = {
@@ -378,69 +379,30 @@ export class Runner implements RunnerControl {
 
     const runDir = path.join(paths.runs(), String(run.executionId));
     fs.mkdirSync(runDir, { recursive: true });
-    const mcpFile = path.join(runDir, 'mcp.json');
     const boardUrl = `http://127.0.0.1:${config.port}`;
-    fs.writeFileSync(
-      mcpFile,
-      JSON.stringify(
-        {
-          mcpServers: {
-            'claude-board': {
-              type: 'http',
-              url: `${boardUrl}/mcp`,
-              headers: { [CARD_HEADER]: String(card.id), [EXECUTION_HEADER]: String(run.executionId) },
-            },
-          },
-        },
-        null,
-        2,
-      ),
-    );
-
     const sessionId = resumeId ?? randomUUID();
-    const maxTurns = card.maxTurns ?? config.defaultMaxTurns;
-    const args = [
-      ...config.claudeArgsPrefix,
-      '-p',
-      '--output-format',
-      'stream-json',
-      '--verbose',
-      '--append-system-prompt',
+    const launch = buildLaunch(agent, {
+      config,
+      card,
+      executionId: run.executionId,
+      runDir,
+      boardUrl,
       systemPrompt,
-      '--mcp-config',
-      mcpFile,
-      '--allowedTools',
-      'mcp__claude-board',
-      '--permission-prompts',
-      'none',
-    ];
-    if (card.dangerousAllowed) args.push('--dangerously-skip-permissions');
-    else {
-      // No mode on the card or in the Board config: Claude Code uses the user's own settings.json, as in VS Code.
-      const mode = card.permissionMode || config.defaultPermissionMode || null;
-      if (mode) args.push('--permission-mode', mode);
-    }
-    for (const dir of workdir.addDirs) args.push('--add-dir', dir);
-    args.push('--disallowedTools', ...disallowedTools(config.prPolicy, protectedBranchList(config.protectedBranches)));
-    if (maxTurns && maxTurns > 0) args.push('--max-turns', String(maxTurns));
-    // The card's choice wins; then the settings. Empty in both: Claude Code's own default.
-    const model = card.model || config.defaultModel || null;
-    const effort = card.effort || config.defaultEffort || null;
-    if (model) args.push('--model', model);
-    if (effort) args.push('--effort', effort);
-    db.prepare('UPDATE executions SET model = ?, effort = ? WHERE id = ?').run(model, effort, run.executionId);
-    // Same name on the card and on the Claude Code session (shown in VS Code and in `claude --resume`).
-    const sessionName = service.getCard(card.id).sessionName;
-    if (sessionName) args.push('--name', sessionName);
-    if (resumeId) args.push('--resume', resumeId);
-    else args.push('--session-id', sessionId);
+      userPrompt,
+      resumeId,
+      sessionId,
+      // Same name on the card and on the Claude Code session (shown in VS Code and in `claude --resume`).
+      sessionName: service.getCard(card.id).sessionName,
+      addDirs: workdir.addDirs,
+    });
+    db.prepare('UPDATE executions SET model = ?, effort = ? WHERE id = ?').run(launch.model, launch.effort, run.executionId);
 
     const transcriptPath = path.join(paths.transcripts(), `${run.executionId}.jsonl`);
     fs.writeFileSync(transcriptPath, JSON.stringify({ type: 'claude_board_prompt', kind, prompt: userPrompt, at: nowIso() }) + '\n');
     db.prepare('UPDATE executions SET transcript_path = ?, claude_session_id = ? WHERE id = ?').run(transcriptPath, sessionId, run.executionId);
     service.setRunFields(card.id, { claudeSessionId: sessionId });
 
-    const env = runEnv(process.env, config.runnerEntrypoint, {
+    const env = launchEnv(process.env, launch, {
       CLAUDE_BOARD_CARD_ID: String(card.id),
       CLAUDE_BOARD_EXECUTION_ID: String(run.executionId),
       CLAUDE_BOARD_URL: boardUrl,
@@ -449,14 +411,14 @@ export class Runner implements RunnerControl {
     // The process writes the stream straight into the transcript and reads the prompt from a file,
     // so nothing ties it to this Board: a restart leaves it running and the next start follows it (D45).
     const promptFile = path.join(runDir, 'prompt.txt');
-    fs.writeFileSync(promptFile, userPrompt);
+    fs.writeFileSync(promptFile, launch.stdin);
     const startOffset = fs.statSync(transcriptPath).size;
     const state = emptyState();
     let exited = false;
     let code: number | null = null;
     let spawnError: Error | null = null;
     try {
-      const child = spawnDetached(config.claudeBin, args, {
+      const child = spawnDetached(launch.bin, launch.args, {
         cwd: workdir.cwd,
         env,
         stdinFile: promptFile,
@@ -486,7 +448,7 @@ export class Runner implements RunnerControl {
     if (spawnError) {
       return this.finish(run, state, {
         forcedStatus: 'error',
-        errorMd: `Não consegui iniciar o Claude Code ("${config.claudeBin}"): ${spawnError.message}. Confira o executável nas configurações e rode "claude-board doctor".`,
+        errorMd: `Não consegui iniciar o ${agentName(launch.agent)} ("${launch.bin}"): ${spawnError.message}. Confira o executável nas configurações e rode "claude-board doctor".`,
       });
     }
     return this.finish(run, state, { exitCode: code, stderr });
@@ -499,10 +461,13 @@ export class Runner implements RunnerControl {
     opts: { forcedStatus?: ExecutionStatus; errorMd?: string; exitCode?: number | null; stderr?: string },
   ): void {
     const { db, service, bus, config } = this.ctx;
-    const row = db.prepare('SELECT outcome, summary_md FROM executions WHERE id = ?').get(run.executionId) as
-      | { outcome: string | null; summary_md: string | null }
+    const row = db.prepare('SELECT outcome, summary_md, agent FROM executions WHERE id = ?').get(run.executionId) as
+      | { outcome: string | null; summary_md: string | null; agent: string | null }
       | undefined;
     const outcome = row?.outcome ?? null;
+    // Messages name the agent that ran: "o Claude" for Claude Code (every run before D92), "o Gemini" otherwise.
+    const who = row?.agent === 'gemini' ? 'o Gemini' : 'o Claude';
+    const Who = who.charAt(0).toUpperCase() + who.slice(1);
     let status: ExecutionStatus;
     let target: Status;
     let errorMd: string | null = opts.errorMd ?? null;
@@ -535,11 +500,12 @@ export class Runner implements RunnerControl {
       status = 'success';
       target = 'review';
       unreported = true;
-      summary = state.result?.text ?? state.lastText ?? 'O Claude terminou sem resumo.';
+      summary = state.result?.text || state.lastText || `${Who} terminou sem resumo.`;
     } else if (/max_turns/.test(subtype)) {
       status = 'error';
       target = 'waiting_user';
-      errorMd = `O Claude atingiu o limite de ${state.result?.numTurns ?? state.turns} turnos sem terminar. Use "Tentar de novo" para continuar a mesma sessão, ou aumente o máximo de turnos do card.`;
+      const limit = service.getCard(run.cardId).maxTurns ?? config.defaultMaxTurns;
+      errorMd = `${Who} atingiu o limite de ${limit > 0 ? limit : (state.result?.numTurns ?? state.turns)} turnos sem terminar. Use "Tentar de novo" para continuar a mesma sessão, ou aumente o máximo de turnos do card.`;
     } else {
       status = 'error';
       target = 'waiting_user';
@@ -562,7 +528,7 @@ export class Runner implements RunnerControl {
         author: 'claude',
         kind: 'run_summary',
         executionId: run.executionId,
-        bodyMd: `${summary}\n\n_O Claude não reportou o fim explicitamente (não chamou card_submit_for_review); este é o texto final da execução._`,
+        bodyMd: `${summary}\n\n_${Who} não reportou o fim explicitamente (não chamou card_submit_for_review); este é o texto final da execução._`,
       });
     }
     service.recordEvent(run.cardId, 'execution_finished', { executionId: run.executionId, status }, 'system');
@@ -613,7 +579,7 @@ export class Runner implements RunnerControl {
         bus.publish({ type: 'execution.progress', cardId: r.card_id, executionId: r.id, data: { line: 'O Board reiniciou; a execução continua.' } });
         continue;
       }
-      const state = r.transcript_path ? replayState(r.transcript_path) : emptyState();
+      const state = r.transcript_path ? replayState(r.transcript_path).state : emptyState();
       if (state.result) {
         this.finish(run, state, { exitCode: null, stderr: r.transcript_path ? this.collectStderr(r.id, r.transcript_path) : '' });
         continue;
@@ -637,9 +603,9 @@ export class Runner implements RunnerControl {
 
   /** Follows a run started by an earlier Board until its process ends. */
   private async reattach(run: ActiveRun, transcriptPath: string, offset: number, spawnedAtMs: number): Promise<void> {
-    const state = replayState(transcriptPath, offset);
+    const { state, reader } = replayState(transcriptPath, offset);
     this.armTimeout(run, spawnedAtMs);
-    if (!(await this.follow(run, state, transcriptPath, offset, () => !run.pid || !isAlive(run.pid)))) return;
+    if (!(await this.follow(run, state, transcriptPath, offset, () => !run.pid || !isAlive(run.pid), reader))) return;
     if (run.timer) clearTimeout(run.timer);
     this.finish(run, state, { exitCode: null, stderr: this.collectStderr(run.executionId, transcriptPath) });
   }

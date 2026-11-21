@@ -84,6 +84,7 @@ export function createMcpServer(ctx: AppContext, session: McpSession): McpServer
       // Only when the card overrides the settings, to keep card lists short.
       ...(c.model ? { model: c.model } : {}),
       ...(c.effort ? { effort: c.effort } : {}),
+      ...(c.agent ? { agent: c.agent } : {}),
     };
   };
 
@@ -204,6 +205,7 @@ export function createMcpServer(ctx: AppContext, session: McpSession): McpServer
         priority: z.number().int().min(1).max(4).optional(),
         model: z.string().nullable().optional().describe('Modelo das execuções deste card (ex.: claude-opus-5-5, claude-sonnet-5-5, claude-haiku-5-5); vazio ou null = o padrão da configuração'),
         effort: z.enum(EFFORT_ENUM).nullable().optional().describe('Effort das execuções deste card; null = o padrão da configuração'),
+        agent: z.enum(['claude', 'gemini']).nullable().optional().describe('Agente que executa o card: claude (Claude Code) ou gemini (Gemini CLI); null = o padrão da configuração'),
       },
     },
     (args) =>
@@ -223,6 +225,7 @@ export function createMcpServer(ctx: AppContext, session: McpSession): McpServer
             priority: args.priority,
             model: args.model,
             effort: args.effort,
+            agent: args.agent,
           },
           'claude',
           'mcp',
@@ -237,7 +240,7 @@ export function createMcpServer(ctx: AppContext, session: McpSession): McpServer
   server.registerTool(
     'card_update',
     {
-      description: 'Edita título, descrição, prioridade, prazo, projeto, pasta do repositório (repoPath), repositórios relacionados, modelo ou effort de um card. O dono não: só o usuário o troca, à mão.',
+      description: 'Edita título, descrição, prioridade, prazo, projeto, pasta do repositório (repoPath), repositórios relacionados, modelo, effort ou agente de um card. O dono não: só o usuário o troca, à mão.',
       inputSchema: {
         id: cardIdArg,
         title: z.string().optional(),
@@ -252,6 +255,7 @@ export function createMcpServer(ctx: AppContext, session: McpSession): McpServer
           .describe('Substitui a lista de repositórios relacionados (nomes cadastrados, ex.: ["hdb", "sms"]); [] limpa'),
         model: z.string().nullable().optional().describe('Modelo das execuções deste card (ex.: claude-opus-5-5, claude-sonnet-5-5, claude-haiku-5-5); vazio ou null = o padrão da configuração'),
         effort: z.enum(EFFORT_ENUM).nullable().optional().describe('Effort das execuções deste card; null = o padrão da configuração'),
+        agent: z.enum(['claude', 'gemini']).nullable().optional().describe('Agente que executa o card: claude (Claude Code) ou gemini (Gemini CLI); null = o padrão da configuração'),
       },
     },
     (args) =>
@@ -270,6 +274,7 @@ export function createMcpServer(ctx: AppContext, session: McpSession): McpServer
             repoPath: args.repoPath,
             model: args.model,
             effort: args.effort,
+            agent: args.agent,
           },
           'claude',
         );

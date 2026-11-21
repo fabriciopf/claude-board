@@ -470,6 +470,20 @@ pre {
   min-width: var(--chip-min);
 }
 
+/* The five icons (pause, sound, theme, language, help) sit after the strip and never scroll away, like the menu, the logo and the pending tab (comment on card #186). */
+.header-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex: none;
+}
+
+.header-actions > .btn,
+.header-actions > .lang-menu > .btn {
+  height: var(--header-h);
+  min-width: var(--header-h);
+}
+
 .counters .agenda-title {
   flex: 0 1 auto;
   min-width: 0;
@@ -2353,7 +2367,7 @@ html[data-busy] body::before {
      instead of four wrapped lines over the board. */
   .header {
     display: grid;
-    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-columns: auto minmax(0, 1fr) auto;
     align-items: center;
     gap: 6px 0;
     padding: 6px 0 8px;
@@ -2395,6 +2409,13 @@ html[data-busy] body::before {
 
   .header > .counters {
     grid-column: 1 / -1;
+  }
+
+  /* The icons stay on the first line, at the right of the logo and the pending tab. */
+  .header > .header-actions {
+    grid-column: 3;
+    grid-row: 1;
+    padding-right: 12px;
   }
 
   /* On the phone the strip starts at the left edge, under the logo. */

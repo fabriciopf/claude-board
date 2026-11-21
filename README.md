@@ -104,6 +104,22 @@ claude -p --output-format stream-json --verbose [--max-turns N] [--model M] [--e
 
 Runs use the same Claude Code login you use interactively, so they draw on the same plan quota.
 
+### Gemini CLI as the agent
+
+A card can run in [Gemini CLI](https://github.com/google-gemini/gemini-cli) instead of Claude Code: pick "Gemini CLI" in the card's "Agent" field, or make it the default in Settings › Gemini CLI. Install it with `npm i -g @google/gemini-cli` and sign in once interactively. The run is:
+
+```text
+gemini --output-format stream-json --skip-trust --approval-mode yolo
+       --admin-policy <rules that block the git pushes prPolicy forbids>
+       [--include-directories <worktree>] [--model M]
+       (--session-id UUID | --resume ID)
+```
+
+- **Same card flow:** the Board's MCP server is registered for the run in a settings file of its own (`GEMINI_CLI_SYSTEM_SETTINGS_PATH`), which merges with your `~/.gemini/settings.json`. The Board's rules go at the top of the prompt, since Gemini CLI has no way to append to its system prompt. Questions, deliveries, splits, retries and "Continue in terminal" (`gemini --resume`) work as with Claude Code.
+- **Git pushes:** the same `prPolicy` and `protectedBranches` rules, written as a Gemini CLI policy file in the admin tier, so your own policies cannot loosen them.
+- **Switching agents:** a session belongs to one agent. A card moved from one agent to the other starts a new session, with the card history in the prompt.
+- **What only Claude Code has:** your `CLAUDE.md`, skills, plugins, claude.ai connectors and the Artifact tool. Gemini CLI reads `GEMINI.md` and its own extensions. There is no effort setting, and the automatic concurrency has no plan reading to pace Gemini runs by.
+
 ### Cards with several items
 
 When a card's description is a list (with or without surrounding context), the first run starts by asking Claude whether the items are independent tasks or steps of a single task.
@@ -194,6 +210,10 @@ Stored in `~/.claude-board/config.json` and editable in Settings.
 | `port` | 4317 | Board port |
 | `claudeBin` | `claude` | Claude Code executable |
 | `claudeHome` | `~/.claude` | Claude Code folder |
+| `defaultAgent` | `claude` | Agent of runs when the card does not choose: `claude` (Claude Code) or `gemini` (Gemini CLI) |
+| `geminiBin` | `gemini` | Gemini CLI executable |
+| `geminiModel` | empty | Model of Gemini runs when the card does not choose; empty = Gemini CLI's default |
+| `geminiApprovalMode` | `yolo` | `--approval-mode` of Gemini runs: `yolo`, `auto_edit`, `default` or `plan`; forbidden pushes stay blocked in any mode |
 | `heartbeatSeconds` | 30 | Runner interval |
 | `maxConcurrency` | `"auto"` | Concurrent runs: `"auto"` (paces runs so the 5-hour usage tracks the window, and only opens a run when what is left until the reset pays for the runs in progress plus one more with slack) or 1 to 20 |
 | `autoSplit` | `true` | On a card's first run, Claude decides whether a list description becomes separate tasks |

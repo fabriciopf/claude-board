@@ -382,60 +382,65 @@ export function App() {
           </nav>
         )}
         {runner && (
-          <div className="counters">
-            {/* Runs and the 5-hour session in one pill: the automatic mode paces the first by the second (D83). */}
-            <span className="counter runner-usage">
-              <span className="runner-part" title={concurrencyTitle(runner.concurrency)}>
-                {runner.running > 0 && <span className="spinner" />} {t('app.runner.running')} <strong>{runner.running}</strong>
-                {runner.concurrency && <ConcurrencySelect concurrency={runner.concurrency} onChanged={() => void load()} notify={notify} />}
+          <>
+            <div className="counters">
+              {/* Runs and the 5-hour session in one pill: the automatic mode paces the first by the second (D83). */}
+              <span className="counter runner-usage">
+                <span className="runner-part" title={concurrencyTitle(runner.concurrency)}>
+                  {runner.running > 0 && <span className="spinner" />} {t('app.runner.running')} <strong>{runner.running}</strong>
+                  {runner.concurrency && <ConcurrencySelect concurrency={runner.concurrency} onChanged={() => void load()} notify={notify} />}
+                </span>
+                <span className="counter-sep" aria-hidden="true" />
+                <UsageChip usage={data?.usage ?? null} />
               </span>
-              <span className="counter-sep" aria-hidden="true" />
-              <UsageChip usage={data?.usage ?? null} />
-            </span>
-            <AgendaChip agenda={data?.agenda ?? null} />
-            <AutomationChip tick={automationsTick} onOpen={() => setView('automations')} />
-            <ActionButton
-              className={'btn small icon-btn' + (runner.paused ? ' primary' : '')}
-              busyLabel=""
-              onAction={togglePause}
-              aria-label={runner.paused ? t('app.runner.resume') : t('app.runner.pause')}
-              title={runner.paused ? t('app.runner.pausedTitle') : t('app.runner.runningTitle')}
-            >
-              {runner.paused ? <PlayIcon /> : <PauseIcon />}
-            </ActionButton>
-            <button
-              className="btn small icon-btn"
-              onClick={toggleSound}
-              aria-pressed={sound}
-              aria-label={sound ? t('app.sound.on') : t('app.sound.off')}
-              title={
-                sound
-                  ? t('app.sound.onTitle', {
-                      waitingUser: statusLabel('waiting_user'),
-                      waitingThird: statusLabel('waiting_third_party'),
-                      review: statusLabel('review'),
-                    })
-                  : t('app.sound.offTitle', { review: statusLabel('review') })
-              }
-            >
-              {sound ? <SoundOnIcon /> : <SoundOffIcon />}
-            </button>
-            {'Notification' in window && Notification.permission === 'default' && (
-              <button className="btn small" onClick={() => void Notification.requestPermission().then(() => load())}>
-                {t('app.notification.enable')}
+              <AgendaChip agenda={data?.agenda ?? null} />
+              <AutomationChip tick={automationsTick} onOpen={() => setView('automations')} />
+              {'Notification' in window && Notification.permission === 'default' && (
+                <button className="btn small" onClick={() => void Notification.requestPermission().then(() => load())}>
+                  {t('app.notification.enable')}
+                </button>
+              )}
+            </div>
+            {/* The five icons stay in view like the menu, the logo and the pending tab: only the strip above scrolls (comment on card #186). */}
+            <div className="header-actions">
+              <ActionButton
+                className={'btn small icon-btn' + (runner.paused ? ' primary' : '')}
+                busyLabel=""
+                onAction={togglePause}
+                aria-label={runner.paused ? t('app.runner.resume') : t('app.runner.pause')}
+                title={runner.paused ? t('app.runner.pausedTitle') : t('app.runner.runningTitle')}
+              >
+                {runner.paused ? <PlayIcon /> : <PauseIcon />}
+              </ActionButton>
+              <button
+                className="btn small icon-btn"
+                onClick={toggleSound}
+                aria-pressed={sound}
+                aria-label={sound ? t('app.sound.on') : t('app.sound.off')}
+                title={
+                  sound
+                    ? t('app.sound.onTitle', {
+                        waitingUser: statusLabel('waiting_user'),
+                        waitingThird: statusLabel('waiting_third_party'),
+                        review: statusLabel('review'),
+                      })
+                    : t('app.sound.offTitle', { review: statusLabel('review') })
+                }
+              >
+                {sound ? <SoundOnIcon /> : <SoundOffIcon />}
               </button>
-            )}
-            <button
-              className="btn small icon-btn"
-              onClick={() => setTheme(NEXT_THEME[theme])}
-              aria-label={t('app.theme.aria', { current: themeLabel(theme), next: themeLabel(NEXT_THEME[theme]).toLowerCase() })}
-              title={t('app.theme.title', { current: themeLabel(theme), next: themeLabel(NEXT_THEME[theme]).toLowerCase() })}
-            >
-              {theme === 'light' ? <SunIcon /> : theme === 'dark' ? <MoonIcon /> : <MonitorIcon />}
-            </button>
-            <LanguageMenu />
-            <HelpButton open={helpOpen} setOpen={setHelpOpen} />
-          </div>
+              <button
+                className="btn small icon-btn"
+                onClick={() => setTheme(NEXT_THEME[theme])}
+                aria-label={t('app.theme.aria', { current: themeLabel(theme), next: themeLabel(NEXT_THEME[theme]).toLowerCase() })}
+                title={t('app.theme.title', { current: themeLabel(theme), next: themeLabel(NEXT_THEME[theme]).toLowerCase() })}
+              >
+                {theme === 'light' ? <SunIcon /> : theme === 'dark' ? <MoonIcon /> : <MonitorIcon />}
+              </button>
+              <LanguageMenu />
+              <HelpButton open={helpOpen} setOpen={setHelpOpen} />
+            </div>
+          </>
         )}
       </header>
 

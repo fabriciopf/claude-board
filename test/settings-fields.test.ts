@@ -10,10 +10,14 @@ describe('settings tabs', () => {
         'claudeBin',
         'claudeHome',
         'classificationModel',
+        'defaultAgent',
         'defaultBaseBranch',
         'defaultEffort',
         'defaultModel',
         'defaultPermissionMode',
+        'geminiApprovalMode',
+        'geminiBin',
+        'geminiModel',
         'heartbeatSeconds',
         'jiraBaseUrl',
         'maxConcurrency',
@@ -47,6 +51,11 @@ describe('settings tabs', () => {
     expect(tabOf('defaultModel')).toBe('claude');
     expect(tabOf('defaultEffort')).toBe('claude');
     expect(tabOf('defaultPermissionMode')).toBe('claude');
+  });
+
+  it('puts the agent choice and the Gemini CLI settings on their own tab (D92)', () => {
+    const tabOf = (key: string) => FIELDS.find((f) => f.key === key)?.tab;
+    for (const key of ['defaultAgent', 'geminiModel', 'geminiApprovalMode', 'geminiBin']) expect(tabOf(key)).toBe('gemini');
   });
 });
 

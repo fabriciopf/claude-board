@@ -342,4 +342,13 @@ AND NOT EXISTS (
 );
 `,
   },
+  {
+    // Agent per card (null = the settings decide) and the agent each run drove (D92). Runs from
+    // before this migration were all Claude Code; their null reads as 'claude'.
+    version: 15,
+    sql: `
+ALTER TABLE cards ADD COLUMN agent TEXT;
+ALTER TABLE executions ADD COLUMN agent TEXT;
+`,
+  },
 ];

@@ -66,6 +66,21 @@ describe('filter bar on one line', () => {
     }
   });
 
+  it('keeps the five header icons outside the scrolling strip', () => {
+    // Comment on card #186: like the menu, the logo and the pending tab, the icons never depend on the scroll.
+    const app = fs.readFileSync(path.join(UI_DIR, 'App.tsx'), 'utf8');
+    const strip = app.indexOf('className="counters"');
+    const actions = app.indexOf('className="header-actions"');
+    expect(strip).toBeGreaterThan(0);
+    expect(actions).toBeGreaterThan(strip);
+    for (const icon of ['onAction={togglePause}', 'onClick={toggleSound}', 'setTheme(NEXT_THEME[theme])', '<LanguageMenu', '<HelpButton']) {
+      const at = app.indexOf(icon, strip);
+      expect(at, icon).toBeGreaterThan(actions);
+    }
+    expect(css).toMatch(/\n\.header-actions \{[^}]*flex:\s*none/);
+    expect(css).not.toMatch(/\.header-actions \{[^}]*overflow/);
+  });
+
   it('shows only the field name when a filter is unset', () => {
     // The text goes through t() since card #184 (D90): read the keys, then their pt-BR text.
     const keys = [...bar.matchAll(/<option value="">\{t\('([\w.]+)'\)\}<\/option>/g)].map((m) => m[1] as MessageKey);

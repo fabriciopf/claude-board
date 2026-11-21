@@ -1,5 +1,5 @@
 import { useState, type ReactElement } from 'react';
-import { effortLabel, modelLabel, STATUSES, type BoardEvent, type Comment, type CommentKind, type Execution, type Status } from '../shared/domain';
+import { AGENT_LABELS, effortLabel, modelLabel, STATUSES, type BoardEvent, type Comment, type CommentKind, type Execution, type Status } from '../shared/domain';
 import { ActionButton } from './ActionButton';
 import { OwnerAvatar } from './OwnerAvatar';
 import { api, fmtDate } from './api';
@@ -168,9 +168,10 @@ function ExecutionBlock({ exec }: { exec: Execution }) {
         <span className={'exec-status ' + exec.status}>{executionStatusLabel(exec.status)}</span>
         <span className="muted small">{fmtDate(exec.startedAt)}</span>
         <span className="muted small">{t('card.exec.stats', { turns: exec.turns, tokens: tokens.toLocaleString(locale()) })}</span>
-        {(exec.model || exec.effort) && (
+        {(exec.model || exec.effort || exec.agent === 'gemini') && (
           <span className="muted small" title={t('card.exec.modelEffort')}>
-            {[exec.model && modelLabel(exec.model), exec.effort && effortLabel(exec.effort)].filter(Boolean).join(' · ')}
+            {/* The agent is named only when it is not Claude Code, the default of every run before D92. */}
+            {[exec.agent === 'gemini' && AGENT_LABELS.gemini, exec.model && modelLabel(exec.model), exec.effort && effortLabel(exec.effort)].filter(Boolean).join(' · ')}
           </span>
         )}
         {exec.promptKind && exec.promptKind !== 'first' && <span className="pill">{promptKindLabel(exec.promptKind)}</span>}

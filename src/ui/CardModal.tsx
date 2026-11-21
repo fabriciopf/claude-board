@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { EFFORT_LABELS, EFFORT_LEVELS, MODEL_OPTIONS, PERMISSION_MODES, REOPEN_ON_COMMENT, STATUSES, effortLabel, modelLabel, type App, type Card, type Label, type LinkKind, type Repository } from '../shared/domain';
+import { AGENTS, AGENT_LABELS, EFFORT_LABELS, EFFORT_LEVELS, PERMISSION_MODES, REOPEN_ON_COMMENT, STATUSES, agentLabel, effortLabel, isAgentId, modelFitsAgent, modelLabel, modelOptionsFor, type AgentId, type App, type Card, type Label, type LinkKind, type Repository } from '../shared/domain';
 import { ActionButton, ActionGroup, useBusy } from './ActionButton';
 import { ApiError, api, fmtDate, useServerEvents, type CardDetailResponse } from './api';
 import { latestDelivery } from './delivery';
@@ -7,6 +7,15 @@ import { statusLabel, statusShortLabel, t } from './i18n';
 import { renderMarkdown } from './markdown';
 import { useImagePaste } from './paste-image';
 import { Timeline } from './Timeline';
+
+/** Settings the modal names in the "padrão" option of its selects. */
+interface ConfigDefaults {
+  defaultModel?: string;
+  defaultEffort?: string;
+  defaultAgent?: string;
+  geminiModel?: string;
+  jiraBaseUrl?: string;
+}
 
 interface Props {
   cardId: number;
@@ -72,11 +81,11 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
   const replyPaste = useImagePaste(setReply, pasteError);
   const adjustPaste = useImagePaste(setAdjust, pasteError);
   // Default model and effort from the settings, named in the "padrão" option of the card's selects.
-  const [defaults, setDefaults] = useState<{ defaultModel?: string; defaultEffort?: string; jiraBaseUrl?: string }>({});
+  const [defaults, setDefaults] = useState<ConfigDefaults>({});
 
   useEffect(() => {
     void api
-      .get<{ defaultModel?: string; defaultEffort?: string; jiraBaseUrl?: string }>('/api/config')
+      .get<ConfigDefaults>('/api/config')
       .then(setDefaults)
       .catch(() => undefined);
   }, []);
@@ -223,6 +232,11 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
   const done = checklist.filter((i) => i.done).length;
   const workDir = card.worktreePath ?? executions.at(-1)?.cwd ?? null;
   const lastExec = executions.at(-1);
+  const defaultAgent: AgentId = isAgentId(defaults.defaultAgent) ? defaults.defaultAgent : 'claude';
+  // The agent of the next run, and the one that holds the session "Continuar no terminal" resumes.
+  const agent: AgentId = card.agent ?? defaultAgent;
+  const lastAgent: AgentId = lastExec ? (lastExec.agent ?? 'claude') : agent;
+  const modelOptions = modelOptionsFor(agent);
   const failed = card.status === 'waiting_user' && !openQuestion && lastExec && lastExec.status !== 'success' && lastExec.status !== 'waiting_user';
   const delivery = card.status === 'review' ? latestDelivery(comments) : null;
   // In review the description is closed by default, like "Pedido original" (card #96). Editing opens it.
@@ -414,7 +428,7 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
               {card.claudeSessionId && (
                 <button
                   className="btn"
-                  onClick={() => void copy(`${workDir ? `cd "${workDir}"; ` : ''}claude --resume ${card.claudeSessionId}`)}
+                  onClick={() => void copy(`${workDir ? `cd "${workDir}"; ` : ''}${lastAgent === 'gemini' ? 'gemini' : 'claude'} --resume ${card.claudeSessionId}`)}
                 >
                   {t('card.continueTerminal')}
                 </button>
@@ -825,10 +839,35 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
                 </select>
               </div>
               <div className="field">
+                <label htmlFor="f-agent">{t('card.agent')}</label>
+                <select
+                  id="f-agent"
+                  className="input"
+                  value={card.agent ?? ''}
+                  onChange={(e) => {
+                    const next = (e.target.value || null) as AgentId | null;
+                    const nextAgent = next ?? defaultAgent;
+                    // A model of the other agent's family would not be passed anyway (D92): clear it.
+                    void patch(card.model && !modelFitsAgent(card.model, nextAgent) ? { agent: next, model: null } : { agent: next });
+                  }}
+                >
+                  <option value="">{t('card.fromSettingsWith', { value: agentLabel(defaultAgent) })}</option>
+                  {AGENTS.map((a) => (
+                    <option key={a} value={a}>
+                      {AGENT_LABELS[a]}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="field">
                 <label htmlFor="f-model">{t('card.model')}</label>
                 <select id="f-model" className="input" value={card.model ?? ''} onChange={(e) => void patch({ model: e.target.value || null })}>
-                  <option value="">{t('card.fromSettingsWith', { value: modelLabel(defaults.defaultModel) })}</option>
-                  {[...MODEL_OPTIONS, ...(card.model && !MODEL_OPTIONS.some((m) => m.id === card.model) ? [{ id: card.model, label: card.model }] : [])].map((m) => (
+                  <option value="">
+                    {t('card.fromSettingsWith', {
+                      value: agent === 'gemini' ? defaults.geminiModel || AGENT_LABELS.gemini : modelLabel(defaults.defaultModel),
+                    })}
+                  </option>
+                  {[...modelOptions, ...(card.model && !modelOptions.some((m) => m.id === card.model) ? [{ id: card.model, label: card.model }] : [])].map((m) => (
                     <option key={m.id} value={m.id}>
                       {m.label}
                     </option>
@@ -837,7 +876,14 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
               </div>
               <div className="field">
                 <label htmlFor="f-effort">{t('card.effort')}</label>
-                <select id="f-effort" className="input" value={card.effort ?? ''} onChange={(e) => void patch({ effort: e.target.value || null })}>
+                <select
+                  id="f-effort"
+                  className="input"
+                  value={card.effort ?? ''}
+                  disabled={agent === 'gemini'}
+                  title={agent === 'gemini' ? t('card.agentEffortNone') : undefined}
+                  onChange={(e) => void patch({ effort: e.target.value || null })}
+                >
                   <option value="">{t('card.fromSettingsWith', { value: effortLabel(defaults.defaultEffort) })}</option>
                   {EFFORT_LEVELS.map((l) => (
                     <option key={l} value={l}>
