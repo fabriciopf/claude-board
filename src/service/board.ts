@@ -154,7 +154,7 @@ function checkModel(v: string | null | undefined): string | null {
   return model;
 }
 
-/** Card agent: claude or antigravity, or null/'' for the settings default (D92, D93). */
+/** Card agent: claude or gemini, or null/'' for the settings default (D92). */
 function checkAgent(v: string | null | undefined): AgentId | null {
   if (!v) return null;
   if (!isAgentId(v)) throw new RuleError('invalid_agent', `Agente é ${AGENTS.join(' ou ')}.`, 400);

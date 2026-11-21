@@ -4,7 +4,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { saveConfig } from '../src/config.js';
 import { Publisher } from '../src/publish/publisher.js';
-import { githubCommitsUrl, SelfUpdater } from '../src/publish/self-update.js';
+import { explainFetchError, githubCommitsUrl, normalizeRemoteUrl, SelfUpdater } from '../src/publish/self-update.js';
 import { makeContext, tempDir } from './helpers.js';
 
 // Card #183 (D89): the Board updates itself from the remote it was cloned from.
@@ -73,6 +73,18 @@ function newUpdater(opts: ConstructorParameters<typeof SelfUpdater>[2] = {}): Se
   return new SelfUpdater(ctx, publisher, { commands, restart, ...opts });
 }
 
+/** Another checkout of the same remote: the public copy that the source Board pushes to (D66). */
+function publicCopy(name = 'public'): string {
+  const dir = path.join(root, name);
+  if (!fs.existsSync(dir)) git(root, 'clone', '-q', '-c', 'core.autocrlf=false', remote, dir);
+  return dir;
+}
+
+async function checkWith(patch: Partial<typeof ctx.config>) {
+  ctx.config = { ...ctx.config, ...patch };
+  return updater.check();
+}
+
 async function applyNow(): Promise<void> {
   updater.begin();
   await updater.whenIdle();
@@ -127,11 +139,36 @@ describe('checking for a new version (D89)', () => {
     expect(s.checkedAt).toBeTruthy();
   });
 
-  it('is unavailable with no remote, and in the install that is the source of the public copy', async () => {
+  it('is unavailable with no remote', async () => {
     git(board, 'remote', 'remove', 'origin');
     expect((await updater.check()).unavailable).toMatch(/não tem remoto/);
-    ctx.config = { ...ctx.config, mirrorRepoPath: root };
-    expect((await updater.check()).unavailable).toMatch(/origem do repositório público/);
+  });
+
+  it('is unavailable in the Board that generates the public copy: its mirror checkout pulls from the same remote', async () => {
+    expect((await checkWith({ mirrorRepoPath: publicCopy() })).unavailable).toMatch(/gera a cópia pública/);
+  });
+
+  // Card #183 review: a second machine said "Este Board é a origem do repositório público" because
+  // the mirror field was filled in there.
+  it('is available when the mirror field is filled but this Board is not the source', async () => {
+    // A config copied from the source machine: the folder does not exist here.
+    expect((await checkWith({ mirrorRepoPath: path.join(root, 'nao-existe') })).unavailable).toBeNull();
+    // The field points at the Board's own clone.
+    expect((await checkWith({ mirrorRepoPath: board })).unavailable).toBeNull();
+    // A checkout whose origin is another repository.
+    const other = path.join(root, 'other.git');
+    git(root, 'init', '-q', '--bare', '-b', 'main', other);
+    const elsewhere = publicCopy('elsewhere');
+    git(elsewhere, 'remote', 'set-url', 'origin', other);
+    expect((await checkWith({ mirrorRepoPath: elsewhere })).unavailable).toBeNull();
+  });
+
+  it('shows only the reason when unavailable, without a stale fetch error', async () => {
+    // The order the second machine showed: a fetch that failed, then the reason it cannot update.
+    expect((await checkWith({ selfUpdateSource: 'origin/nao-existe' })).checkError).toBeTruthy();
+    const s = await checkWith({ selfUpdateSource: '', mirrorRepoPath: publicCopy() });
+    expect(s.unavailable).toMatch(/gera a cópia pública/);
+    expect(s.checkError).toBeNull();
   });
 
   it('keeps the last result and says why when a fetch fails', async () => {
@@ -139,8 +176,36 @@ describe('checking for a new version (D89)', () => {
     await updater.check();
     git(board, 'remote', 'set-url', 'origin', path.join(root, 'gone.git'));
     const s = await updater.check();
-    expect(s.checkError).toMatch(/Não consegui buscar `origin\/main`/);
+    expect(s.checkError).toMatch(/^Não consegui buscar origin\/main\. O Board tenta de novo em 15 min\. Resposta do git: /);
     expect(s.behind).toBe(1);
+  });
+
+  it('explains the fetch errors of a machine without network, without access and others', () => {
+    const dns = "fatal: unable to access 'https://github.com/fabriciopf/claude-board.git/': Could not resolve host: github.com";
+    expect(explainFetchError('origin/main', 'https://github.com/fabriciopf/claude-board.git', dns, 15)).toBe(
+      `Sem acesso a github.com desta máquina: o nome não resolveu (rede fora, DNS ou proxy). O Board tenta de novo em 15 min. Resposta do git: ${dns}`,
+    );
+    expect(explainFetchError('origin/main', 'git@github.com:a/b.git', 'ssh: connect to host github.com port 22: Connection timed out', 15)).toMatch(/^Sem conexão com github\.com/);
+    expect(explainFetchError('origin/main', 'https://github.com/a/b.git', 'remote: Repository not found.', 15)).toMatch(/^github\.com recusou o acesso a origin\/main/);
+    expect(explainFetchError('origin/main', '', '', 15)).toBe('Não consegui buscar origin/main. O Board tenta de novo em 15 min. (o git não deu mensagem)');
+  });
+
+  it('compares the https and ssh forms of one remote as equal', () => {
+    expect(normalizeRemoteUrl('https://github.com/FabricioPF/claude-board.git')).toBe(normalizeRemoteUrl('git@github.com:fabriciopf/claude-board.git'));
+    expect(normalizeRemoteUrl('https://user:token@github.com/a/b/')).toBe('github.com/a/b');
+    expect(normalizeRemoteUrl('https://github.com/a/b')).not.toBe(normalizeRemoteUrl('https://github.com/a/c'));
+  });
+
+  it('checks again in minutes after a failed fetch, not at the next 6-hour tick', async () => {
+    updater.close();
+    updater = newUpdater({ firstCheckMs: 1, checkEveryMs: 3600_000, retryCheckMs: 30 });
+    git(board, 'remote', 'set-url', 'origin', path.join(root, 'gone.git'));
+    updater.schedule();
+    await vi.waitFor(() => expect(updater.state().checkError).toBeTruthy(), { timeout: 10000, interval: 20 });
+    const first = updater.state().checkedAt;
+    git(board, 'remote', 'set-url', 'origin', remote);
+    await vi.waitFor(() => expect(updater.state().checkError).toBeNull(), { timeout: 10000, interval: 20 });
+    expect(updater.state().checkedAt).not.toBe(first);
   });
 
   it('builds the GitHub link of the commits from https and ssh remotes only', () => {
@@ -234,9 +299,8 @@ describe('applying the update (D89)', () => {
     updater.begin();
     expect(() => updater.begin()).toThrow(/já está em andamento/);
     await updater.whenIdle();
-    ctx.config = { ...ctx.config, mirrorRepoPath: root };
-    await updater.check();
-    expect(() => updater.begin()).toThrow(/origem do repositório público/);
+    await checkWith({ mirrorRepoPath: publicCopy() });
+    expect(() => updater.begin()).toThrow(/gera a cópia pública/);
   });
 });
 

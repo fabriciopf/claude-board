@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AGENTS, AGENT_LABELS, EFFORT_LABELS, EFFORT_LEVELS, PERMISSION_MODES, REOPEN_ON_COMMENT, STATUSES, agentLabel, effortLabel, isAgentId, modelFitsAgent, modelLabel, modelOptionsFor, resumeCommand, type AgentId, type App, type Card, type Label, type LinkKind, type Repository } from '../shared/domain';
+import { AGENTS, AGENT_LABELS, EFFORT_LABELS, EFFORT_LEVELS, PERMISSION_MODES, REOPEN_ON_COMMENT, STATUSES, agentLabel, effortLabel, isAgentId, modelFitsAgent, modelLabel, modelOptionsFor, type AgentId, type App, type Card, type Label, type LinkKind, type Repository } from '../shared/domain';
 import { ActionButton, ActionGroup, useBusy } from './ActionButton';
 import { ApiError, api, fmtDate, useServerEvents, type CardDetailResponse } from './api';
 import { latestDelivery } from './delivery';
@@ -13,7 +13,7 @@ interface ConfigDefaults {
   defaultModel?: string;
   defaultEffort?: string;
   defaultAgent?: string;
-  antigravityModel?: string;
+  geminiModel?: string;
   jiraBaseUrl?: string;
 }
 
@@ -235,7 +235,7 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
   const defaultAgent: AgentId = isAgentId(defaults.defaultAgent) ? defaults.defaultAgent : 'claude';
   // The agent of the next run, and the one that holds the session "Continuar no terminal" resumes.
   const agent: AgentId = card.agent ?? defaultAgent;
-  const lastAgent: string = lastExec ? (lastExec.agent ?? 'claude') : agent;
+  const lastAgent: AgentId = lastExec ? (lastExec.agent ?? 'claude') : agent;
   const modelOptions = modelOptionsFor(agent);
   const failed = card.status === 'waiting_user' && !openQuestion && lastExec && lastExec.status !== 'success' && lastExec.status !== 'waiting_user';
   const delivery = card.status === 'review' ? latestDelivery(comments) : null;
@@ -428,7 +428,7 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
               {card.claudeSessionId && (
                 <button
                   className="btn"
-                  onClick={() => void copy(`${workDir ? `cd "${workDir}"; ` : ''}${resumeCommand(lastAgent, card.claudeSessionId ?? '')}`)}
+                  onClick={() => void copy(`${workDir ? `cd "${workDir}"; ` : ''}${lastAgent === 'gemini' ? 'gemini' : 'claude'} --resume ${card.claudeSessionId}`)}
                 >
                   {t('card.continueTerminal')}
                 </button>
@@ -864,7 +864,7 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
                 <select id="f-model" className="input" value={card.model ?? ''} onChange={(e) => void patch({ model: e.target.value || null })}>
                   <option value="">
                     {t('card.fromSettingsWith', {
-                      value: agent === 'antigravity' ? defaults.antigravityModel || AGENT_LABELS.antigravity : modelLabel(defaults.defaultModel),
+                      value: agent === 'gemini' ? defaults.geminiModel || AGENT_LABELS.gemini : modelLabel(defaults.defaultModel),
                     })}
                   </option>
                   {[...modelOptions, ...(card.model && !modelOptions.some((m) => m.id === card.model) ? [{ id: card.model, label: card.model }] : [])].map((m) => (
@@ -880,6 +880,8 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
                   id="f-effort"
                   className="input"
                   value={card.effort ?? ''}
+                  disabled={agent === 'gemini'}
+                  title={agent === 'gemini' ? t('card.agentEffortNone') : undefined}
                   onChange={(e) => void patch({ effort: e.target.value || null })}
                 >
                   <option value="">{t('card.fromSettingsWith', { value: effortLabel(defaults.defaultEffort) })}</option>

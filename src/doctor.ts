@@ -48,15 +48,15 @@ export async function runDoctor(config: Config, opts: { checkPort?: boolean } = 
     detail: claude.ok ? `${config.claudeBin}: ${claude.out.split('\n')[0]}` : `não achei "${config.claudeBin}": ${claude.out}`,
   });
 
-  // Antigravity CLI (D93): required only when it is the default agent; otherwise a card that picks it fails alone.
-  const agy = run(config.antigravityBin, [...config.antigravityArgsPrefix, '--version']);
+  // Gemini CLI (D92): required only when it is the default agent; otherwise a card that picks it fails alone.
+  const gemini = run(config.geminiBin, [...config.geminiArgsPrefix, '--version']);
   checks.push({
-    name: 'Antigravity CLI no PATH',
-    ok: agy.ok,
-    required: config.defaultAgent === 'antigravity',
-    detail: agy.ok
-      ? `${config.antigravityBin}: ${agy.out.split('\n')[0]}`
-      : `não achei "${config.antigravityBin}" (só faz falta para cards com o agente Antigravity CLI; no Windows instale com irm https://antigravity.google/cli/install.ps1 | iex e entre uma vez no agy)`,
+    name: 'Gemini CLI no PATH',
+    ok: gemini.ok,
+    required: config.defaultAgent === 'gemini',
+    detail: gemini.ok
+      ? `${config.geminiBin}: ${gemini.out.split('\n')[0]}`
+      : `não achei "${config.geminiBin}" (só faz falta para cards com o agente Gemini CLI; instale com npm i -g @google/gemini-cli)`,
   });
 
   const home = claudeHomeDir(config);
