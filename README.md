@@ -104,21 +104,21 @@ claude -p --output-format stream-json --verbose [--max-turns N] [--model M] [--e
 
 Runs use the same Claude Code login you use interactively, so they draw on the same plan quota.
 
-### Antigravity CLI as the agent
+### Gemini CLI as the agent
 
-A card can run in [Antigravity CLI](https://antigravity.google/docs/cli) (`agy`, Google) instead of Claude Code: pick "Antigravity CLI" in the card's "Agent" field, or make it the default in Settings › Antigravity CLI. Install it (on Windows, `irm https://antigravity.google/cli/install.ps1 | iex`) and sign in once in a terminal. The Board drives it through its Agent Client Protocol mode, with a small client of its own:
+A card can run in [Gemini CLI](https://github.com/google-gemini/gemini-cli) instead of Claude Code: pick "Gemini CLI" in the card's "Agent" field, or make it the default in Settings › Gemini CLI. Install it with `npm i -g @google/gemini-cli` and sign in once interactively. The run is:
 
 ```text
-node bin/agy-acp.mjs runs/<id>/agy-run.json
-  └─ agy acp [--model M] [--effort E] [--mode plan] [--add-dir <worktree>]
-       initialize → session/new (or session/load) with the Board's MCP server → session/prompt
+gemini --output-format stream-json --skip-trust --approval-mode yolo
+       --admin-policy <rules that block the git pushes prPolicy forbids>
+       [--include-directories <worktree>] [--model M]
+       (--session-id UUID | --resume ID)
 ```
 
-- **Same card flow:** each session gets the Board's MCP server with the card's headers (over HTTP, or over stdio through `claude-board mcp` when agy offers no HTTP MCP). The Board's rules go at the top of the prompt. Questions, deliveries, splits, retries and "Continue in terminal" (`agy --conversation <id>`) work as with Claude Code. The client writes the run in Claude Code's stream format, so the transcript, turns and tokens show the same way.
-- **Permissions:** the client answers every permission request agy makes: it allows them, except the shell commands the `prPolicy` and `protectedBranches` rules forbid, which it refuses (a compound command is checked part by part).
-- **Sessions:** agy picks the session id; the Board learns it from the run. A reply loads the same session. A card moved from one agent to the other starts a new session, with the card history in the prompt.
-- **Turn limit:** the card's maximum turns cancels the session when it is reached.
-- **What only Claude Code has:** your `CLAUDE.md`, skills, plugins, claude.ai connectors and the Artifact tool. Antigravity CLI reads `GEMINI.md`, `AGENTS.md` and its own plugins. The automatic concurrency has no plan reading to pace Antigravity runs by.
+- **Same card flow:** the Board's MCP server is registered for the run in a settings file of its own (`GEMINI_CLI_SYSTEM_SETTINGS_PATH`), which merges with your `~/.gemini/settings.json`. The Board's rules go at the top of the prompt, since Gemini CLI has no way to append to its system prompt. Questions, deliveries, splits, retries and "Continue in terminal" (`gemini --resume`) work as with Claude Code.
+- **Git pushes:** the same `prPolicy` and `protectedBranches` rules, written as a Gemini CLI policy file in the admin tier, so your own policies cannot loosen them.
+- **Switching agents:** a session belongs to one agent. A card moved from one agent to the other starts a new session, with the card history in the prompt.
+- **What only Claude Code has:** your `CLAUDE.md`, skills, plugins, claude.ai connectors and the Artifact tool. Gemini CLI reads `GEMINI.md` and its own extensions. There is no effort setting, and the automatic concurrency has no plan reading to pace Gemini runs by.
 
 ### Cards with several items
 
@@ -199,7 +199,9 @@ Updating takes the same path as a publication of the Board's own cards: the new 
 
 Changes you made to your own Board stay: when your branch has commits the remote does not, the update merges the two and runs the tests first. A conflict stops the update and names the files.
 
-Settings › Workspace e Git has the mode, the branch to follow and a **Verificar agora** button. The update is off in a Board that has `mirrorRepoPath` set, because that Board is the source of the public copy.
+Settings › Workspace e Git has the mode, the branch to follow and a **Verificar agora** button. The update is off only in the Board that generates the public copy: its `mirrorRepoPath` checkout is another repository whose `origin` is the remote it would update from.
+
+When a check cannot reach the remote (no network, DNS, proxy, credentials), the panel says why and the Board checks again in 15 minutes.
 
 ## Configuration
 
@@ -210,9 +212,10 @@ Stored in `~/.claude-board/config.json` and editable in Settings.
 | `port` | 4317 | Board port |
 | `claudeBin` | `claude` | Claude Code executable |
 | `claudeHome` | `~/.claude` | Claude Code folder |
-| `defaultAgent` | `claude` | Agent of runs when the card does not choose: `claude` (Claude Code) or `antigravity` (Antigravity CLI) |
-| `antigravityBin` | `agy` | Antigravity CLI executable |
-| `antigravityModel` | empty | Model of Antigravity runs when the card does not choose; empty = Antigravity CLI's default (`agy models` lists them) |
+| `defaultAgent` | `claude` | Agent of runs when the card does not choose: `claude` (Claude Code) or `gemini` (Gemini CLI) |
+| `geminiBin` | `gemini` | Gemini CLI executable |
+| `geminiModel` | empty | Model of Gemini runs when the card does not choose; empty = Gemini CLI's default |
+| `geminiApprovalMode` | `yolo` | `--approval-mode` of Gemini runs: `yolo`, `auto_edit`, `default` or `plan`; forbidden pushes stay blocked in any mode |
 | `heartbeatSeconds` | 30 | Runner interval |
 | `maxConcurrency` | `"auto"` | Concurrent runs: `"auto"` (paces runs so the 5-hour usage tracks the window, and only opens a run when what is left until the reset pays for the runs in progress plus one more with slack) or 1 to 20 |
 | `autoSplit` | `true` | On a card's first run, Claude decides whether a list description becomes separate tasks |

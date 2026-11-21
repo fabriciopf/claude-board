@@ -205,7 +205,7 @@ export function createMcpServer(ctx: AppContext, session: McpSession): McpServer
         priority: z.number().int().min(1).max(4).optional(),
         model: z.string().nullable().optional().describe('Modelo das execuções deste card (ex.: claude-opus-5-5, claude-sonnet-5-5, claude-haiku-5-5); vazio ou null = o padrão da configuração'),
         effort: z.enum(EFFORT_ENUM).nullable().optional().describe('Effort das execuções deste card; null = o padrão da configuração'),
-        agent: z.enum(['claude', 'antigravity']).nullable().optional().describe('Agente que executa o card: claude (Claude Code) ou antigravity (Antigravity CLI, do Google); null = o padrão da configuração'),
+        agent: z.enum(['claude', 'gemini']).nullable().optional().describe('Agente que executa o card: claude (Claude Code) ou gemini (Gemini CLI); null = o padrão da configuração'),
       },
     },
     (args) =>
@@ -255,7 +255,7 @@ export function createMcpServer(ctx: AppContext, session: McpSession): McpServer
           .describe('Substitui a lista de repositórios relacionados (nomes cadastrados, ex.: ["hdb", "sms"]); [] limpa'),
         model: z.string().nullable().optional().describe('Modelo das execuções deste card (ex.: claude-opus-5-5, claude-sonnet-5-5, claude-haiku-5-5); vazio ou null = o padrão da configuração'),
         effort: z.enum(EFFORT_ENUM).nullable().optional().describe('Effort das execuções deste card; null = o padrão da configuração'),
-        agent: z.enum(['claude', 'antigravity']).nullable().optional().describe('Agente que executa o card: claude (Claude Code) ou antigravity (Antigravity CLI, do Google); null = o padrão da configuração'),
+        agent: z.enum(['claude', 'gemini']).nullable().optional().describe('Agente que executa o card: claude (Claude Code) ou gemini (Gemini CLI); null = o padrão da configuração'),
       },
     },
     (args) =>

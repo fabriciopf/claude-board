@@ -1,15 +1,14 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { DEFAULT_CONFIG, protectedBranchList, type Config } from '../config.js';
 import { CARD_HEADER, EXECUTION_HEADER } from '../mcp/http.js';
-import { agentLabel, isAgentId, modelFitsAgent, type AgentId, type Card } from '../shared/domain.js';
+import { AGENT_LABELS, isAgentId, modelFitsAgent, type AgentId, type Card } from '../shared/domain.js';
 
 /**
- * How a run starts in each command-line agent (D92, D93). The runner decides what the run is (card,
+ * How a run starts in each command-line agent (D92). The runner decides what the run is (card,
  * prompts, session, folder); the agent decides how that becomes a command line, environment and
- * files. Both write Claude Code's stream-json on stdout: Claude Code itself, and the Board's ACP
- * client for Antigravity CLI (`bin/agy-acp.mjs`), which translates.
+ * files. Both agents write newline-delimited JSON on stdout, which `StreamReader` (stream.ts) turns
+ * into one shape.
  */
 
 export interface LaunchInput {
@@ -19,13 +18,11 @@ export interface LaunchInput {
   /** Folder of the run's own files (`~/.claude-board/runs/<id>`). */
   runDir: string;
   boardUrl: string;
-  /** Folder the run starts in. */
-  cwd: string;
   systemPrompt: string;
   userPrompt: string;
   /** Session to resume, or null for a new one. */
   resumeId: string | null;
-  /** Id of the new session, for an agent that takes one (`presetSession`). */
+  /** Id of the new session (ignored when resuming). */
   sessionId: string;
   sessionName: string | null;
   addDirs: string[];
@@ -43,11 +40,6 @@ export interface Launch {
   stdin: string;
   model: string | null;
   effort: string | null;
-  /**
-   * Whether the run uses the session id the Board chose. Antigravity CLI picks its own; the Board
-   * learns it from the stream (`session_id` of the init event).
-   */
-  presetSession: boolean;
 }
 
 /** The card's agent, else the settings' default. */
@@ -58,13 +50,22 @@ export function resolveAgent(card: Pick<Card, 'agent'>, config: Pick<Config, 'de
 
 /** The model a run of this agent uses: the card's when it fits the agent, else the agent's default. */
 export function resolveModel(card: Pick<Card, 'model'>, config: Config, agent: AgentId): string | null {
-  const fallback = agent === 'antigravity' ? config.antigravityModel : config.defaultModel;
+  const fallback = agent === 'gemini' ? config.geminiModel : config.defaultModel;
   const own = card.model && modelFitsAgent(card.model, agent) ? card.model : null;
   return own || fallback || null;
 }
 
-export function agentName(agent: string): string {
-  return agentLabel(agent);
+export function agentBin(config: Config, agent: AgentId): string {
+  return agent === 'gemini' ? config.geminiBin : config.claudeBin;
+}
+
+export function agentName(agent: AgentId): string {
+  return AGENT_LABELS[agent];
+}
+
+/** Command a person types to continue the card's session in a terminal. */
+export function resumeCommand(agent: AgentId, sessionId: string): string {
+  return agent === 'gemini' ? `gemini --resume ${sessionId}` : `claude --resume ${sessionId}`;
 }
 
 // ---------- git push guard ----------
@@ -98,9 +99,9 @@ export function disallowedTools(policy: Config['prPolicy'], protectedBranches: s
 const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 /**
- * The same rules as `disallowedTools`, as regular expressions over one shell command, each matched
- * from the start (`^(?:…)`). A protected branch ending in `*` (preproduction*) covers any suffix.
- * The Antigravity ACP client splits a compound command (`cd x && git push`) before matching.
+ * The same rules as `disallowedTools`, as regular expressions over a shell command. Gemini CLI anchors
+ * a `commandRegex` at the start of the command, so each one matches from there. A protected branch
+ * ending in `*` (preproduction*) covers any suffix.
  */
 export function pushDenyPatterns(policy: Config['prPolicy'], protectedBranches: string[]): string[] {
   const branch = (b: string) => (b.endsWith('*') ? `${escapeRegex(b.slice(0, -1))}[^\\s]*` : escapeRegex(b));
@@ -118,6 +119,20 @@ export function pushDenyPatterns(policy: Config['prPolicy'], protectedBranches: 
     `${pushAny}.*\\S:(refs/heads/)?(${branches})(\\s|$)`,
   ];
   return policy === 'push_branch' ? [...force, 'gh\\s+pr\\s+create\\b'] : force;
+}
+
+/** TOML string literal. */
+const tomlString = (s: string) => JSON.stringify(s);
+
+/** Gemini CLI policy file that denies the pushes `prPolicy` forbids (admin tier: nothing overrides it). */
+export function geminiPolicyToml(policy: Config['prPolicy'], protectedBranches: string[]): string {
+  const rules = pushDenyPatterns(policy, protectedBranches).map(
+    (re) =>
+      `[[rule]]\ntoolName = "run_shell_command"\ncommandRegex = ${tomlString(re)}\ndecision = "deny"\npriority = 999\ndenyMessage = ${tomlString(
+        'O Claude Board bloqueia este git push pela política de git da configuração (prPolicy).',
+      )}\n`,
+  );
+  return `# Generated by Claude Board for one run: git pushes the Board's prPolicy forbids.\n\n${rules.join('\n')}`;
 }
 
 // ---------- Claude Code ----------
@@ -178,99 +193,78 @@ function claudeLaunch(input: LaunchInput): Launch {
   // CLAUDE_CODE_ENTRYPOINT: `claude -p` alone reports `sdk-cli`, which hides the Artifact tool (D60).
   const env: Record<string, string> = {};
   if (config.runnerEntrypoint) env.CLAUDE_CODE_ENTRYPOINT = config.runnerEntrypoint;
-  return { agent: 'claude', bin: config.claudeBin, args, env, unsetEnv: ['CLAUDECODE'], stdin: input.userPrompt, model, effort, presetSession: true };
+  return { agent: 'claude', bin: config.claudeBin, args, env, unsetEnv: ['CLAUDECODE'], stdin: input.userPrompt, model, effort };
 }
 
-// ---------- Antigravity CLI ----------
+// ---------- Gemini CLI ----------
 
-/** Folder of the running code (src/runner or dist/server/runner → the package root). */
-export function packageRoot(): string {
-  let dir = path.dirname(fileURLToPath(import.meta.url));
-  for (let i = 0; i < 6; i++) {
-    if (fs.existsSync(path.join(dir, 'package.json'))) return dir;
-    dir = path.dirname(dir);
-  }
-  return process.cwd();
+/** Approval mode of a Gemini run: the card's dangerous flag or plan mode, else the setting. */
+export function geminiApprovalMode(card: Pick<Card, 'dangerousAllowed' | 'permissionMode'>, config: Pick<Config, 'geminiApprovalMode'>): string {
+  if (card.dangerousAllowed) return 'yolo';
+  if (card.permissionMode === 'plan') return 'plan';
+  return config.geminiApprovalMode || 'yolo';
 }
 
 /**
- * Antigravity CLI has no flag to append to its system prompt, so the Board's rules go at the top of
- * the prompt, on every run, as Claude Code gets them on every run.
+ * Gemini CLI has no flag to append to its system prompt (GEMINI_SYSTEM_MD replaces it), so the Board's
+ * rules go at the top of what the run reads on stdin, on every run, as Claude Code gets them on every run.
  */
-export function withBoardRules(systemPrompt: string, userPrompt: string): string {
+export function geminiStdin(systemPrompt: string, userPrompt: string): string {
   return `<claude-board-rules>\n${systemPrompt}\n</claude-board-rules>\n\n${userPrompt}`;
 }
 
-/** What the ACP client (`bin/agy-acp.mjs`) reads: how to start agy, the session, the prompt and the Board's rules. */
-export interface AcpRunConfig {
-  bin: string;
-  args: string[];
-  cwd: string;
-  prompt: string;
-  resumeId: string | null;
-  model: string | null;
-  maxTurns: number;
-  /** Regular expressions of the shell commands the client refuses (`pushDenyPatterns`). */
-  denyPatterns: string[];
-  mcp: {
-    name: string;
-    url: string;
-    headers: Record<string, string>;
-    /** The same server over stdio (`claude-board mcp`), for an agent without HTTP MCP. */
-    stdio: { command: string; args: string[]; env: Record<string, string> };
-  };
-}
-
-/**
- * Antigravity CLI (D93) runs through its Agent Client Protocol mode (`agy acp`), driven by a small
- * client of the Board. ACP is the one interface where the Board can hand each session its own MCP
- * server (headers of the card and of the run) and answer the permission requests itself; the
- * headless mode reads MCP servers only from the user's global files and has no per-run push rules.
- * The client is the run's process: detached like Claude Code, so a Board restart leaves it running (D45).
- */
-function antigravityLaunch(input: LaunchInput): Launch {
+function geminiLaunch(input: LaunchInput): Launch {
   const { config, card, runDir, boardUrl, executionId } = input;
-  const model = resolveModel(card, config, 'antigravity');
-  const effort = card.effort || config.defaultEffort || null;
-  const agyArgs = [...config.antigravityArgsPrefix, 'acp'];
-  if (model) agyArgs.push('--model', model);
-  if (effort) agyArgs.push('--effort', effort);
-  if (card.permissionMode === 'plan') agyArgs.push('--mode', 'plan');
-  for (const dir of input.addDirs) agyArgs.push('--add-dir', dir);
-  const root = packageRoot();
-  const ids = { CLAUDE_BOARD_CARD_ID: String(card.id), CLAUDE_BOARD_EXECUTION_ID: String(executionId), CLAUDE_BOARD_URL: boardUrl };
-  const run: AcpRunConfig = {
-    bin: config.antigravityBin,
-    args: agyArgs,
-    cwd: input.cwd,
-    prompt: withBoardRules(input.systemPrompt, input.userPrompt),
-    resumeId: input.resumeId,
-    model,
-    maxTurns: card.maxTurns ?? config.defaultMaxTurns ?? 0,
-    denyPatterns: pushDenyPatterns(config.prPolicy, protectedBranchList(config.protectedBranches)),
-    mcp: {
-      name: 'claude-board',
-      url: `${boardUrl}/mcp`,
-      headers: { [CARD_HEADER]: String(card.id), [EXECUTION_HEADER]: String(executionId) },
-      stdio: { command: process.execPath, args: [path.join(root, 'bin', 'claude-board.mjs'), 'mcp'], env: ids },
+  // The MCP server of the Board and the turn limit go in a settings file of this run only, read as the
+  // system settings: it merges with the user's ~/.gemini/settings.json and wins over it (D92).
+  const settingsFile = path.join(runDir, 'gemini-settings.json');
+  const maxTurns = card.maxTurns ?? config.defaultMaxTurns;
+  const settings: Record<string, unknown> = {
+    mcpServers: {
+      'claude-board': {
+        httpUrl: `${boardUrl}/mcp`,
+        headers: { [CARD_HEADER]: String(card.id), [EXECUTION_HEADER]: String(executionId) },
+        // The Board's own tools never ask for confirmation, as `--allowedTools mcp__claude-board` in Claude Code.
+        trust: true,
+      },
     },
   };
-  const runFile = path.join(runDir, 'agy-run.json');
-  fs.writeFileSync(runFile, JSON.stringify(run, null, 2));
+  if (maxTurns && maxTurns > 0) settings.model = { maxSessionTurns: maxTurns };
+  fs.writeFileSync(settingsFile, JSON.stringify(settings, null, 2));
+  const policyDir = path.join(runDir, 'gemini-policy');
+  fs.mkdirSync(policyDir, { recursive: true });
+  fs.writeFileSync(path.join(policyDir, 'claude-board.toml'), geminiPolicyToml(config.prPolicy, protectedBranchList(config.protectedBranches)));
+
+  const args = [
+    ...config.geminiArgsPrefix,
+    '--output-format',
+    'stream-json',
+    // Headless runs refuse an untrusted folder; the Board already chose this one.
+    '--skip-trust',
+    '--approval-mode',
+    geminiApprovalMode(card, config),
+    // Admin tier: the push rules win over the user's own policies, which stay loaded.
+    '--admin-policy',
+    policyDir,
+  ];
+  for (const dir of input.addDirs) args.push('--include-directories', dir);
+  const model = resolveModel(card, config, 'gemini');
+  if (model) args.push('--model', model);
+  if (input.resumeId) args.push('--resume', input.resumeId);
+  else args.push('--session-id', input.sessionId);
   return {
-    agent: 'antigravity',
-    bin: process.execPath,
-    args: [path.join(root, 'bin', 'agy-acp.mjs'), runFile],
-    env: {},
+    agent: 'gemini',
+    bin: config.geminiBin,
+    args,
+    env: { GEMINI_CLI_SYSTEM_SETTINGS_PATH: settingsFile },
     unsetEnv: ['CLAUDECODE', 'CLAUDE_CODE_ENTRYPOINT'],
-    // The prompt travels in the run file; stdin stays empty.
-    stdin: '',
+    stdin: geminiStdin(input.systemPrompt, input.userPrompt),
+    // Gemini CLI has no effort setting.
     model,
-    effort,
-    presetSession: false,
+    effort: null,
   };
 }
 
 export function buildLaunch(agent: AgentId, input: LaunchInput): Launch {
-  return agent === 'antigravity' ? antigravityLaunch(input) : claudeLaunch(input);
+  return agent === 'gemini' ? geminiLaunch(input) : claudeLaunch(input);
 }

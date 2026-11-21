@@ -6,7 +6,8 @@ import type { AppContext, SelfUpdateControl } from '../context.js';
 import { nowIso } from '../db/index.js';
 import { RuleError } from '../service/rules.js';
 import type { SelfUpdateCommit, SelfUpdatePhase, SelfUpdateState } from '../shared/domain.js';
-import { canonicalDir, git, linkDir, runCommand, syncDir, type CmdResult } from './git.js';
+import { expandHome } from '../config.js';
+import { canonicalDir, git, linkDir, repoRoot, runCommand, samePath, syncDir, type CmdResult } from './git.js';
 import { DEFAULT_COMMANDS, isScreenOnly, type Publisher, type PublishCommands } from './publisher.js';
 
 /**
@@ -41,6 +42,8 @@ export interface SelfUpdaterOptions {
   retryMs?: number;
   /** Limit of one fetch. */
   fetchTimeoutMs?: number;
+  /** Next check after a fetch that failed (network down when the Board started, DNS, proxy). */
+  retryCheckMs?: number;
 }
 
 class UpdateError extends Error {}
@@ -56,6 +59,39 @@ interface Source {
 export function githubCommitsUrl(remoteUrl: string, branch: string): string | null {
   const m = remoteUrl.trim().match(/github\.com[:/]([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/i);
   return m ? `https://github.com/${m[1]}/${m[2]}/commits/${branch}` : null;
+}
+
+/** A remote URL without scheme, credentials, .git and case, so the https and ssh forms of one repo compare equal. */
+export function normalizeRemoteUrl(url: string): string {
+  return url
+    .trim()
+    .toLowerCase()
+    .replace(/^[a-z+]+:\/\//, '')
+    .replace(/^[^@/]+@/, '')
+    .replace(/^([^/:]+):(?!\d)/, '$1/')
+    .replace(/\.git\/?$/, '')
+    .replace(/\/+$/, '');
+}
+
+/**
+ * The fetch error in words: what is wrong and what to do. The last line of the git output goes after
+ * it, since the user may need it to fix a proxy or a credential.
+ */
+export function explainFetchError(ref: string, url: string, out: string, retryMinutes: number): string {
+  const host = url.match(/^(?:[a-z+]+:\/\/)?(?:[^@/]+@)?([^/:]+)/i)?.[1] ?? 'o remoto';
+  const again = `O Board tenta de novo em ${retryMinutes} min.`;
+  const last = out.trim().split('\n').pop() ?? '';
+  const raw = last ? ` Resposta do git: ${last}` : '';
+  if (/could not resolve host|name or service not known|temporary failure in name resolution|nodename nor servname/i.test(out)) {
+    return `Sem acesso a ${host} desta máquina: o nome não resolveu (rede fora, DNS ou proxy). ${again}${raw}`;
+  }
+  if (/failed to connect|connection (timed out|refused)|could not connect|network is unreachable|tempo esgotado/i.test(out)) {
+    return `Sem conexão com ${host} desta máquina (rede, firewall ou proxy). ${again}${raw}`;
+  }
+  if (/authentication failed|could not read username|permission denied|repository not found|error: 403/i.test(out)) {
+    return `${host} recusou o acesso a ${ref}: o repositório é privado ou a credencial do git desta máquina não vale para ele.${raw}`;
+  }
+  return `Não consegui buscar ${ref}. ${again}${raw || ' (o git não deu mensagem)'}`;
 }
 
 /** git with a time limit and no prompt: a fetch that wants a password fails instead of hanging the server. */
@@ -87,6 +123,7 @@ export class SelfUpdater implements SelfUpdateControl {
   private checking: Promise<SelfUpdateState> | null = null;
   private timers: NodeJS.Timeout[] = [];
   private retryTimer: NodeJS.Timeout | null = null;
+  private recheckTimer: NodeJS.Timeout | null = null;
   private last: Pick<SelfUpdateState, 'source' | 'sourceUrl' | 'behind' | 'ahead' | 'commits' | 'remoteSha' | 'checkedAt' | 'checkError' | 'unavailable'> = {
     source: null,
     sourceUrl: null,
@@ -127,6 +164,22 @@ export class SelfUpdater implements SelfUpdateControl {
     this.timers = [];
     if (this.retryTimer) clearTimeout(this.retryTimer);
     this.retryTimer = null;
+    if (this.recheckTimer) clearTimeout(this.recheckTimer);
+    this.recheckTimer = null;
+  }
+
+  /** A failed fetch is checked again in minutes, not at the next 6-hour tick (card #183 review). */
+  private scheduleRecheck(): void {
+    if (this.recheckTimer || !this.timers.length) return;
+    this.recheckTimer = setTimeout(() => {
+      this.recheckTimer = null;
+      void this.tick();
+    }, this.retryCheckMs());
+    this.recheckTimer.unref?.();
+  }
+
+  private retryCheckMs(): number {
+    return this.opts.retryCheckMs ?? 15 * 60_000;
   }
 
   private async tick(): Promise<void> {
@@ -201,13 +254,21 @@ export class SelfUpdater implements SelfUpdateControl {
 
   // ---------- where the versions come from ----------
 
-  /** Why this install cannot update itself, or null. */
-  private unavailableReason(repo: string | null): string | null {
-    if (!repo) return 'Não achei o repositório git de onde o Board roda.';
-    if (this.ctx.config.mirrorRepoPath) {
-      return 'Este Board é a origem do repositório público (D66): ele envia as mudanças para lá, não recebe de lá.';
-    }
-    return null;
+  /**
+   * True when this Board is the one that generates the public copy (D66): its mirror checkout is
+   * another repository whose origin is the very remote it would update from. A filled-in
+   * `mirrorRepoPath` alone proves nothing (card #183 review): a config copied from the source
+   * machine, a folder that does not exist here, or the Board's own clone.
+   */
+  private isMirrorSource(repo: string, remoteUrl: string): boolean {
+    const configured = this.ctx.config.mirrorRepoPath;
+    if (!configured || !remoteUrl) return false;
+    const mirror = repoRoot(path.resolve(expandHome(configured)));
+    if (!mirror || samePath(mirror, repo)) return false;
+    const common = (dir: string) => git(dir, ['rev-parse', '--path-format=absolute', '--git-common-dir']).out;
+    if (samePath(common(mirror), common(repo))) return false;
+    const mirrorOrigin = git(mirror, ['config', '--get', 'remote.origin.url']).out;
+    return !!mirrorOrigin && normalizeRemoteUrl(mirrorOrigin) === normalizeRemoteUrl(remoteUrl);
   }
 
   private source(repo: string): Source | null {
@@ -248,24 +309,21 @@ export class SelfUpdater implements SelfUpdateControl {
 
   private async doCheck(): Promise<SelfUpdateState> {
     const repo = this.publisher.selfRepo();
-    const unavailable = this.unavailableReason(repo);
-    if (unavailable) {
-      this.last = { ...this.last, unavailable, behind: 0, ahead: 0, commits: [], checkedAt: nowIso() };
+    // An unavailable install shows only why: no stale fetch error or count from an earlier check.
+    const unavailableState = (unavailable: string) => {
+      this.last = { unavailable, source: null, sourceUrl: null, behind: 0, ahead: 0, commits: [], remoteSha: null, checkedAt: nowIso(), checkError: null };
       this.changed();
       return this.state();
-    }
-    const src = this.source(repo as string);
+    };
+    if (!repo) return unavailableState('Não achei o repositório git de onde o Board roda.');
+    const src = this.source(repo);
     if (!src) {
-      this.last = {
-        ...this.last,
-        unavailable: 'O repositório do Board não tem remoto de onde buscar versões. Instale por `git clone` do repositório público para receber as atualizações.',
-        behind: 0,
-        ahead: 0,
-        commits: [],
-        checkedAt: nowIso(),
-      };
-      this.changed();
-      return this.state();
+      return unavailableState('O repositório do Board não tem remoto de onde buscar versões. Instale por `git clone` do repositório público para receber as atualizações.');
+    }
+    if (this.isMirrorSource(repo, git(repo, ['config', '--get', `remote.${src.remote}.url`]).out)) {
+      return unavailableState(
+        'Este Board gera a cópia pública (D66): o origin da pasta em "Repositório público do Board" é o mesmo remoto de onde ele buscaria versões, então ele envia as mudanças para lá e não recebe de lá.',
+      );
     }
     const idle = this.phase === 'idle';
     if (idle) this.setPhase('checking', null);
@@ -279,8 +337,9 @@ export class SelfUpdater implements SelfUpdateControl {
       const base = { unavailable: null, source: src.ref, sourceUrl: githubCommitsUrl(remoteUrl, src.branch), checkedAt: nowIso() };
       if (!fetched.ok) {
         // Keep what the last good fetch found; say why this one failed.
-        this.last = { ...this.last, ...base, checkError: `Não consegui buscar \`${src.ref}\`: ${fetched.out || 'erro do git'}` };
+        this.last = { ...this.last, ...base, checkError: explainFetchError(src.ref, remoteUrl, fetched.out, Math.round(this.retryCheckMs() / 60_000)) };
         this.log(`fetch falhou: ${fetched.out}`);
+        this.scheduleRecheck();
       } else {
         this.last = { ...base, checkError: null, ...this.compare(repo as string, src.ref) };
       }

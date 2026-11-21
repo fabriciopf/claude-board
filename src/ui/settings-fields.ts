@@ -1,9 +1,9 @@
-import { AGENTS, AGENT_LABELS, ANTIGRAVITY_MODEL_OPTIONS, AUTO_CONCURRENCY, CONCURRENCY_PRESETS, SELF_UPDATE_MODES, EFFORT_LABELS, EFFORT_LEVELS, MODEL_OPTIONS, UNLIMITED_CONCURRENCY } from '../shared/domain';
+import { AGENTS, AGENT_LABELS, GEMINI_MODEL_OPTIONS, AUTO_CONCURRENCY, CONCURRENCY_PRESETS, SELF_UPDATE_MODES, EFFORT_LABELS, EFFORT_LEVELS, MODEL_OPTIONS, UNLIMITED_CONCURRENCY } from '../shared/domain';
 import { t, type MessageKey } from './i18n';
 
 export type Config = Record<string, any>;
 
-export type SettingsTab = 'runs' | 'organization' | 'git' | 'claude' | 'antigravity';
+export type SettingsTab = 'runs' | 'organization' | 'git' | 'claude' | 'gemini';
 
 // Labels and hints are getters, read at render time, so they follow the UI language (D90).
 const tab = (id: SettingsTab) => ({
@@ -13,7 +13,7 @@ const tab = (id: SettingsTab) => ({
   },
 });
 
-export const SETTINGS_TABS: { id: SettingsTab; label: string }[] = [tab('runs'), tab('organization'), tab('git'), tab('claude'), tab('antigravity')];
+export const SETTINGS_TABS: { id: SettingsTab; label: string }[] = [tab('runs'), tab('organization'), tab('git'), tab('claude'), tab('gemini')];
 
 export interface Field {
   key: string;
@@ -103,24 +103,25 @@ export const FIELDS: Field[] = [
   field({ key: 'agendaRefreshMinutes', tab: 'claude', type: 'number', hasHint: true }),
   field({ key: 'heartbeatSeconds', tab: 'claude', type: 'number' }),
   field({ key: 'transcriptRetentionDays', tab: 'claude', type: 'number' }),
-  // Antigravity CLI (D93): which agent runs the cards that do not choose, and how Antigravity CLI runs.
+  // Gemini CLI (D92): which agent runs the cards that do not choose, and how Gemini CLI runs.
   field({
     key: 'defaultAgent',
-    tab: 'antigravity',
+    tab: 'gemini',
     type: 'select',
     options: AGENTS,
     optionLabels: () => ({ ...AGENT_LABELS }),
     hasHint: true,
   }),
   field({
-    key: 'antigravityModel',
-    tab: 'antigravity',
+    key: 'geminiModel',
+    tab: 'gemini',
     type: 'select',
-    options: ['', ...ANTIGRAVITY_MODEL_OPTIONS.map((m) => m.id)],
-    optionLabels: () => ({ '': t('settings.opt.antigravityDefault'), ...Object.fromEntries(ANTIGRAVITY_MODEL_OPTIONS.map((m) => [m.id, m.label])) }),
+    options: ['', ...GEMINI_MODEL_OPTIONS.map((m) => m.id)],
+    optionLabels: () => ({ '': t('settings.opt.geminiDefault'), ...Object.fromEntries(GEMINI_MODEL_OPTIONS.map((m) => [m.id, m.label])) }),
     hasHint: true,
   }),
-  field({ key: 'antigravityBin', tab: 'antigravity', type: 'text', hasHint: true }),
+  field({ key: 'geminiApprovalMode', tab: 'gemini', type: 'select', options: ['yolo', 'auto_edit', 'default', 'plan'], hasHint: true }),
+  field({ key: 'geminiBin', tab: 'gemini', type: 'text' }),
 ];
 
 /** Keys whose draft differs from the saved config. */
