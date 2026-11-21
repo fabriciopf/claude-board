@@ -52,6 +52,8 @@ export async function registerApi(app: FastifyInstance, ctx: AppContext): Promis
       labels: s.listLabels(),
       repositories: s.listRepositories(),
       runner: runnerState(ctx.db, isPaused(ctx), ctx.runner?.concurrency?.()),
+      // The cover of a card without its own agent shows this one (D98).
+      defaultAgent: ctx.config.defaultAgent,
       usage: ctx.usage?.get() ?? null,
       agenda: ctx.agenda?.get() ?? null,
       publish: ctx.publisher?.state() ?? null,

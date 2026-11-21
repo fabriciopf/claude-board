@@ -1,8 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { DEFAULT_CONFIG, protectedBranchList, type Config } from '../config.js';
 import { CARD_HEADER, EXECUTION_HEADER } from '../mcp/http.js';
+import { packageRoot } from './package-root.js';
+import { protectedBranchPattern } from './push-guard.js';
 import { agentLabel, isAgentId, modelFitsAgent, type AgentId, type Card } from '../shared/domain.js';
 
 /**
@@ -83,6 +84,9 @@ export function disallowedTools(policy: Config['prPolicy'], protectedBranches: s
     'git push * --delete *',
     'git push * -d *',
     'git push * :*',
+    // --no-verify skips the worktree's pre-push hook, the second lock (D96).
+    'git push --no-verify*',
+    'git push * --no-verify*',
     // "origin main" and any refspec whose destination is a protected branch (HEAD:main, HEAD:refs/heads/main).
     ...protectedBranches.flatMap((b) => [`git push origin ${b}`, `git push origin ${b} *`, `git push * *:${b}`, `git push * *:refs/heads/${b}`]),
   ];
@@ -95,21 +99,19 @@ export function disallowedTools(policy: Config['prPolicy'], protectedBranches: s
   return rules.flatMap((r) => [`Bash(${r})`, `PowerShell(${r})`]);
 }
 
-const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-
 /**
  * The same rules as `disallowedTools`, as regular expressions over one shell command, each matched
- * from the start (`^(?:…)`). A protected branch ending in `*` (preproduction*) covers any suffix.
+ * from the start (`^(?:…)`). A protected branch ending in `*` (preproduction*) covers any suffix; the
+ * worktree's pre-push hook reads the same `protectedBranchPattern` (D96).
  * The Antigravity ACP client splits a compound command (`cd x && git push`) before matching.
  */
 export function pushDenyPatterns(policy: Config['prPolicy'], protectedBranches: string[]): string[] {
-  const branch = (b: string) => (b.endsWith('*') ? `${escapeRegex(b.slice(0, -1))}[^\\s]*` : escapeRegex(b));
-  const branches = protectedBranches.map(branch).join('|');
+  const branches = protectedBranchPattern(protectedBranches);
   const pushAny = 'git\\s+push\\b';
   if (policy === 'none') return [pushAny, 'gh\\s+pr\\s+create\\b'];
   const force = [
-    // --force, --force-with-lease, -f, --mirror, --delete, -d
-    `${pushAny}.*\\s(--force\\S*|-f|--mirror|--delete|-d)(\\s|$)`,
+    // --force, --force-with-lease, -f, --mirror, --delete, -d, and --no-verify (skips the pre-push hook)
+    `${pushAny}.*\\s(--force\\S*|-f|--mirror|--delete|-d|--no-verify)(\\s|$)`,
     // +refspec (forced) and :branch (deletes the remote branch)
     `${pushAny}.*\\s[+:]\\S*`,
     // origin main, origin main …
@@ -183,16 +185,6 @@ function claudeLaunch(input: LaunchInput): Launch {
 
 // ---------- Antigravity CLI ----------
 
-/** Folder of the running code (src/runner or dist/server/runner → the package root). */
-export function packageRoot(): string {
-  let dir = path.dirname(fileURLToPath(import.meta.url));
-  for (let i = 0; i < 6; i++) {
-    if (fs.existsSync(path.join(dir, 'package.json'))) return dir;
-    dir = path.dirname(dir);
-  }
-  return process.cwd();
-}
-
 /**
  * Antigravity CLI has no flag to append to its system prompt, so the Board's rules go at the top of
  * the prompt, on every run, as Claude Code gets them on every run.
@@ -208,7 +200,10 @@ export interface AcpRunConfig {
   cwd: string;
   prompt: string;
   resumeId: string | null;
+  /** Set with session/set_model after the session opens; null = agy's own default. */
   model: string | null;
+  /** Set with session/set_mode after the session opens ('plan' for a card in plan mode). */
+  mode: string | null;
   maxTurns: number;
   /** Regular expressions of the shell commands the client refuses (`pushDenyPatterns`). */
   denyPatterns: string[];
@@ -231,11 +226,12 @@ export interface AcpRunConfig {
 function antigravityLaunch(input: LaunchInput): Launch {
   const { config, card, runDir, boardUrl, executionId } = input;
   const model = resolveModel(card, config, 'antigravity');
-  const effort = card.effort || config.defaultEffort || null;
+  // `agy acp` takes none of --model, --effort or --mode (agy 1.5.14 exits with "flags provided but
+  // not defined"; card #191). The model and the plan mode go over ACP once the session is open
+  // (session/set_model, session/set_mode); effort is Claude Code's alone, so it is not passed nor
+  // recorded on the run.
+  const mode = card.permissionMode === 'plan' ? 'plan' : null;
   const agyArgs = [...config.antigravityArgsPrefix, 'acp'];
-  if (model) agyArgs.push('--model', model);
-  if (effort) agyArgs.push('--effort', effort);
-  if (card.permissionMode === 'plan') agyArgs.push('--mode', 'plan');
   for (const dir of input.addDirs) agyArgs.push('--add-dir', dir);
   const root = packageRoot();
   const ids = { CLAUDE_BOARD_CARD_ID: String(card.id), CLAUDE_BOARD_EXECUTION_ID: String(executionId), CLAUDE_BOARD_URL: boardUrl };
@@ -246,6 +242,7 @@ function antigravityLaunch(input: LaunchInput): Launch {
     prompt: withBoardRules(input.systemPrompt, input.userPrompt),
     resumeId: input.resumeId,
     model,
+    mode,
     maxTurns: card.maxTurns ?? config.defaultMaxTurns ?? 0,
     denyPatterns: pushDenyPatterns(config.prPolicy, protectedBranchList(config.protectedBranches)),
     mcp: {
@@ -266,7 +263,7 @@ function antigravityLaunch(input: LaunchInput): Launch {
     // The prompt travels in the run file; stdin stays empty.
     stdin: '',
     model,
-    effort,
+    effort: null,
     presetSession: false,
   };
 }

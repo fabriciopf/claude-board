@@ -15,7 +15,19 @@ if (args.includes('--version')) {
   console.log('1.9.0 (Antigravity CLI fake)');
   process.exit(0);
 }
-const get = (flag) => (args.includes(flag) ? args[args.indexOf(flag) + 1] : undefined);
+// Like the real `agy acp` (1.5.14), an unknown flag stops it before it answers (card #191):
+// it has no --model, --effort nor --mode; those exist only outside acp.
+const ACP_VALUE_FLAGS = new Set(['--add-dir', '--agent', '--app-data-dir', '--log-file', '--gemini-dir']);
+const ACP_BOOL_FLAGS = new Set(['--sandbox', '--stdio', '--dangerously-skip-permissions', '--disable-telemetry', '--process-per-session']);
+if (args[0] === 'acp') {
+  for (let i = 1; i < args.length; i++) {
+    if (ACP_VALUE_FLAGS.has(args[i])) i++;
+    else if (!ACP_BOOL_FLAGS.has(args[i])) {
+      process.stderr.write(`Error: flags provided but not defined: ${args[i].replace(/^--/, '-')}\n`);
+      process.exit(1);
+    }
+  }
+}
 // FAKE_AGY_HTTP=0 makes the agent announce no HTTP MCP, so the client falls back to stdio.
 const http = process.env.FAKE_AGY_HTTP !== '0';
 const log = (entry) => process.env.FAKE_AGY_LOG && fs.appendFileSync(process.env.FAKE_AGY_LOG, JSON.stringify(entry) + '\n');
@@ -87,7 +99,7 @@ async function prompt(params) {
   const s = sessions.get(params.sessionId);
   const text = params.prompt.map((b) => b.text ?? '').join('\n');
   const scenario = /\[fake:([a-z_]+)\]/.exec(text)?.[1] ?? (s.loaded ? 'success' : 'no_report');
-  log({ args, prompt: text, sessionId: params.sessionId, scenario, cwd: process.cwd(), loaded: !!s.loaded, mcp: s.mcpServers, entrypoint: process.env.CLAUDE_CODE_ENTRYPOINT ?? null });
+  log({ args, prompt: text, sessionId: params.sessionId, scenario, model: s.model ?? null, mode: s.mode ?? null, cwd: process.cwd(), loaded: !!s.loaded, mcp: s.mcpServers, entrypoint: process.env.CLAUDE_CODE_ENTRYPOINT ?? null });
   const id = params.sessionId;
   const usage = { inputTokens: 400, outputTokens: 100 };
   switch (scenario) {
@@ -151,6 +163,19 @@ readline.createInterface({ input: process.stdin }).on('line', async (line) => {
       // The history comes back as updates before the answer; the client must not write them again.
       update(msg.params.sessionId, { sessionUpdate: 'user_message_chunk', content: { type: 'text', text: 'pedido antigo' } });
       update(msg.params.sessionId, { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'RESPOSTA ANTIGA REPETIDA' } });
+      return reply({});
+    }
+    case 'session/set_model': {
+      const s = sessions.get(msg.params.sessionId);
+      if (!s) return send({ id: msg.id, error: { code: -32602, message: 'unknown session' } });
+      if (msg.params.modelId === 'modelo-inexistente') return send({ id: msg.id, error: { code: -32602, message: 'unknown model modelo-inexistente' } });
+      s.model = msg.params.modelId;
+      return reply({});
+    }
+    case 'session/set_mode': {
+      const s = sessions.get(msg.params.sessionId);
+      if (!s) return send({ id: msg.id, error: { code: -32602, message: 'unknown session' } });
+      s.mode = msg.params.modeId;
       return reply({});
     }
     case 'session/prompt':

@@ -104,6 +104,7 @@ export const card = defineMessages(
     agent: 'Agente',
     model: 'Modelo',
     effort: 'Effort',
+    effortClaudeOnly: 'O Antigravity CLI não aceita effort: vale só para o Claude Code.',
     maxTurns: 'Máx. de turnos',
     noLimit: 'sem limite',
     dangerConfirm:
@@ -287,6 +288,7 @@ export const card = defineMessages(
       agent: 'Agent',
       model: 'Model',
       effort: 'Effort',
+      effortClaudeOnly: 'Antigravity CLI takes no effort: it applies to Claude Code only.',
       maxTurns: 'Max turns',
       noLimit: 'no limit',
       dangerConfirm:
@@ -465,6 +467,7 @@ export const card = defineMessages(
       agent: 'Agente',
       model: 'Modelo',
       effort: 'Effort',
+      effortClaudeOnly: 'Antigravity CLI no acepta effort: vale solo para Claude Code.',
       maxTurns: 'Máx. de turnos',
       noLimit: 'sin límite',
       dangerConfirm:

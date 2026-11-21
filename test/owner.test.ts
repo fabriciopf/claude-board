@@ -30,10 +30,10 @@ describe('card owner', () => {
     expect(owner(imported)).toBe('claude');
   });
 
-  it('the cover shows a person for the user and the Claude icon for Claude, not letters', () => {
-    const tile = readFileSync(new URL('../src/ui/CardTile.tsx', import.meta.url), 'utf8');
-    expect(tile).toMatch(/<OwnerAvatar owner=\{card\.owner\}/);
-    expect(tile).not.toMatch(/'C' : 'V'/);
+  it('the owner avatar shows a person for the user and the Claude icon for Claude, not letters', () => {
+    // Since D98 the cover shows the agent (test/agent-cover.test.ts); the owner avatar stays next to comments.
+    const timeline = readFileSync(new URL('../src/ui/Timeline.tsx', import.meta.url), 'utf8');
+    expect(timeline).toMatch(/<OwnerAvatar owner=\{c\.author\}/);
     const avatar = readFileSync(new URL('../src/ui/OwnerAvatar.tsx', import.meta.url), 'utf8');
     expect(avatar).toMatch(/owner === 'claude' \? <ClaudeIcon \/> : <PersonIcon \/>/);
     // White spark on the orange in both themes, not the dark --on-accent of the dark theme.

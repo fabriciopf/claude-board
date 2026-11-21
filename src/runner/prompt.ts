@@ -12,6 +12,10 @@ function protectedProse(config: Config): string {
   return list.length > 1 ? `${list.slice(0, -1).join(', ')} e ${list[list.length - 1]}` : list[0];
 }
 
+/** The worktree's pre-push hook (D96): the second push lock, only where the Board made the worktree. */
+const HOOK_LOCK = 'O worktree tem um hook pre-push do Board que aplica essa mesma regra no próprio git; não o pule (`--no-verify`) nem troque o `core.hooksPath`.';
+const NO_HOOK_LOCK = 'Este card roda sem worktree, então o git daqui não tem a trava de push do Board (o hook pre-push): a regra acima depende só de você e das permissões do agente.';
+
 const prRules = (PROTECTED: string): Record<Config['prPolicy'], string> => ({
   none: 'Não faça push nem abra PR. Deixe os commits na branch local do card; o usuário decide o que sobe.',
   push_branch: `Push liberado quando o card pedir (na descrição ou num comentário do usuário): da branch do card (cb/*) ou para a branch que o card nomear, como a de um PR já aberto (\`git push origin HEAD:refs/heads/<branch>\`). Sem pedido no card, deixe os commits na branch local. Nunca faça push forçado nem push para ${PROTECTED}. Não abra PR; atualizar a descrição de um PR já aberto (\`gh pr edit\`) vale quando o card pedir.`,
@@ -109,7 +113,7 @@ ${config.userProfile.trim() ? `Perfil do usuário: ${config.userProfile.trim()}
 3. Se a tarefa depender de outra pessoa, de deploy ou de acesso, chame card_wait_third_party com o motivo e encerre.
 4. Ao terminar, chame card_submit_for_review com um resumo: o que foi feito, onde está (arquivos, branch, links) e o que o usuário precisa conferir. Nunca mova o card para "Concluída": só o usuário aprova.
 5. Trabalhe dentro de ${cwd}. Não apague nem altere nada fora desse diretório. Antes de qualquer ação irreversível fora dele, chame card_ask_user.${branch ? `\n6. O diretório é um worktree próprio na branch ${branch}; a branch principal do repositório não é tocada.` : ''}
-${branch ? '7' : '6'}. Git: ${prRules(protectedProse(config))[config.prPolicy]}
+${branch ? '7' : '6'}. Git: ${prRules(protectedProse(config))[config.prPolicy]} ${branch ? HOOK_LOCK : NO_HOOK_LOCK}
 ${branch ? '8' : '7'}. Se uma permissão for negada, não tente contornar: diga no card_ask_user o que precisaria e por quê.${
     card.sessionName
       ? ''

@@ -1,6 +1,7 @@
 // Who a card belongs to, as a round icon: a person for the user, the Claude spark for Claude (D86).
 import type { CSSProperties } from 'react';
 import type { Owner } from '../shared/domain';
+import { ClaudeMark } from './AgentIcon';
 import { t } from './i18n';
 
 /** Head and shoulders, drawn in currentColor. */
@@ -13,34 +14,15 @@ export function PersonIcon({ size = 14 }: { size?: number }) {
   );
 }
 
-/** Rays of uneven length around a center, like the Claude spark, in currentColor. */
-const RAYS = Array.from({ length: 12 }, (_, i) => {
-  const angle = (i * 30 - 90) * (Math.PI / 180);
-  const outer = i % 2 === 0 ? 10.5 : 8;
-  const inner = 2.2;
-  const r = (n: number) => Math.round(n * 100) / 100;
-  return {
-    x1: r(12 + inner * Math.cos(angle)),
-    y1: r(12 + inner * Math.sin(angle)),
-    x2: r(12 + outer * Math.cos(angle)),
-    y2: r(12 + outer * Math.sin(angle)),
-  };
-});
-
+/** The official Claude mark (D98), in currentColor: white on the orange disc. */
 export function ClaudeIcon({ size = 14 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden="true" focusable="false">
-      {RAYS.map((l, i) => (
-        <line key={i} {...l} />
-      ))}
-    </svg>
-  );
+  return <ClaudeMark size={size} />;
 }
 
 /** Name of the owner in the current language. */
 export const ownerName = (owner: Owner) => t(owner === 'user' ? 'board.owner.user' : 'board.owner.claude');
 
-/** The round avatar on the card cover and next to comments. */
+/** The round avatar next to comments; the card cover shows the agent instead (D98). */
 export function OwnerAvatar({ owner, label, style }: { owner: Owner; label?: string; style?: CSSProperties }) {
   const text = label ?? t('board.owner.label', { name: ownerName(owner) });
   return (

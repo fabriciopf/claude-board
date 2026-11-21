@@ -19,6 +19,12 @@ export type Status = (typeof STATUSES)[number];
  */
 export const NEWEST_FIRST_STATUSES: readonly Status[] = ['backlog', 'waiting_user', 'waiting_third_party', 'review', 'done'];
 
+/**
+ * Lists whose cards carry the "not seen yet" mark until the user opens them: "Em revisão" (D84) and
+ * "Aguardando você" (D95).
+ */
+export const UNSEEN_STATUSES: readonly Status[] = ['review', 'waiting_user'];
+
 export const STATUS_LABELS: Record<Status, string> = {
   triage: 'Triagem',
   backlog: 'Não iniciada',
@@ -203,6 +209,16 @@ export function agentLabel(id: string | null | undefined): string {
   return AGENT_LABELS[(id as AgentId) ?? 'claude'] ?? id ?? AGENT_LABELS.claude;
 }
 
+/**
+ * Agent shown on the card cover (card #197, D98): the one of the run in progress; otherwise the one
+ * the next run will drive, the card's own or the default of the settings.
+ */
+export function coverAgent(card: Pick<CardSummary, 'agent' | 'runningAgent'>, defaultAgent: string | null | undefined): string {
+  if (card.runningAgent) return card.runningAgent;
+  if (isAgentId(card.agent)) return card.agent;
+  return isAgentId(defaultAgent) ? defaultAgent : 'claude';
+}
+
 /** Command a person types to continue a card's session in a terminal, in the agent that holds it. */
 export function resumeCommand(agent: string | null | undefined, sessionId: string): string {
   if (agent === 'antigravity') return `agy --conversation ${sessionId}`;
@@ -348,6 +364,8 @@ export interface CardSummary extends Card {
   checklist: { text: string; done: boolean }[];
   commentCount: number;
   running: boolean;
+  /** Agent of the run in progress ('claude' for a run from before migration 15); null when nothing runs. */
+  runningAgent: string | null;
   hasOpenQuestion: boolean;
   /** Title of the card this one was split from. */
   parentTitle: string | null;
@@ -355,8 +373,8 @@ export interface CardSummary extends Card {
   subtasks: CardRef[];
   /** When the card last entered its current list: the last "moved" event into it, else its creation (card #152). */
   enteredStatusAt: string;
-  /** In "Em revisão" and not opened since Claude or the runner put it there (D84). */
-  unseenInReview: boolean;
+  /** In "Em revisão" or "Aguardando você" and not opened since Claude or the runner put it there (D84, D95). */
+  unseen: boolean;
 }
 
 export interface Comment {

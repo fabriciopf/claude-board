@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AGENTS, AGENT_LABELS, EFFORT_LABELS, EFFORT_LEVELS, PERMISSION_MODES, REOPEN_ON_COMMENT, STATUSES, agentLabel, effortLabel, isAgentId, modelFitsAgent, modelLabel, modelOptionsFor, resumeCommand, type AgentId, type App, type Card, type Label, type LinkKind, type Repository } from '../shared/domain';
+import { AGENTS, AGENT_LABELS, EFFORT_LABELS, EFFORT_LEVELS, PERMISSION_MODES, REOPEN_ON_COMMENT, STATUSES, UNSEEN_STATUSES, agentLabel, effortLabel, isAgentId, modelFitsAgent, modelLabel, modelOptionsFor, resumeCommand, type AgentId, type App, type Card, type Label, type LinkKind, type Repository } from '../shared/domain';
 import { ActionButton, ActionGroup, useBusy } from './ActionButton';
 import { ApiError, api, fmtDate, useServerEvents, type CardDetailResponse } from './api';
 import { latestDelivery } from './delivery';
@@ -106,11 +106,11 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
     void load();
   }, [cardId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Opening a card in "Em revisão" clears its "not seen yet" mark, also when it arrives there while
-  // open (D84). The server writes nothing when there is no mark to clear.
+  // Opening a card in "Em revisão" or "Aguardando você" clears its "not seen yet" mark, also when it
+  // arrives there while open (D84, D95). The server writes nothing when there is no mark to clear.
   const status = detail?.card.id === cardId ? detail.card.status : undefined;
   useEffect(() => {
-    if (status === 'review') void api.quietPost(`/api/cards/${cardId}/seen`).catch(() => undefined);
+    if (status && UNSEEN_STATUSES.includes(status)) void api.quietPost(`/api/cards/${cardId}/seen`).catch(() => undefined);
   }, [cardId, status]);
 
   useServerEvents((msg) => {
@@ -880,6 +880,9 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
                   id="f-effort"
                   className="input"
                   value={card.effort ?? ''}
+                  // Antigravity CLI takes no effort (card #191): the select would have no effect.
+                  disabled={agent === 'antigravity'}
+                  title={agent === 'antigravity' ? t('card.effortClaudeOnly') : undefined}
                   onChange={(e) => void patch({ effort: e.target.value || null })}
                 >
                   <option value="">{t('card.fromSettingsWith', { value: effortLabel(defaults.defaultEffort) })}</option>

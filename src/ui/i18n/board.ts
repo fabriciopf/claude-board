@@ -40,6 +40,8 @@ export const board = defineMessages(
     'tile.appWithPath': 'Projeto: {name} ({path})',
     'tile.repository': 'Repositório: {name}',
     'tile.automationTitle': 'Criado por uma automação',
+    'tile.agent': 'Roda no {name}',
+    'tile.agentRunning': 'Rodando no {name}',
     'tile.automation': '⟳ automação',
     'tile.suggests': 'sugere: {status}',
 
@@ -148,6 +150,8 @@ export const board = defineMessages(
       'tile.appWithPath': 'Project: {name} ({path})',
       'tile.repository': 'Repository: {name}',
       'tile.automationTitle': 'Created by an automation',
+      'tile.agent': 'Runs in {name}',
+      'tile.agentRunning': 'Running in {name}',
       'tile.automation': '⟳ automation',
       'tile.suggests': 'suggests: {status}',
 
@@ -250,6 +254,8 @@ export const board = defineMessages(
       'tile.appWithPath': 'Proyecto: {name} ({path})',
       'tile.repository': 'Repositorio: {name}',
       'tile.automationTitle': 'Creada por una automatización',
+      'tile.agent': 'Se ejecuta en {name}',
+      'tile.agentRunning': 'Ejecutándose en {name}',
       'tile.automation': '⟳ automatización',
       'tile.suggests': 'sugiere: {status}',
 
