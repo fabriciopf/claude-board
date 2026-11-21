@@ -21,7 +21,7 @@ export const settings = defineMessages(
     // Fields (label "f." and hint "h.")
     'f.maxConcurrency': 'Execuções simultâneas',
     'h.maxConcurrency':
-      'quantos cards da fila "Pronta" o Claude executa ao mesmo tempo; também vale para as tarefas de um card dividido. Automático: o Board abre quantas couberem para o uso da sessão de 5h acompanhar o tempo da janela, sem estourar o limite. 0: nada novo sai da fila. ∞: todo card da fila começa na hora. Também dá para trocar no contador "rodando" do cabeçalho',
+      'quantos cards da fila "Pronta" o Claude Code executa ao mesmo tempo (o Antigravity CLI tem limite próprio, logo abaixo); também vale para as tarefas de um card dividido. Automático: o Board abre quantas couberem para o uso da sessão de 5h acompanhar o tempo da janela, sem estourar o limite. 0: nada novo sai da fila. ∞: todo card da fila começa na hora. Também dá para trocar no contador "rodando" do cabeçalho',
     'opt.auto': 'Automático',
     'opt.unlimited': '∞ (sem limite)',
     'opt.zero': '0 (fila parada)',
@@ -170,6 +170,11 @@ export const settings = defineMessages(
     'conc.titleUnlimited': 'Execuções rodando agora. Sem limite: todo card da fila começa na hora. Clique para escolher outro modo.',
     'conc.titleZero': 'Execuções rodando agora. Em 0, nada novo sai da fila. Clique para escolher outro modo.',
     'conc.titleFixed': 'Execuções rodando agora. Clique para escolher quantas rodam ao mesmo tempo.',
+    'f.antigravityConcurrency': 'Execuções simultâneas do Antigravity CLI',
+    'h.antigravityConcurrency': 'limite próprio dos cards que rodam no Antigravity CLI, à parte do limite acima, que vale para o Claude Code. Sem modo automático: a cota do Google é outra e o Board não lê o uso dela. 0: nenhum card do Antigravity sai da fila',
+    'conc.titleAntigravity': 'Execuções do Antigravity CLI rodando agora, com limite próprio: a cota do Google é outra e o Board não lê o uso dela. Clique para escolher quantas rodam ao mesmo tempo.',
+    'conc.quotaAntigravity': 'Às {time} uma execução do Antigravity parou por limite de cota: {message}. O aviso some quando uma execução dele terminar bem.',
+    'conc.quotaShort': 'cota',
 
     // Usage ticker
     'usage.fiveHour': '5 horas',
@@ -201,7 +206,7 @@ export const settings = defineMessages(
 
       'f.maxConcurrency': 'Simultaneous runs',
       'h.maxConcurrency':
-        'how many cards of the "Ready" queue Claude runs at the same time; also applies to the tasks of a split card. Automatic: the Board opens as many as fit so the 5-hour session usage keeps pace with the window, without going over the limit. 0: nothing new leaves the queue. ∞: every card in the queue starts right away. You can also change it in the "running" counter in the header',
+        'how many cards of the "Ready" queue Claude Code runs at the same time (Antigravity CLI has its own limit, right below); also applies to the tasks of a split card. Automatic: the Board opens as many as fit so the 5-hour session usage keeps pace with the window, without going over the limit. 0: nothing new leaves the queue. ∞: every card in the queue starts right away. You can also change it in the "running" counter in the header',
       'opt.auto': 'Automatic',
       'opt.unlimited': '∞ (no limit)',
       'opt.zero': '0 (queue stopped)',
@@ -346,6 +351,11 @@ export const settings = defineMessages(
       'conc.titleUnlimited': 'Runs going on now. No limit: every card in the queue starts right away. Click to choose another mode.',
       'conc.titleZero': 'Runs going on now. At 0, nothing new leaves the queue. Click to choose another mode.',
       'conc.titleFixed': 'Runs going on now. Click to choose how many run at the same time.',
+      'f.antigravityConcurrency': 'Simultaneous Antigravity CLI runs',
+      'h.antigravityConcurrency': 'a limit of its own for the cards that run on Antigravity CLI, apart from the limit above, which applies to Claude Code. No automatic mode: the Google quota is another one and the Board does not read its usage. 0: no Antigravity card leaves the queue',
+      'conc.titleAntigravity': 'Antigravity CLI runs going on now, with a limit of their own: the Google quota is another one and the Board does not read its usage. Click to choose how many run at the same time.',
+      'conc.quotaAntigravity': 'At {time} an Antigravity run stopped on a quota limit: {message}. The notice goes away when one of its runs ends well.',
+      'conc.quotaShort': 'quota',
 
       'usage.fiveHour': '5 hours',
       'usage.week': 'Week',
@@ -375,7 +385,7 @@ export const settings = defineMessages(
 
       'f.maxConcurrency': 'Ejecuciones simultáneas',
       'h.maxConcurrency':
-        'cuántas tarjetas de la cola "Lista" ejecuta Claude al mismo tiempo; también vale para las tareas de una tarjeta dividida. Automático: el Board abre las que quepan para que el uso de la sesión de 5 h acompañe el tiempo de la ventana, sin pasar el límite. 0: nada nuevo sale de la cola. ∞: toda tarjeta de la cola empieza en el acto. También puedes cambiarlo en el contador "en curso" del encabezado',
+        'cuántas tarjetas de la cola "Lista" ejecuta Claude Code al mismo tiempo (Antigravity CLI tiene su propio límite, justo debajo); también vale para las tareas de una tarjeta dividida. Automático: el Board abre las que quepan para que el uso de la sesión de 5 h acompañe el tiempo de la ventana, sin pasar el límite. 0: nada nuevo sale de la cola. ∞: toda tarjeta de la cola empieza en el acto. También puedes cambiarlo en el contador "en curso" del encabezado',
       'opt.auto': 'Automático',
       'opt.unlimited': '∞ (sin límite)',
       'opt.zero': '0 (cola detenida)',
@@ -520,6 +530,11 @@ export const settings = defineMessages(
       'conc.titleUnlimited': 'Ejecuciones en curso ahora. Sin límite: toda tarjeta de la cola empieza en el acto. Haz clic para elegir otro modo.',
       'conc.titleZero': 'Ejecuciones en curso ahora. En 0, nada nuevo sale de la cola. Haz clic para elegir otro modo.',
       'conc.titleFixed': 'Ejecuciones en curso ahora. Haz clic para elegir cuántas corren al mismo tiempo.',
+      'f.antigravityConcurrency': 'Ejecuciones simultáneas de Antigravity CLI',
+      'h.antigravityConcurrency': 'límite propio de las tarjetas que corren en Antigravity CLI, aparte del límite de arriba, que vale para Claude Code. Sin modo automático: la cuota de Google es otra y el Board no lee su uso. 0: ninguna tarjeta de Antigravity sale de la cola',
+      'conc.titleAntigravity': 'Ejecuciones de Antigravity CLI en curso ahora, con límite propio: la cuota de Google es otra y el Board no lee su uso. Haz clic para elegir cuántas corren al mismo tiempo.',
+      'conc.quotaAntigravity': 'A las {time} una ejecución de Antigravity se detuvo por límite de cuota: {message}. El aviso desaparece cuando una ejecución suya termine bien.',
+      'conc.quotaShort': 'cuota',
 
       'usage.fiveHour': '5 horas',
       'usage.week': 'Semana',

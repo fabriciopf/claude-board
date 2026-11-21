@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { AUTO_CONCURRENCY, SELF_UPDATE_MODES, UNLIMITED_CONCURRENCY, DEFAULT_RUN_EFFORT, DEFAULT_RUN_MODEL, MAX_CONCURRENCY, isAgentId, isEffortLevel, isValidModelId, type AgentId, type ConcurrencySetting, type SelfUpdateMode } from './shared/domain.js';
+import { AUTO_CONCURRENCY, DEFAULT_ANTIGRAVITY_CONCURRENCY, SELF_UPDATE_MODES, UNLIMITED_CONCURRENCY, DEFAULT_RUN_EFFORT, DEFAULT_RUN_MODEL, MAX_CONCURRENCY, isAgentId, isEffortLevel, isValidModelId, type AgentConcurrencySetting, type AgentId, type ConcurrencySetting, type SelfUpdateMode } from './shared/domain.js';
 
 export interface Config {
   port: number;
@@ -21,8 +21,10 @@ export interface Config {
   /** VS Code workspace root: runs start here to load the same CLAUDE.md, skills, settings and memory. */
   workspaceDir: string | null;
   heartbeatSeconds: number;
-  /** Runs at the same time: 0 to MAX_CONCURRENCY, 'auto' to pace them by the 5-hour usage (D47), or 'unlimited' (D83). */
+  /** Claude Code runs at the same time: 0 to MAX_CONCURRENCY, 'auto' to pace them by the 5-hour usage (D47), or 'unlimited' (D83). */
   maxConcurrency: ConcurrencySetting;
+  /** Antigravity CLI runs at the same time, apart from the Claude Code ones (D99): 0 to MAX_CONCURRENCY or 'unlimited'. */
+  antigravityConcurrency: AgentConcurrencySetting;
   runTimeoutMinutes: number;
   defaultMaxTurns: number;
   defaultPermissionMode: string;
@@ -85,6 +87,7 @@ export const DEFAULT_CONFIG: Config = {
   workspaceDir: null,
   heartbeatSeconds: 30,
   maxConcurrency: AUTO_CONCURRENCY,
+  antigravityConcurrency: DEFAULT_ANTIGRAVITY_CONCURRENCY,
   // 0 = no limit, as in a VS Code session. A card can still set its own max turns.
   runTimeoutMinutes: 0,
   defaultMaxTurns: 0,
@@ -200,6 +203,7 @@ export function saveConfig(current: Config, patch: Partial<Config>): Config {
     }
   }
   next.maxConcurrency = parseConcurrency(next.maxConcurrency);
+  next.antigravityConcurrency = parseAgentConcurrency(next.antigravityConcurrency);
   if (!['none', 'push_branch', 'open_pr'].includes(next.prPolicy)) throw new Error('prPolicy inválida');
   next.defaultModel = String(next.defaultModel ?? '').trim();
   if (next.defaultModel && !isValidModelId(next.defaultModel)) throw new Error(`Modelo inválido: ${next.defaultModel}`);
@@ -240,6 +244,22 @@ export function parseConcurrency(value: unknown): ConcurrencySetting {
   const n = typeof value === 'string' && value.trim() ? Number(value) : value;
   if (typeof n !== 'number' || !Number.isInteger(n) || n < 0 || n > MAX_CONCURRENCY) {
     throw new Error(`Execuções simultâneas: use "automático", "∞" ou um número inteiro de 0 a ${MAX_CONCURRENCY}.`);
+  }
+  return n;
+}
+
+/**
+ * The Antigravity CLI limit (D99): 'unlimited' or a whole number from 0 to MAX_CONCURRENCY. There is
+ * no automatic mode, because the Board reads no usage of the Google quota to pace by.
+ */
+export function parseAgentConcurrency(value: unknown): AgentConcurrencySetting {
+  if (value === UNLIMITED_CONCURRENCY || value === '∞') return UNLIMITED_CONCURRENCY;
+  if (value === AUTO_CONCURRENCY) {
+    throw new Error('Execuções simultâneas do Antigravity CLI: não há modo automático, porque o Board não lê o uso da cota do Google. Use "∞" ou um número.');
+  }
+  const n = typeof value === 'string' && value.trim() ? Number(value) : value;
+  if (typeof n !== 'number' || !Number.isInteger(n) || n < 0 || n > MAX_CONCURRENCY) {
+    throw new Error(`Execuções simultâneas do Antigravity CLI: use "∞" ou um número inteiro de 0 a ${MAX_CONCURRENCY}.`);
   }
   return n;
 }

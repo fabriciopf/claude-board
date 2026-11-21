@@ -1,4 +1,4 @@
-import { AGENTS, AGENT_LABELS, ANTIGRAVITY_MODEL_OPTIONS, AUTO_CONCURRENCY, CONCURRENCY_PRESETS, SELF_UPDATE_MODES, EFFORT_LABELS, EFFORT_LEVELS, MODEL_OPTIONS, UNLIMITED_CONCURRENCY } from '../shared/domain';
+import { AGENTS, AGENT_LABELS, ANTIGRAVITY_CONCURRENCY_PRESETS, ANTIGRAVITY_MODEL_OPTIONS, AUTO_CONCURRENCY, CONCURRENCY_PRESETS, SELF_UPDATE_MODES, EFFORT_LABELS, EFFORT_LEVELS, MODEL_OPTIONS, UNLIMITED_CONCURRENCY } from '../shared/domain';
 import { t, type MessageKey } from './i18n';
 
 export type Config = Record<string, any>;
@@ -55,6 +55,15 @@ export const FIELDS: Field[] = [
     // The same choices as the selector of the header counter (D83); another number from config.json still shows.
     options: CONCURRENCY_PRESETS,
     optionLabels: () => ({ [AUTO_CONCURRENCY]: t('settings.opt.auto'), [UNLIMITED_CONCURRENCY]: t('settings.opt.unlimited'), '0': t('settings.opt.zero') }),
+    hasHint: true,
+  }),
+  // Antigravity CLI runs have their own limit (D99): next to the Claude Code one, with no automatic mode.
+  field({
+    key: 'antigravityConcurrency',
+    tab: 'runs',
+    type: 'select',
+    options: ANTIGRAVITY_CONCURRENCY_PRESETS,
+    optionLabels: () => ({ [UNLIMITED_CONCURRENCY]: t('settings.opt.unlimited'), '0': t('settings.opt.zero') }),
     hasHint: true,
   }),
   // The agent of every card that does not choose one (D93): a choice about runs, so it lives here, not on an agent's tab.

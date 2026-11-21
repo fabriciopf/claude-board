@@ -133,6 +133,14 @@ export type ConcurrencySetting = number | typeof AUTO_CONCURRENCY | typeof UNLIM
  */
 export const CONCURRENCY_PRESETS: string[] = [AUTO_CONCURRENCY, '0', '1', '2', '4', '8', UNLIMITED_CONCURRENCY];
 
+/**
+ * Runs of Antigravity CLI at the same time (D99): its own number, apart from `maxConcurrency`, which
+ * governs Claude Code. No automatic mode: the Board reads no usage of the Google quota.
+ */
+export type AgentConcurrencySetting = number | typeof UNLIMITED_CONCURRENCY;
+export const ANTIGRAVITY_CONCURRENCY_PRESETS: string[] = ['0', '1', '2', '4', '8', UNLIMITED_CONCURRENCY];
+export const DEFAULT_ANTIGRAVITY_CONCURRENCY = 2;
+
 /** Text of each choice: the numbers as they are, auto and the infinity sign. */
 export function concurrencyOptionLabel(value: string): string {
   if (value === AUTO_CONCURRENCY) return 'auto';
@@ -140,7 +148,7 @@ export function concurrencyOptionLabel(value: string): string {
   return value;
 }
 
-/** How many runs the Board allows right now, and why (shown in the header). */
+/** How many Claude Code runs the Board allows right now, and why (shown in the header). Antigravity CLI has its own limit (D99). */
 export interface ConcurrencyInfo {
   mode: 'auto' | 'fixed' | 'unlimited';
   /** null = no ceiling (mode "unlimited"); 0 = the queue does not move. */
@@ -207,6 +215,14 @@ export function agentLabel(id: string | null | undefined): string {
   // 'gemini' only names runs from before D93.
   if (id === 'gemini') return 'Gemini CLI';
   return AGENT_LABELS[(id as AgentId) ?? 'claude'] ?? id ?? AGENT_LABELS.claude;
+}
+
+/**
+ * Which concurrency limit a run counts against (D99). A run without an agent is from before D92, so
+ * Claude Code; the old 'gemini' runs were Google's, like Antigravity.
+ */
+export function runLane(agent: string | null | undefined): AgentId {
+  return agent === 'antigravity' || agent === 'gemini' ? 'antigravity' : 'claude';
 }
 
 /**
@@ -433,9 +449,32 @@ export interface CardDetail {
   subtasks: CardRef[];
 }
 
+/**
+ * The Antigravity CLI side of the header counter (D99): its runs, its own limit, and the last
+ * quota error an Antigravity run reported (the Board has no other reading of that quota).
+ */
+export interface AntigravityLane {
+  running: number;
+  /** null = no ceiling. */
+  limit: number | null;
+  /** Whether the header shows the split by agent: Antigravity is the default, has a card in the queue, a run going or a quota note. */
+  shown: boolean;
+  quota: AgentQuotaNote | null;
+}
+
+/** A run of the agent ended on a quota or rate-limit error. */
+export interface AgentQuotaNote {
+  at: string;
+  message: string;
+}
+
 export interface RunnerState {
   paused: boolean;
+  /** All runs going, of every agent. */
   running: number;
+  /** Runs of Claude Code, the ones `concurrency` limits (D99). */
+  claudeRunning?: number;
+  antigravity?: AntigravityLane;
   /** A publication of the Board holds new runs until the running ones end (D42). */
   held?: boolean;
   /** Absent when the runner is not active in this process. */

@@ -7,6 +7,7 @@ describe('settings tabs', () => {
       [
         'agendaRefreshMinutes',
         'antigravityBin',
+        'antigravityConcurrency',
         'antigravityModel',
         'autoSplit',
         'claudeBin',
@@ -55,7 +56,8 @@ describe('settings tabs', () => {
     const tabOf = (key: string) => FIELDS.find((f) => f.key === key)?.tab;
     expect(tabOf('defaultAgent')).toBe('runs');
     const runs = FIELDS.filter((f) => f.tab === 'runs').map((f) => f.key);
-    expect(runs.slice(0, 2)).toEqual(['maxConcurrency', 'defaultAgent']);
+    // The two concurrency limits come first, Claude Code then Antigravity CLI (D99).
+    expect(runs.slice(0, 3)).toEqual(['maxConcurrency', 'antigravityConcurrency', 'defaultAgent']);
     for (const key of ['antigravityModel', 'antigravityBin']) expect(tabOf(key)).toBe('antigravity');
   });
 });
