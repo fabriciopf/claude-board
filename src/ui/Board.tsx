@@ -16,7 +16,7 @@ import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } 
 import { CSS } from '@dnd-kit/utilities';
 import { NEWEST_FIRST_STATUSES, STATUS_DESCRIPTIONS, STATUS_LABELS, STATUSES, type App, type CardSummary, type Label, type Repository, type Status } from '../shared/domain';
 import { CardTile } from './CardTile';
-import { columnCountText } from './board-filters';
+import { columnCountText, columnNeedsAttention } from './board-filters';
 import { DEFAULT_SORT, compareCards, type CardSort } from './card-sort';
 
 /** Lists nobody drops a card into by hand: the runner and the importer own them. */
@@ -143,6 +143,12 @@ function Column(props: {
   total?: number;
 }) {
   const count = columnCountText(props.ids.length, props.total);
+  const attention = columnNeedsAttention(props.status, props.ids.length, props.total);
+  const title = (
+    <span className={'column-title' + (attention ? ' attention' : '')}>
+      <span className="column-title-text">{STATUS_LABELS[props.status]}</span>
+    </span>
+  );
   const countTitle = props.total === undefined ? undefined : `${props.ids.length} de ${props.total} cards com a busca e os filtros atuais`;
   const { setNodeRef } = useDroppable({ id: colId(props.status), disabled: NO_DROP.includes(props.status) });
   const [draft, setDraft] = useState('');
@@ -162,7 +168,7 @@ function Column(props: {
             {side === 'right' ? '‹' : '›'}
           </span>
           <span className="column-count" title={countTitle}>{count}</span>
-          <span className="column-title">{STATUS_LABELS[props.status]}</span>
+          {title}
         </button>
       </section>
     );
@@ -177,7 +183,7 @@ function Column(props: {
   return (
     <section className={'column' + (props.isOver ? ' drop-target' : '')} aria-label={STATUS_LABELS[props.status]}>
       <div className="column-head">
-        <span className="column-title">{STATUS_LABELS[props.status]}</span>
+        {title}
         <button
           className="info-btn"
           title={STATUS_DESCRIPTIONS[props.status]}
