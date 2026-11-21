@@ -159,6 +159,10 @@ function Column(props: {
   const { setNodeRef } = useDroppable({ id: colId(props.status), disabled: NO_DROP.includes(props.status) });
   const [draft, setDraft] = useState('');
   const [showInfo, setShowInfo] = useState(false);
+  // Enter and the button both add: one card per submit, however many times either is hit (card #165).
+  // Every hook stays above the folded strip's early return: a hook below it made expanding a folded
+  // column render one hook more than before, and React threw the whole board away (card #178).
+  const { track, isBusy } = useBusy();
   const side = COLLAPSIBLE[props.status]?.side;
   if (props.collapsed) {
     return (
@@ -180,8 +184,6 @@ function Column(props: {
     );
   }
   const canQuickAdd = props.status === 'backlog' || props.status === 'ready' || props.status === 'waiting_third_party';
-  // Enter and the button both add: one card per submit, however many times either is hit (card #165).
-  const { track, isBusy } = useBusy();
   const adding = isBusy('add');
   const submit = () =>
     track('add', async () => {

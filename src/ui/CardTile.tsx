@@ -3,6 +3,11 @@ import { STATUS_LABELS, STATUS_SHORT_LABELS, showsChecklistOnTile, type App, typ
 import { fmtDate, isOverdue } from './api';
 import { toggleLabelsExpanded, useLabelsExpanded } from './label-display';
 
+/** Small dot on a card in "Em revisão" not opened since it got there (D84). */
+export function UnseenDot() {
+  return <span className="unseen-dot" role="img" aria-label="Não visto" title="Ainda não aberto desde que chegou em Em revisão" />;
+}
+
 /** Checklist items shown on the cover; the rest is summed up as "+N itens". */
 const MAX_ITEMS = 6;
 
@@ -47,6 +52,7 @@ export const CardTile = forwardRef<HTMLDivElement, Props>(function CardTile(
   ].join(' ');
   return (
     <div ref={ref} className={classes} data-card-id={card.id} tabIndex={0} aria-busy={saving || undefined} {...rest}>
+      {card.unseenInReview && <UnseenDot />}
       {cardLabels.length > 0 && (
         <button
           type="button"

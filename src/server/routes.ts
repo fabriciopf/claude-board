@@ -175,6 +175,7 @@ export async function registerApi(app: FastifyInstance, ctx: AppContext): Promis
     ctx.runner?.nudge();
     return card;
   });
+  app.post<{ Params: Params }>('/api/cards/:id/seen', async (req) => s.markSeen(num(req.params.id)));
   app.post<{ Params: Params }>('/api/cards/:id/approve', async (req) => s.approve(num(req.params.id)));
   app.post<{ Params: Params }>('/api/cards/:id/retry', async (req) => {
     const card = s.retry(num(req.params.id));

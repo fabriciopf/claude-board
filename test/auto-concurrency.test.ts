@@ -258,7 +258,12 @@ describe('config', () => {
       expect(saveConfig(base, { maxConcurrency: 'auto' }).maxConcurrency).toBe('auto');
       expect(saveConfig(base, { maxConcurrency: '7' as never }).maxConcurrency).toBe(7);
       expect(JSON.parse(fs.readFileSync(path.join(home, 'config.json'), 'utf8')).maxConcurrency).toBe(7);
-      for (const bad of ['automatico', '', 0, 21, 2.5]) {
+      // 0 and ∞ are choices since D83; the infinity sign is saved as "unlimited".
+      expect(saveConfig(base, { maxConcurrency: 0 }).maxConcurrency).toBe(0);
+      expect(saveConfig(base, { maxConcurrency: '0' as never }).maxConcurrency).toBe(0);
+      expect(saveConfig(base, { maxConcurrency: 'unlimited' }).maxConcurrency).toBe('unlimited');
+      expect(saveConfig(base, { maxConcurrency: '∞' as never }).maxConcurrency).toBe('unlimited');
+      for (const bad of ['automatico', '', -1, 21, 2.5, 'infinito']) {
         expect(() => saveConfig(base, { maxConcurrency: bad as never }), String(bad)).toThrow(/automático/);
       }
     } finally {

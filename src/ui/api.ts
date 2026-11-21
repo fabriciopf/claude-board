@@ -33,6 +33,8 @@ export const api = {
   patch: <T>(url: string, body: unknown) => requests.track(request<T>('PATCH', url, body)),
   put: <T>(url: string, body: unknown) => requests.track(request<T>('PUT', url, body)),
   del: <T>(url: string) => requests.track(request<T>('DELETE', url)),
+  /** A write the user did not click for (marking a card as seen, D84): no progress bar. */
+  quietPost: <T>(url: string, body: unknown = {}) => request<T>('POST', url, body),
 };
 
 export interface BoardData {
