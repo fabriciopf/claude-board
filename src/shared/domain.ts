@@ -19,6 +19,12 @@ export type Status = (typeof STATUSES)[number];
  */
 export const NEWEST_FIRST_STATUSES: readonly Status[] = ['backlog', 'waiting_user', 'waiting_third_party', 'review', 'done'];
 
+/**
+ * Lists whose cards carry the "not seen yet" mark until the user opens them: "Em revisão" (D84) and
+ * "Aguardando você" (D95).
+ */
+export const UNSEEN_STATUSES: readonly Status[] = ['review', 'waiting_user'];
+
 export const STATUS_LABELS: Record<Status, string> = {
   triage: 'Triagem',
   backlog: 'Não iniciada',
@@ -355,8 +361,8 @@ export interface CardSummary extends Card {
   subtasks: CardRef[];
   /** When the card last entered its current list: the last "moved" event into it, else its creation (card #152). */
   enteredStatusAt: string;
-  /** In "Em revisão" and not opened since Claude or the runner put it there (D84). */
-  unseenInReview: boolean;
+  /** In "Em revisão" or "Aguardando você" and not opened since Claude or the runner put it there (D84, D95). */
+  unseen: boolean;
 }
 
 export interface Comment {

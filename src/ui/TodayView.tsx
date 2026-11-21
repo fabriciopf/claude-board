@@ -118,7 +118,7 @@ export function TodayView({
                   <span className={'pill ' + tone}>{reason}</span>
                   <div className="grow">
                     <div>
-                      {card.unseenInReview && <UnseenDot />}
+                      {card.unseen && <UnseenDot status={card.status} />}
                       <span className="muted small">#{card.id}</span> {card.title}
                     </div>
                     <div className="muted small">
