@@ -82,6 +82,11 @@ class PublishError extends Error {
   }
 }
 
+/** Comment on a concluded card of the Board with work to send while the public mirror (D66) is off (card #163). */
+export const MIRROR_OFF_NOTE =
+  'Não abri PR no repositório público: o envio ao concluir (D66) está desligado, porque o campo "Repositório público do Board" está vazio em Configurações › Workspace e Git. ' +
+  'Preencha a pasta do checkout público, a conta do GitHub e os termos que barram o envio; o próximo card do Board concluído leva a `master` inteira, com o trabalho deste card.';
+
 /** Event that marks a card handed back to Claude after a merge conflict (D68). */
 export const CONFLICT_HANDBACK_EVENT = 'publish_conflict_returned';
 
@@ -156,27 +161,39 @@ export class Publisher {
    */
   mirrorDecision(cardId: number): 'now' | 'later' | null {
     try {
-      if (!this.mirror.enabled()) return null;
       const card = this.adoptBranch(this.ctx.service.getCard(cardId));
       if (!this.isBoardCard(card)) return null;
-      const entry = this.ctx.db.prepare('SELECT status FROM publish_queue WHERE card_id = ? ORDER BY id DESC LIMIT 1').get(cardId) as { status: string } | undefined;
-      if (entry && (entry.status === 'pending' || entry.status === 'publishing')) return 'later';
-      if (entry?.status === 'failed') {
-        this.ctx.service.addComment(cardId, {
-          author: 'system',
-          bodyMd: 'Não enviei ao repositório público: a publicação deste card no Board falhou. Depois que ela passar, o envio sai sozinho.',
-        });
+      const decision = this.workToMirror(card);
+      if (decision && !this.mirror.enabled()) {
+        // Off: say so on the card instead of skipping in silence (card #163).
+        this.ctx.service.addComment(cardId, { author: 'system', bodyMd: MIRROR_OFF_NOTE });
         return null;
       }
-      if (entry?.status === 'published') return 'now';
-      // Merged by hand (no queue entry): the card's branch is in the publish branch.
-      const repo = this.selfRepo();
-      if (repo && card.branch && git(repo, ['merge-base', '--is-ancestor', card.branch, this.ctx.config.publishBranch]).ok) return 'now';
-      return null;
+      return decision;
     } catch (err) {
       this.log(`espelho do card #${cardId}: ${(err as Error).message}`);
       return null;
     }
+  }
+
+  /** Whether a concluded card of the Board has work in the publish branch to send (see mirrorDecision). */
+  private workToMirror(card: Card): 'now' | 'later' | null {
+    const entry = this.ctx.db.prepare('SELECT status FROM publish_queue WHERE card_id = ? ORDER BY id DESC LIMIT 1').get(card.id) as { status: string } | undefined;
+    if (entry && (entry.status === 'pending' || entry.status === 'publishing')) return 'later';
+    if (entry?.status === 'failed') {
+      // With the mirror off there is nothing to promise; the off note is not due either (no work in master yet).
+      if (!this.mirror.enabled()) return null;
+      this.ctx.service.addComment(card.id, {
+        author: 'system',
+        bodyMd: 'Não enviei ao repositório público: a publicação deste card no Board falhou. Depois que ela passar, o envio sai sozinho.',
+      });
+      return null;
+    }
+    if (entry?.status === 'published') return 'now';
+    // Merged by hand (no queue entry): the card's branch is in the publish branch.
+    const repo = this.selfRepo();
+    if (repo && card.branch && git(repo, ['merge-base', '--is-ancestor', card.branch, this.ctx.config.publishBranch]).ok) return 'now';
+    return null;
   }
 
   /** A card of the Board's project or repo (app = claude-board), with or without a branch. */
@@ -714,7 +731,7 @@ export class Publisher {
         author: 'system',
         bodyMd: `Devolvi o card ao Claude para integrar a ${code(conflict.target)} e resolver o conflito. Quando ele entregar de novo, a publicação volta para a fila sozinha.`,
       });
-      service.moveCard(card.id, { status: 'ready', owner: 'claude', reason: 'conflito na publicação' }, 'system');
+      service.moveCard(card.id, { status: 'ready', reason: 'conflito na publicação' }, 'system');
     } catch (err) {
       this.log(`devolução do card #${e.cardId} após conflito falhou: ${(err as Error).message}`);
     }
