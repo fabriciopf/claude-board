@@ -13,19 +13,58 @@ describe('status rules', () => {
     expect(service.moveCard(card.id, { status: 'done' }, 'user').status).toBe('done');
   });
 
-  it('a card owned by the user never enters the queue', () => {
+  it('a card of the user enters the queue and stays with the user (D86)', () => {
     const { service } = makeContext();
     const card = service.createCard({ title: 'Minha tarefa' }, 'user', 'manual');
     expect(card.owner).toBe('user');
+    const moved = service.moveCard(card.id, { status: 'ready' }, 'user');
+    expect(moved.owner).toBe('user');
+    expect(service.nextReadyCard()?.id).toBe(card.id);
+  });
+
+  it('no move, reply, adjustment, comment or retry changes the owner (D86)', () => {
+    const { service } = makeContext();
+    const card = service.createCard({ title: 'Do usuário' }, 'user', 'manual');
+    const owner = (): string => service.getCard(card.id).owner;
+    service.sendToClaude(card.id, 'user');
+    expect(owner()).toBe('user');
+    service.moveCard(card.id, { status: 'running' }, 'system');
+    service.moveCard(card.id, { status: 'waiting_user' }, 'system');
+    service.addComment(card.id, { author: 'claude', bodyMd: 'Qual branch?', kind: 'question' });
+    service.reply(card.id, 'production');
+    expect(owner()).toBe('user');
+    service.moveCard(card.id, { status: 'review' }, 'system');
+    service.requestAdjustments(card.id, 'Mais um teste.');
+    expect(owner()).toBe('user');
+    service.moveCard(card.id, { status: 'review' }, 'system');
+    service.addUserComment(card.id, 'Faltou a borda.');
+    expect(owner()).toBe('user');
+    service.moveCard(card.id, { status: 'waiting_user' }, 'system');
+    service.retry(card.id);
+    expect(owner()).toBe('user');
+    expect(service.getCardDetail(card.id).events.some((e) => e.type === 'owner')).toBe(false);
+  });
+
+  it('only the user changes the owner, by hand, and the change is in the history (D86)', () => {
+    const { service } = makeContext();
+    const mine = service.createCard({ title: 'Meu' }, 'user', 'manual');
+    const claudes = service.createCard({ title: 'Do Claude' }, 'claude', 'mcp');
+    expect(claudes.owner).toBe('claude');
     try {
-      service.moveCard(card.id, { status: 'ready' }, 'user');
+      service.updateCard(mine.id, { owner: 'claude' }, 'claude');
       throw new Error('should have thrown');
     } catch (err) {
-      expect((err as RuleError).code).toBe('owner_is_user');
+      expect((err as RuleError).code).toBe('owner_user_only');
     }
-    const moved = service.moveCard(card.id, { status: 'ready', owner: 'claude' }, 'user');
-    expect(moved.owner).toBe('claude');
-    expect(service.nextReadyCard()?.id).toBe(card.id);
+    expect(() => service.updateCard(mine.id, { owner: 'claude' }, 'system')).toThrow(RuleError);
+    // Repeating the current owner is not a change.
+    expect(service.updateCard(mine.id, { owner: 'user', title: 'Meu, renomeado' }, 'claude').title).toBe('Meu, renomeado');
+    service.moveCard(mine.id, { status: 'ready' }, 'user');
+    const changed = service.updateCard(mine.id, { owner: 'claude' }, 'user');
+    expect(changed.owner).toBe('claude');
+    const events = service.getCardDetail(mine.id).events;
+    expect(events.filter((e) => e.type === 'owner').map((e) => [e.payload.from, e.payload.to, e.author])).toEqual([['user', 'claude', 'user']]);
+    expect(events.some((e) => e.type === 'updated' && (e.payload.fields as string[]).includes('owner'))).toBe(false);
   });
 
   it('nobody but the runner puts a card in running', () => {
@@ -85,9 +124,12 @@ describe('REST API', () => {
     const ctx = makeContext();
     const app = await buildApp(ctx, { serveUi: false });
     const card = (await app.inject({ method: 'POST', url: '/api/cards', payload: { title: 'Meu' } })).json();
-    const res = await app.inject({ method: 'POST', url: `/api/cards/${card.id}/move`, payload: { status: 'ready' } });
-    expect(res.statusCode).toBe(409);
-    expect(res.json().error).toBe('owner_is_user');
+    const res = await app.inject({ method: 'POST', url: `/api/cards/${card.id}/move`, payload: { status: 'running' } });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error).toBe('target_not_allowed');
+    // An owner sent with a move is ignored: the move never changes it (D86).
+    const queued = await app.inject({ method: 'POST', url: `/api/cards/${card.id}/move`, payload: { status: 'ready', owner: 'claude' } });
+    expect(queued.json()).toMatchObject({ status: 'ready', owner: 'user' });
     await app.close();
   });
 });

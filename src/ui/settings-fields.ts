@@ -1,4 +1,4 @@
-import { AUTO_CONCURRENCY, EFFORT_LABELS, EFFORT_LEVELS, MAX_CONCURRENCY, MODEL_OPTIONS } from '../shared/domain';
+import { AUTO_CONCURRENCY, CONCURRENCY_PRESETS, EFFORT_LABELS, EFFORT_LEVELS, MODEL_OPTIONS, UNLIMITED_CONCURRENCY } from '../shared/domain';
 
 export type Config = Record<string, any>;
 
@@ -32,9 +32,10 @@ export const FIELDS: Field[] = [
     tab: 'runs',
     label: 'Execuções simultâneas',
     type: 'select',
-    options: [AUTO_CONCURRENCY, ...Array.from({ length: MAX_CONCURRENCY }, (_, i) => String(i + 1))],
-    optionLabels: { [AUTO_CONCURRENCY]: 'Automático' },
-    hint: 'quantos cards da fila "Pronta" o Claude executa ao mesmo tempo; também vale para as tarefas de um card dividido. Automático: o Board abre quantas couberem para o uso da sessão de 5h acompanhar o tempo da janela, sem estourar o limite',
+    // The same choices as the selector of the header counter (D83); another number from config.json still shows.
+    options: CONCURRENCY_PRESETS,
+    optionLabels: { [AUTO_CONCURRENCY]: 'Automático', [UNLIMITED_CONCURRENCY]: '∞ (sem limite)', '0': '0 (fila parada)' },
+    hint: 'quantos cards da fila "Pronta" o Claude executa ao mesmo tempo; também vale para as tarefas de um card dividido. Automático: o Board abre quantas couberem para o uso da sessão de 5h acompanhar o tempo da janela, sem estourar o limite. 0: nada novo sai da fila. ∞: todo card da fila começa na hora. Também dá para trocar no contador "rodando" do cabeçalho',
   },
   {
     key: 'autoSplit',
@@ -139,6 +140,16 @@ export function dirtyKeys(config: Config | null, draft: Config): string[] {
   if (!config) return [];
   // Inputs hand back strings ("4"), the config holds numbers (4): compare as text.
   return FIELDS.filter((f) => String(draft[f.key] ?? '') !== String(config[f.key] ?? '')).map((f) => f.key);
+}
+
+/**
+ * A value changed outside this screen (the header selector of maxConcurrency, D83): the saved copy follows
+ * it, and the draft too unless the field holds an edit of its own. null = nothing to change.
+ */
+export function followLiveValue(key: string, config: Config, draft: Config, live: string): { config: Config; draft: Config } | null {
+  if (String(config[key] ?? '') === live) return null;
+  const edited = String(draft[key] ?? '') !== String(config[key] ?? '');
+  return { config: { ...config, [key]: live }, draft: edited ? draft : { ...draft, [key]: live } };
 }
 
 export function toPatchValue(f: Field, value: unknown): unknown {

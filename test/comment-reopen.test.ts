@@ -5,16 +5,15 @@ import { makeContext } from './helpers.js';
 
 // Card #32 / D39: a user comment on a card in review or done sends it back to Claude's queue.
 describe('a user comment reopens a delivered card', () => {
-  it('review → ready, with the comment as the next prompt and Claude as owner', () => {
+  it('review → ready, with the comment as the next prompt and the owner unchanged (D86)', () => {
     const { service } = makeContext();
-    const card = service.createCard({ title: 'x', owner: 'claude' }, 'user', 'manual');
+    const card = service.createCard({ title: 'x' }, 'user', 'manual');
     service.moveCard(card.id, { status: 'review' }, 'claude');
-    service.moveCard(card.id, { status: 'review', owner: 'user' }, 'user');
     const { comment, card: after } = service.addUserComment(card.id, '  Faltou o teste de borda.  ');
     expect(comment.kind).toBe('comment');
     expect(comment.author).toBe('user');
     expect(after.status).toBe('ready');
-    expect(after.owner).toBe('claude');
+    expect(after.owner).toBe('user');
     expect(after.nextPrompt).toBe('Faltou o teste de borda.');
     expect(after.nextPromptKind).toBe('comment');
     expect(service.nextReadyCard()?.id).toBe(card.id);

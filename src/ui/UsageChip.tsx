@@ -1,60 +1,83 @@
 import { useEffect, useState } from 'react';
 import type { UsageSnapshot } from '../shared/domain';
+import { USAGE_TICK_MS, usageRows, usageTitle, type UsageRow } from './usage-rows';
 
-function duration(ms: number): string {
-  const min = Math.max(0, Math.round(ms / 60000));
-  const h = Math.floor(min / 60);
-  const m = min % 60;
-  return h ? `${h}h${String(m).padStart(2, '0')}` : `${m} min`;
+function reducedMotion(): boolean {
+  try {
+    return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  } catch {
+    return false;
+  }
 }
 
-const clock = (unixSec: number) => new Date(unixSec * 1000).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+function Row({ row }: { row: UsageRow }) {
+  return (
+    <span className={'usage-row' + (row.tone ? ' ' + row.tone : '')}>
+      {row.label}: <strong>{row.value}</strong>
+      {row.pct !== null && (
+        <span className="usage-bar" aria-hidden="true">
+          <span style={{ width: `${row.pct}%` }} />
+        </span>
+      )}
+      <span className={row.pct === null ? 'muted small' : undefined}>{row.note}</span>
+    </span>
+  );
+}
 
-/** "Sessão 5h: 38% · reset em 1h12", from the last reading the Board got from Claude Code. */
+/**
+ * Second half of the runner pill (D83): "5 horas: 38% ▬ reset em 1h12" and "Semana: 12% ▬ reset em 3d05h",
+ * one at a time, scrolling up every 5 seconds. Every line sits in the same column, so the pill is as wide
+ * as the widest line and nothing else in the header moves when the line changes. Hovering holds the line.
+ */
 export function UsageChip({ usage }: { usage: UsageSnapshot | null }) {
   const [now, setNow] = useState(() => Date.now());
+  const [tick, setTick] = useState({ step: 0, animate: false });
+  const [held, setHeld] = useState(false);
   useEffect(() => {
     const t = window.setInterval(() => setNow(Date.now()), 30000);
     return () => window.clearInterval(t);
   }, []);
 
-  const w = usage?.fiveHour;
-  if (!usage || !w) {
-    return (
-      <span className="counter usage" title="O Board lê o uso do plano quando roda uma execução do Claude Code.">
-        Sessão 5h: <strong>—</strong>
-        <span className="muted small">sem leitura ainda</span>
-      </span>
-    );
-  }
+  const rows = usageRows(usage, now);
+  const n = rows.length;
+  const signature = rows.map((r) => r.key).join('|');
+  useEffect(() => setTick({ step: 0, animate: false }), [signature]);
+  useEffect(() => {
+    if (n < 2 || held) return;
+    const t = window.setInterval(() => {
+      // Without motion, step straight to the next line. With motion, the last step lands on a copy of the
+      // first line (below the others) and snaps back to the top when the scroll ends, so it always goes up.
+      if (reducedMotion()) setTick((s) => ({ step: (s.step + 1) % n, animate: false }));
+      // A hidden tab may skip the transitionend that snaps back: start over from the top.
+      else setTick((s) => (s.step >= n ? { step: 0, animate: false } : { step: s.step + 1, animate: true }));
+    }, USAGE_TICK_MS);
+    return () => window.clearInterval(t);
+  }, [n, held]);
 
-  const age = now - new Date(usage.observedAt).getTime();
-  const resetMs = w.resetsAt * 1000 - now;
-  const read = `lido há ${duration(age)}`;
-  const weekly = usage.sevenDay ? ` Semana: ${Math.round(usage.sevenDay.utilization * 100)}%, renova ${new Date(usage.sevenDay.resetsAt * 1000).toLocaleString('pt-BR', { weekday: 'short', hour: '2-digit', minute: '2-digit' })}.` : '';
-
-  if (resetMs <= 0) {
-    return (
-      <span className="counter usage" title={`A janela de 5h renovou às ${clock(w.resetsAt)}. O uso atual aparece na próxima execução.${weekly}`}>
-        Sessão 5h: <strong>janela renovada</strong>
-        <span className="muted small">às {clock(w.resetsAt)}</span>
-      </span>
-    );
-  }
-
-  const pct = Math.round(w.utilization * 100);
-  const tone = pct >= 95 ? ' danger' : pct >= 80 ? ' attention' : '';
+  const track = n > 1 ? [...rows, rows[0]] : rows;
+  const step = Math.min(tick.step, track.length - 1);
   return (
     <span
-      className={'counter usage' + tone}
-      title={`Uso da janela de 5h do seu plano, na última execução do Board (${read}). Renova às ${clock(w.resetsAt)}.${weekly}`}
+      className="usage-part"
+      title={usageTitle(usage, now)}
+      onMouseEnter={() => setHeld(true)}
+      onMouseLeave={() => setHeld(false)}
     >
-      Sessão 5h: <strong>{pct}%</strong>
-      <span className="usage-bar" aria-hidden="true">
-        <span style={{ width: `${Math.min(100, pct)}%` }} />
+      <span className="usage-viewport">
+        <span
+          className={'usage-track' + (tick.animate ? ' animate' : '')}
+          style={{ transform: `translateY(-${step * 1.5}em)` }}
+          onTransitionEnd={() => {
+            if (tick.step >= n) setTick({ step: 0, animate: false });
+          }}
+        >
+          {track.map((r, i) => (
+            <span key={r.key + '-' + i} className="usage-slot" aria-hidden={n > 1 && i === n ? true : undefined}>
+              <Row row={r} />
+            </span>
+          ))}
+        </span>
       </span>
-      reset em <strong>{duration(resetMs)}</strong>
-      <span className="muted small">· {read}</span>
     </span>
   );
 }
