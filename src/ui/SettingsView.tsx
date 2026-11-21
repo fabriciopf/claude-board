@@ -15,6 +15,10 @@ interface DoctorCheck {
   detail: string;
 }
 
+/** Install commands of Antigravity CLI (antigravity.google/docs, getting started). */
+const AGY_INSTALL_WINDOWS = 'irm https://antigravity.google/cli/install.ps1 | iex';
+const AGY_INSTALL_UNIX = 'curl -fsSL https://antigravity.google/cli/install.sh | bash';
+
 const TAB_STORE_KEY = 'cb:settings-tab';
 
 function readTab(): SettingsTab {
@@ -341,6 +345,9 @@ export function SettingsView({
                   </ActionButton>
                 </div>
               </div>
+
+              {/* jiraBaseUrl lives on this tab and was never drawn (found by test/settings-tabs-render.test.ts, card #159). */}
+              <div className="panel">{configFields('organization')}</div>
             </>
           )}
 
@@ -348,6 +355,42 @@ export function SettingsView({
             <>
               <div className="panel">{configFields('git')}</div>
               <SelfUpdatePanel notify={notify} />
+            </>
+          )}
+
+          {tab === 'antigravity' && (
+            <>
+              <div className="panel">
+                <h3>{t('settings.antigravity.title')}</h3>
+                {configFields('antigravity')}
+              </div>
+              <div className="panel">
+                <h3>{t('settings.antigravity.howTitle')}</h3>
+                <ol className="small">
+                  <li>
+                    {t('settings.antigravity.install')}
+                    <div className="code-line">
+                      <code>{AGY_INSTALL_WINDOWS}</code>
+                    </div>
+                    <div className="code-line">
+                      <code>{AGY_INSTALL_UNIX}</code>
+                    </div>
+                  </li>
+                  <li>
+                    {t('settings.antigravity.signIn')} <code>agy</code>
+                  </li>
+                  <li>{t('settings.antigravity.pick')}</li>
+                </ol>
+                <p className="small muted">{t('settings.antigravity.onlyClaude')}</p>
+                {/* The doctor's line about agy (D93), the same one the Claude Code tab lists with the others. */}
+                {doctor
+                  ?.filter((c) => /antigravity/i.test(c.name))
+                  .map((c) => (
+                    <div key={c.name} className="small" style={{ padding: '2px 0' }}>
+                      <span className={'pill ' + (c.ok ? 'ok' : c.required ? 'danger' : 'warn')}>{c.ok ? t('settings.doctor.ok') : c.required ? t('settings.doctor.missing') : t('settings.doctor.warning')}</span> <strong>{c.name}</strong>: {c.detail}
+                    </div>
+                  ))}
+              </div>
             </>
           )}
 

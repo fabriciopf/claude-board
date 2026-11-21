@@ -79,7 +79,7 @@ function eventText(e: BoardEvent): string | null {
     case 'answered':
       return null; // the answer itself is shown as a comment
     case 'viewed':
-      return null; // only clears the "not seen yet" mark of a card in review (D84)
+      return null; // only clears the "not seen yet" mark (D84, D95)
     case 'reopened_by_comment':
       return null; // the comment and the move to the queue are shown on their own
     case 'publish_conflict_returned':
