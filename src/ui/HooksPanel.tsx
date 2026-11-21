@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { ActionButton } from './ActionButton';
 import { api } from './api';
+import { t } from './i18n';
 
 interface HooksStatus {
   installed: boolean;
@@ -38,27 +39,24 @@ export function HooksPanel({ notify }: { notify: (msg: string, error?: boolean) 
 
   return (
     <div className="panel">
-      <h3>Hooks do Claude Code</h3>
-      <p className="small muted">
-        Com os hooks, as sessões que você abre no VS Code aparecem no quadro sem chamar LLM. Se o Board estiver desligado, eles saem em menos de 1 s sem
-        atrapalhar nada.
-      </p>
+      <h3>{t('settings.hooks.title')}</h3>
+      <p className="small muted">{t('settings.hooks.intro')}</p>
       {error && <div className="muted small">{error}</div>}
       {status && (
         <>
           <div className="small">
-            <span className={'pill ' + (status.installed ? 'ok' : 'warn')}>{status.installed ? 'Instalados' : 'Não instalados'}</span> em{' '}
+            <span className={'pill ' + (status.installed ? 'ok' : 'warn')}>{status.installed ? t('settings.hooks.installed') : t('settings.hooks.notInstalled')}</span> {t('settings.hooks.in')}{' '}
             <code>{status.settingsPath}</code>
             {status.installed && ` (${status.events.join(', ')})`}
           </div>
           <div className="actions">
             {status.installed ? (
-              <ActionButton className="btn" busyLabel="Removendo…" onAction={() => act('/api/hooks/uninstall', 'Hooks removidos')}>
-                Remover hooks
+              <ActionButton className="btn" busyLabel={t('settings.hooks.removing')} onAction={() => act('/api/hooks/uninstall', t('settings.hooks.removed'))}>
+                {t('settings.hooks.remove')}
               </ActionButton>
             ) : (
-              <ActionButton className="btn primary" busyLabel="Instalando…" onAction={() => act('/api/hooks/install', 'Hooks instalados (backup feito)')}>
-                Instalar hooks
+              <ActionButton className="btn primary" busyLabel={t('settings.hooks.installing')} onAction={() => act('/api/hooks/install', t('settings.hooks.installedToast'))}>
+                {t('settings.hooks.install')}
               </ActionButton>
             )}
           </div>

@@ -14,11 +14,12 @@ import {
 } from '@dnd-kit/core';
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { NEWEST_FIRST_STATUSES, STATUS_DESCRIPTIONS, isColumnShown, STATUS_LABELS, STATUSES, type App, type CardSummary, type Label, type Repository, type Status } from '../shared/domain';
+import { NEWEST_FIRST_STATUSES, isColumnShown, STATUSES, type App, type CardSummary, type Label, type Repository, type Status } from '../shared/domain';
 import { ActionButton, useBusy } from './ActionButton';
 import { CardTile } from './CardTile';
-import { columnCountText, columnNeedsAttention } from './board-filters';
+import { collapsedStripLabel, columnCountText, columnNeedsAttention } from './board-filters';
 import { DEFAULT_SORT, compareCards, type CardSort } from './card-sort';
+import { statusDescription, statusLabel, t } from './i18n';
 
 /** Lists nobody drops a card into by hand: the runner and the importer own them. */
 const NO_DROP: Status[] = ['running', 'triage'];
@@ -149,13 +150,14 @@ function Column(props: {
   total?: number;
 }) {
   const count = columnCountText(props.ids.length, props.total);
+  const label = statusLabel(props.status);
   const attention = columnNeedsAttention(props.status, props.ids.length, props.total);
   const title = (
     <span className={'column-title' + (attention ? ' attention' : '')}>
-      <span className="column-title-text">{STATUS_LABELS[props.status]}</span>
+      <span className="column-title-text">{label}</span>
     </span>
   );
-  const countTitle = props.total === undefined ? undefined : `${props.ids.length} de ${props.total} cards com a busca e os filtros atuais`;
+  const countTitle = props.total === undefined ? undefined : t('board.column.countTitle', { shown: props.ids.length, total: props.total });
   const { setNodeRef } = useDroppable({ id: colId(props.status), disabled: NO_DROP.includes(props.status) });
   const [draft, setDraft] = useState('');
   const [showInfo, setShowInfo] = useState(false);
@@ -166,12 +168,12 @@ function Column(props: {
   const side = COLLAPSIBLE[props.status]?.side;
   if (props.collapsed) {
     return (
-      <section className={'column collapsed' + (side === 'right' ? ' collapsed-right' : '')} aria-label={STATUS_LABELS[props.status]}>
+      <section className={'column collapsed' + (side === 'right' ? ' collapsed-right' : '')} aria-label={label}>
         <button
           className="column-expand"
           onClick={props.toggleCollapsed}
-          title={`Expandir a ${STATUS_LABELS[props.status]}`}
-          aria-label={`Expandir a ${STATUS_LABELS[props.status]}`}
+          title={t('board.column.expand', { status: label })}
+          aria-label={collapsedStripLabel(label, props.ids.length, props.total)}
           aria-expanded={false}
         >
           <span className="column-expand-arrow" aria-hidden="true">
@@ -192,13 +194,13 @@ function Column(props: {
       if (await props.onQuickAdd(title)) setDraft('');
     });
   return (
-    <section className={'column' + (props.isOver ? ' drop-target' : '')} aria-label={STATUS_LABELS[props.status]}>
+    <section className={'column' + (props.isOver ? ' drop-target' : '')} aria-label={label}>
       <div className="column-head">
         {title}
         <button
           className="info-btn"
-          title={STATUS_DESCRIPTIONS[props.status]}
-          aria-label={`Para que serve "${STATUS_LABELS[props.status]}"`}
+          title={statusDescription(props.status)}
+          aria-label={t('board.column.info', { status: label })}
           aria-expanded={showInfo}
           onClick={() => setShowInfo(!showInfo)}
         >
@@ -209,14 +211,14 @@ function Column(props: {
           <button
             className="btn link small"
             onClick={props.toggleCollapsed}
-            title={`Recolher a ${STATUS_LABELS[props.status]}`}
-            aria-label={`Recolher a ${STATUS_LABELS[props.status]}`}
+            title={t('board.column.collapse', { status: label })}
+            aria-label={t('board.column.collapse', { status: label })}
           >
             {side === 'right' ? '›' : '‹'}
           </button>
         )}
       </div>
-      {showInfo && <p className="column-info">{STATUS_DESCRIPTIONS[props.status]}</p>}
+      {showInfo && <p className="column-info">{statusDescription(props.status)}</p>}
       <div className="column-body" ref={setNodeRef}>
         <SortableContext items={props.ids} strategy={verticalListSortingStrategy}>
           {props.ids.map((id) => {
@@ -245,7 +247,7 @@ function Column(props: {
                 className="input"
                 autoFocus
                 rows={2}
-                placeholder="Título do card (Enter salva, Esc cancela)"
+                placeholder={t('board.column.quickAddPlaceholder')}
                 value={draft}
                 readOnly={adding}
                 aria-busy={adding || undefined}
@@ -260,17 +262,17 @@ function Column(props: {
                 }}
               />
               <div className="actions" style={{ marginTop: 6 }}>
-                <ActionButton className="btn primary small" busy={adding} busyLabel="Adicionando…" onAction={submit}>
-                  Adicionar
+                <ActionButton className="btn primary small" busy={adding} busyLabel={t('board.column.adding')} onAction={submit}>
+                  {t('board.column.add')}
                 </ActionButton>
                 <button className="btn small" disabled={adding} onClick={() => props.setQuickAdd(false)}>
-                  Cancelar
+                  {t('board.column.cancel')}
                 </button>
               </div>
             </div>
           ) : (
             <button className="btn link" onClick={() => props.setQuickAdd(true)}>
-              + Adicionar card
+              {t('board.column.addCard')}
             </button>
           )}
         </div>

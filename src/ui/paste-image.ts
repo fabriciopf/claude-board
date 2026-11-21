@@ -1,5 +1,6 @@
 import { useState, type ClipboardEvent, type DragEvent } from 'react';
 import { imageMarkdown, insertSnippet } from '../shared/images';
+import { t } from './i18n';
 
 /** The first image file in a paste or a drop, if any. */
 export function imageFile(dt: DataTransfer | null): File | null {
@@ -22,7 +23,7 @@ export async function uploadImage(file: Blob): Promise<string> {
     body: file,
   });
   const data = await res.json().catch(() => null);
-  if (!res.ok) throw new Error(data?.message ?? `Erro ${res.status} ao enviar a imagem`);
+  if (!res.ok) throw new Error(data?.message ?? t('card.uploadError', { status: res.status }));
   return data.url as string;
 }
 

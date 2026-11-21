@@ -1,9 +1,11 @@
 import type { UsageSnapshot, UsageWindow } from '../shared/domain';
+import { locale, t } from './i18n';
 
 /** One line of the usage ticker in the runner pill: "5 horas: 38% ▬ reset em 1h12" or "Semana: …" (D83). */
 export interface UsageRow {
   key: 'fiveHour' | 'sevenDay';
-  label: '5 horas' | 'Semana';
+  /** "5 horas" or "Semana", in the UI language. */
+  label: string;
   /** Bold value after the label: "38%", "renovada" or "—". */
   value: string;
   /** 0..100 for the bar; null = no bar (no reading, or the window already renewed). */
@@ -26,17 +28,17 @@ export function duration(ms: number): string {
   return h ? `${h}h${String(m).padStart(2, '0')}` : `${m} min`;
 }
 
-const clock = (unixSec: number) => new Date(unixSec * 1000).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+const clock = (unixSec: number) => new Date(unixSec * 1000).toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' });
 const dayClock = (unixSec: number) =>
-  new Date(unixSec * 1000).toLocaleString('pt-BR', { weekday: 'short', hour: '2-digit', minute: '2-digit' });
+  new Date(unixSec * 1000).toLocaleString(locale(), { weekday: 'short', hour: '2-digit', minute: '2-digit' });
 
 function row(key: UsageRow['key'], w: UsageWindow, now: number): UsageRow {
-  const label = key === 'fiveHour' ? '5 horas' : 'Semana';
+  const label = key === 'fiveHour' ? t('settings.usage.fiveHour') : t('settings.usage.week');
   const at = key === 'fiveHour' ? clock(w.resetsAt) : dayClock(w.resetsAt);
-  if (w.resetsAt * 1000 <= now) return { key, label, value: 'renovada', pct: null, note: `às ${at}`, tone: '' };
+  if (w.resetsAt * 1000 <= now) return { key, label, value: t('settings.usage.renewed'), pct: null, note: t('settings.usage.at', { time: at }), tone: '' };
   const pct = Math.round(w.utilization * 100);
   const tone = pct >= 95 ? 'danger' : pct >= 80 ? 'attention' : '';
-  return { key, label, value: `${pct}%`, pct: Math.min(100, Math.max(0, pct)), note: `reset em ${duration(w.resetsAt * 1000 - now)}`, tone };
+  return { key, label, value: `${pct}%`, pct: Math.min(100, Math.max(0, pct)), note: t('settings.usage.resetIn', { d: duration(w.resetsAt * 1000 - now) }), tone };
 }
 
 /**
@@ -47,20 +49,20 @@ export function usageRows(usage: UsageSnapshot | null, now: number): UsageRow[] 
   const rows: UsageRow[] = [];
   if (usage?.fiveHour) rows.push(row('fiveHour', usage.fiveHour, now));
   if (usage?.sevenDay) rows.push(row('sevenDay', usage.sevenDay, now));
-  if (rows.length === 0) rows.push({ key: 'fiveHour', label: '5 horas', value: '—', pct: null, note: 'sem leitura ainda', tone: '' });
+  if (rows.length === 0) rows.push({ key: 'fiveHour', label: t('settings.usage.fiveHour'), value: '—', pct: null, note: t('settings.usage.noReading'), tone: '' });
   return rows;
 }
 
 /** Tooltip of the ticker: both windows at once, so hovering never depends on which line is showing. */
 export function usageTitle(usage: UsageSnapshot | null, now: number): string {
-  if (!usage || (!usage.fiveHour && !usage.sevenDay)) return 'O Board lê o uso do plano quando roda uma execução do Claude Code.';
-  const read = `lido há ${duration(now - new Date(usage.observedAt).getTime())}`;
-  const parts = [`Uso do seu plano na última execução do Board (${read}).`];
+  if (!usage || (!usage.fiveHour && !usage.sevenDay)) return t('settings.usage.titleNone');
+  const read = t('settings.usage.titleRead', { d: duration(now - new Date(usage.observedAt).getTime()) });
+  const parts = [t('settings.usage.titleHead', { read })];
   const describe = (name: string, w: UsageWindow, at: string) =>
     w.resetsAt * 1000 <= now
-      ? `${name}: renovada às ${at}; o uso atual aparece na próxima execução.`
-      : `${name}: ${Math.round(w.utilization * 100)}%, renova ${at}.`;
-  if (usage.fiveHour) parts.push(describe('5 horas', usage.fiveHour, `às ${clock(usage.fiveHour.resetsAt)}`));
-  if (usage.sevenDay) parts.push(describe('Semana', usage.sevenDay, dayClock(usage.sevenDay.resetsAt)));
+      ? t('settings.usage.titleRenewed', { name, at })
+      : t('settings.usage.titlePct', { name, pct: Math.round(w.utilization * 100), at });
+  if (usage.fiveHour) parts.push(describe(t('settings.usage.fiveHour'), usage.fiveHour, t('settings.usage.at', { time: clock(usage.fiveHour.resetsAt) })));
+  if (usage.sevenDay) parts.push(describe(t('settings.usage.week'), usage.sevenDay, dayClock(usage.sevenDay.resetsAt)));
   return parts.join(' ');
 }
