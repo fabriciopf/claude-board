@@ -25,6 +25,8 @@ describe('settings tabs', () => {
         'prPolicy',
         'protectedBranches',
         'recentCommentsInPrompt',
+        'selfUpdate',
+        'selfUpdateSource',
         'transcriptRetentionDays',
         'userProfile',
         'workspaceDir',

@@ -55,6 +55,7 @@ export async function registerApi(app: FastifyInstance, ctx: AppContext): Promis
       usage: ctx.usage?.get() ?? null,
       agenda: ctx.agenda?.get() ?? null,
       publish: ctx.publisher?.state() ?? null,
+      selfUpdate: ctx.selfUpdate?.state() ?? null,
     };
   });
 
@@ -75,6 +76,24 @@ export async function registerApi(app: FastifyInstance, ctx: AppContext): Promis
   app.post<{ Params: Params }>('/api/publish/:id/retry', async (req) => {
     publisher().retry(num(req.params.id));
     return publisher().state();
+  });
+
+  // ---------- update of the Board from its git remote (D89) ----------
+
+  const selfUpdate = () => {
+    if (!ctx.selfUpdate) throw new RuleError('self_update_off', 'A atualização do Board não está ativa neste processo.', 409);
+    return ctx.selfUpdate;
+  };
+
+  app.get('/api/self-update', async () => selfUpdate().state());
+
+  /** "Verificar agora": fetches the remote and answers with what is new. */
+  app.post('/api/self-update/check', async () => selfUpdate().check());
+
+  /** "Atualizar": starts in the background; the strip follows the phases. */
+  app.post('/api/self-update/apply', async () => {
+    selfUpdate().begin();
+    return selfUpdate().state();
   });
 
   app.get('/api/runner', async () => runnerState(ctx.db, isPaused(ctx), ctx.runner?.concurrency?.()));
@@ -283,12 +302,18 @@ export async function registerApi(app: FastifyInstance, ctx: AppContext): Promis
 
   app.get('/api/config', async () => ctx.config);
   app.patch('/api/config', async (req) => {
+    const before = ctx.config;
     try {
       // The port the server listens on is fixed at start; keep the live value.
       ctx.config = { ...saveConfig(ctx.config, (req.body ?? {}) as Body), port: ctx.config.port, host: ctx.config.host };
     } catch (err) {
       throw new RuleError('invalid_config', (err as Error).message, 400);
     }
+    // Turning the update on, or pointing it at another branch, checks right away instead of in hours (D89).
+    const c = ctx.config;
+    const updateChanged = c.selfUpdate !== before.selfUpdate || c.selfUpdateSource !== before.selfUpdateSource || c.mirrorRepoPath !== before.mirrorRepoPath;
+    if (updateChanged && c.selfUpdate !== 'off') void ctx.selfUpdate?.check().catch(() => undefined);
+    else if (updateChanged) ctx.bus.publish({ type: 'self-update.changed' });
     ctx.runner?.reschedule?.();
     ctx.runner?.nudge();
     ctx.bus.publish({ type: 'runner.changed' });

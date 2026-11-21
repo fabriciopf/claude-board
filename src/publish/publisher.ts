@@ -392,7 +392,8 @@ export class Publisher {
     return this.ctx.service.getSetting('publishHold', false);
   }
 
-  private setHold(on: boolean): void {
+  /** Holds the runner (no new run starts) during an apply; also used by the self-update (D89). */
+  setHold(on: boolean): void {
     this.ctx.service.setSetting('publishHold', on);
     this.ctx.bus.publish({ type: 'runner.changed' });
     if (!on) this.ctx.runner?.nudge();
@@ -431,6 +432,8 @@ export class Publisher {
   /** Starts a batch when idle; a batch in progress picks the queue up again when it ends. */
   kick(): void {
     if (this.busy || !this.ctx.config.autoPublish) return;
+    // One apply at a time: the self-update (D89) kicks the queue again when it ends.
+    if (this.ctx.selfUpdate?.isBusy()) return;
     if (!this.eligible().length) return;
     const p = this.publishBatch()
       .catch((err) => this.log(`erro interno: ${(err as Error).stack ?? err}`))
@@ -445,6 +448,11 @@ export class Publisher {
         }
       });
     this.busy = p;
+  }
+
+  /** A batch is under way. */
+  isBusy(): boolean {
+    return !!this.busy;
   }
 
   /** Waits for the batch in progress (tests). */
@@ -671,7 +679,7 @@ export class Publisher {
    * Runs with a process survive the restart (D45): the new server follows them again. Only a run
    * still being prepared (registered, process not started yet) is waited for, a few seconds at most.
    */
-  private async waitIdleRunner(): Promise<void> {
+  async waitIdleRunner(): Promise<void> {
     for (;;) {
       const starting = (this.ctx.db.prepare("SELECT COUNT(*) AS n FROM executions WHERE status = 'running' AND pid IS NULL").get() as { n: number }).n;
       if (!starting) return;
@@ -681,7 +689,7 @@ export class Publisher {
   }
 
   /** Copy of the database before the server restart (the new code may migrate it). */
-  private backupDb(): string {
+  backupDb(): string {
     const file = path.join(paths.backups(), `board-before-publish-${nowIso().replace(/[:.]/g, '-')}.db`);
     fs.mkdirSync(paths.backups(), { recursive: true });
     this.ctx.db.exec(`VACUUM INTO '${file.replace(/'/g, "''")}'`);
@@ -799,7 +807,7 @@ export class Publisher {
     return `Card concluído: worktree \`${wt}\` removida; a branch \`${card.branch}\` ficou.${merged ? '' : ` Ela ainda tem commits fora da \`${target}\`.`}`;
   }
 
-  private dropTmp(repo: string, tmp: string): void {
+  dropTmp(repo: string, tmp: string): void {
     unlinkJunction(path.join(tmp, 'node_modules'));
     const r = git(repo, ['worktree', 'remove', '--force', tmp]);
     if (!r.ok) {
@@ -823,11 +831,11 @@ export class Publisher {
    * The server cannot restart itself: a detached process waits for this one to exit and starts the
    * new server (lesson of card #32: anything in the server's tree dies with it).
    */
-  private restartMode(): 'window' | 'background' {
+  restartMode(): 'window' | 'background' {
     return this.ctx.config.publishRestartMode || (process.platform === 'win32' ? 'window' : 'background');
   }
 
-  private async restartDetached(repo: string): Promise<void> {
+  async restartDetached(repo: string): Promise<void> {
     const bin = path.join(repo, 'bin', 'claude-board.mjs');
     const startArgs = this.ctx.startArgs ?? ['start'];
     const mode = this.restartMode();
