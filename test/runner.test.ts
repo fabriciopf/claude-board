@@ -341,12 +341,44 @@ describe('runner with the fake claude', () => {
     expect(ok.json().maxConcurrency).toBe(20);
     expect(ctx.config.maxConcurrency).toBe(20);
     expect(JSON.parse(fs.readFileSync(path.join(ctx.home, 'config.json'), 'utf8')).maxConcurrency).toBe(20);
-    for (const bad of [21, 0, 2.5]) {
+    for (const bad of [21, -1, 2.5]) {
       const r = await patch(bad);
       expect(r.statusCode, String(bad)).toBe(400);
-      expect(r.json().message).toMatch(/1 a 20/);
+      expect(r.json().message).toMatch(/0 a 20/);
     }
     expect(ctx.config.maxConcurrency).toBe(20);
+  });
+
+  it('(m2) the header selector saves 0 and ∞ like any other choice (D83)', async () => {
+    const patch = (maxConcurrency: unknown) => app.inject({ method: 'PATCH', url: '/api/config', payload: { maxConcurrency } });
+    for (const [sent, saved] of [['0', 0], ['unlimited', 'unlimited'], ['∞', 'unlimited'], ['4', 4], ['auto', 'auto']] as const) {
+      const r = await patch(sent);
+      expect(r.statusCode, sent).toBe(200);
+      expect(ctx.config.maxConcurrency, sent).toBe(saved);
+    }
+    const state = await app.inject({ method: 'GET', url: '/api/runner' });
+    expect(state.json().concurrency.mode).toBe('auto');
+    ctx.config.maxConcurrency = 1;
+  });
+
+  it('(m3) at 0 the queue does not move, and at ∞ every ready card starts at once (D83)', async () => {
+    ctx.config.maxConcurrency = 0;
+    expect(runner.concurrency()).toEqual({ mode: 'fixed', limit: 0, reason: '' });
+    const cards = Array.from({ length: 5 }, (_, i) => queue('Sem teto ' + (i + 1), 'Trava. [fake:hang]'));
+    const status = () => cards.map((c) => ctx.service.getCard(c.id).status);
+    expect(runner.tick()).toBe(0);
+    expect(status()).toEqual(Array(5).fill('ready'));
+
+    ctx.config.maxConcurrency = 'unlimited';
+    expect(runner.concurrency()).toEqual({ mode: 'unlimited', limit: null, reason: '' });
+    expect(runner.tick()).toBe(5);
+    expect(status()).toEqual(Array(5).fill('running'));
+
+    runner.setPaused(true);
+    for (const c of cards) await runner.stop(c.id);
+    await runner.drain();
+    runner.setPaused(false);
+    ctx.config.maxConcurrency = 1;
   });
 
   it('(n) runs as many ready cards at once as maxConcurrency allows; the next one waits for a free slot', async () => {

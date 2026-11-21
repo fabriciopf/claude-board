@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { ActionButton } from './ActionButton';
 import { api } from './api';
 import type { PublishEntry, PublishState } from '../shared/domain';
 
@@ -10,7 +11,20 @@ const STATUS_TEXT: Record<PublishEntry['status'], string> = {
 };
 
 /** "Publicação pendente (N)" in the header: the Board's own delivered branches waiting to go live (D42). */
-export function PublishChip({ publish, running, onOpen, notify }: { publish: PublishState | null; running: number; onOpen: (cardId: number) => void; notify: (msg: string, error?: boolean) => void }) {
+export function PublishChip({
+  publish,
+  running,
+  onOpen,
+  notify,
+  reload,
+}: {
+  publish: PublishState | null;
+  running: number;
+  onOpen: (cardId: number) => void;
+  notify: (msg: string, error?: boolean) => void;
+  /** Reloads the board, so the button stays busy until the list shows the new state (card #165). */
+  reload: () => Promise<void>;
+}) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -27,9 +41,11 @@ export function PublishChip({ publish, running, onOpen, notify }: { publish: Pub
   const failed = publish.entries.filter((e) => e.status === 'failed').length;
   const label = busy ? 'Publicando o Board' : publish.pending ? `Publicação pendente (${publish.pending})` : `Publicação falhou (${failed})`;
 
-  const act = async (fn: () => Promise<unknown>) => {
+  const act = async (fn: () => Promise<unknown>, ok: string) => {
     try {
       await fn();
+      notify(ok);
+      await reload();
     } catch (err) {
       notify((err as Error).message, true);
     }
@@ -62,9 +78,9 @@ export function PublishChip({ publish, running, onOpen, notify }: { publish: Pub
                 {e.status === 'failed' && (
                   <>
                     {e.errorMd && <pre className="publish-error">{e.errorMd}</pre>}
-                    <button className="btn small" onClick={() => void act(() => api.post(`/api/publish/${e.id}/retry`))}>
+                    <ActionButton className="btn small" busyLabel="Recolocando na fila…" onAction={() => act(() => api.post(`/api/publish/${e.id}/retry`), 'Publicação de volta na fila')}>
                       Tentar de novo
-                    </button>
+                    </ActionButton>
                   </>
                 )}
               </li>
@@ -72,9 +88,9 @@ export function PublishChip({ publish, running, onOpen, notify }: { publish: Pub
           </ul>
           {(publish.pending > 0 || publish.phase === 'waiting') && (
             <div className="publish-now">
-              <button className="btn small primary" onClick={() => void act(() => api.post('/api/publish/now'))}>
-                Publicar agora
-              </button>
+              <ActionButton className="btn small primary" disabled={busy} busyLabel="Iniciando…" onAction={() => act(() => api.post('/api/publish/now'), 'Publicação iniciada')}>
+                {busy ? 'Publicando…' : 'Publicar agora'}
+              </ActionButton>
               <span className="muted small">
                 {running > 0
                   ? `${running === 1 ? 'A execução em curso continua' : `As ${running} execuções em curso continuam`} durante o reinício.`

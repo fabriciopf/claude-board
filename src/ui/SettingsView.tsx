@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import type { App, Label, Repository } from '../shared/domain';
+import { ActionButton, ActionGroup } from './ActionButton';
 import { api } from './api';
 import { AppsPanel } from './AppsPanel';
 import { HooksPanel } from './HooksPanel';
-import { FIELDS, SETTINGS_TABS, dirtyKeys, toPatchValue, type Config, type Field, type SettingsTab } from './settings-fields';
+import { FIELDS, SETTINGS_TABS, dirtyKeys, followLiveValue, toPatchValue, type Config, type Field, type SettingsTab } from './settings-fields';
 
 interface DoctorCheck {
   name: string;
@@ -47,7 +48,7 @@ function FieldInput({ f, draft, setDraft }: { f: Field; draft: Config; setDraft:
     return (
       <select id={id} className="input" value={draft[f.key] ?? ''} onChange={(e) => set(e.target.value)}>
         {/* A value typed into config.json by hand (an alias like "opus") still shows. */}
-        {[...f.options!, ...(draft[f.key] && !f.options!.includes(draft[f.key]) ? [draft[f.key] as string] : [])].map((o) => (
+        {[...f.options!, ...(draft[f.key] && !f.options!.includes(String(draft[f.key])) ? [String(draft[f.key])] : [])].map((o) => (
           <option key={o} value={o}>
             {f.optionLabels?.[o] ?? (o || 'herdar do Claude Code')}
           </option>
@@ -87,7 +88,7 @@ function ConfigFields({
   draft: Config;
   setDraft: (d: Config) => void;
   dirty: string[];
-  onSave: () => void;
+  onSave: () => Promise<void>;
   onDiscard: () => void;
 }) {
   if (!config) return <div className="muted">Carregando…</div>;
@@ -113,15 +114,16 @@ function ConfigFields({
           {f.hint && <div className="muted small">{f.hint}</div>}
         </div>
       ))}
+      <ActionGroup>
       <div className="actions settings-save">
-        <button className="btn primary" disabled={dirty.length === 0} onClick={onSave}>
+        <ActionButton className="btn primary" disabled={dirty.length === 0} busyLabel="Salvando…" onAction={onSave}>
           Salvar
-        </button>
+        </ActionButton>
         {dirty.length > 0 && (
           <>
-            <button className="btn" onClick={onDiscard}>
+            <ActionButton className="btn" onAction={onDiscard}>
               Descartar
-            </button>
+            </ActionButton>
             <span className="muted small">
               {dirty.length === 1 ? '1 alteração não salva' : `${dirty.length} alterações não salvas`}
               {elsewhere > 0 && ` (${elsewhere} em outra aba)`}
@@ -129,6 +131,7 @@ function ConfigFields({
           </>
         )}
       </div>
+      </ActionGroup>
     </>
   );
 }
@@ -138,11 +141,14 @@ export function SettingsView({
   labels,
   repositories = [],
   notify,
+  liveConcurrency,
 }: {
   apps: App[];
   labels: Label[];
   repositories?: Repository[];
   notify: (msg: string, error?: boolean) => void;
+  /** maxConcurrency as the runner has it now: the header selector may change it while this screen is open (D83). */
+  liveConcurrency?: string;
 }) {
   const [tab, setTab] = useState<SettingsTab>(readTab);
   const [config, setConfig] = useState<Config | null>(null);
@@ -161,6 +167,16 @@ export function SettingsView({
   }, []);
 
   useEffect(() => writeTab(tab), [tab]);
+
+  useEffect(() => {
+    if (!config || liveConcurrency === undefined) return;
+    const next = followLiveValue('maxConcurrency', config, draft, liveConcurrency);
+    if (next) {
+      setConfig(next.config);
+      setDraft(next.draft);
+    }
+    // Only a change of the live value (or the first load) matters; the draft is read, not watched.
+  }, [liveConcurrency, config === null]);
 
   const dirty = dirtyKeys(config, draft);
 
@@ -197,7 +213,7 @@ export function SettingsView({
   const mcpStdio = 'claude mcp add --scope user claude-board -- claude-board mcp';
 
   const configFields = (t: SettingsTab) => (
-    <ConfigFields tab={t} config={config} draft={draft} setDraft={setDraft} dirty={dirty} onSave={() => void save()} onDiscard={() => config && setDraft(config)} />
+    <ConfigFields tab={t} config={config} draft={draft} setDraft={setDraft} dirty={dirty} onSave={save} onDiscard={() => config && setDraft(config)} />
   );
 
   return (
@@ -250,32 +266,39 @@ export function SettingsView({
                   {labels.map((l) => (
                     <span key={l.id} className="label-chip" style={{ background: l.color }}>
                       {l.name}
-                      <button
+                      <ActionButton
                         className="btn link small"
                         style={{ color: '#fff' }}
                         aria-label={'Apagar ' + l.name}
-                        onClick={() => window.confirm(`Apagar a label "${l.name}"?`) && void api.del(`/api/labels/${l.id}`)}
+                        onAction={() =>
+                          window.confirm(`Apagar a label "${l.name}"?`) &&
+                          api.del(`/api/labels/${l.id}`).then(
+                            () => notify(`Label "${l.name}" apagada`),
+                            (err) => notify(err.message, true),
+                          )
+                        }
                       >
                         ✕
-                      </button>
+                      </ActionButton>
                     </span>
                   ))}
                 </div>
                 <div className="actions">
                   <input type="color" value={newLabel.color} aria-label="Cor da nova label" onChange={(e) => setNewLabel({ ...newLabel, color: e.target.value })} />
                   <input className="input" placeholder="Nova label" value={newLabel.name} onChange={(e) => setNewLabel({ ...newLabel, name: e.target.value })} />
-                  <button
+                  <ActionButton
                     className="btn"
                     disabled={!newLabel.name.trim()}
-                    onClick={() =>
-                      void api
+                    busyLabel="Criando…"
+                    onAction={() =>
+                      api
                         .post('/api/labels', newLabel)
                         .then(() => setNewLabel({ name: '', color: '#64748b' }))
                         .catch((err) => notify(err.message, true))
                     }
                   >
                     Criar label
-                  </button>
+                  </ActionButton>
                 </div>
               </div>
 
@@ -286,33 +309,34 @@ export function SettingsView({
                   {repositories.map((x) => (
                     <span key={x.id} className="repo-chip">
                       {x.name}
-                      <button
+                      <ActionButton
                         className="btn link small"
                         aria-label={'Apagar ' + x.name}
-                        onClick={() =>
+                        onAction={() =>
                           window.confirm(`Apagar o repositório "${x.name}"? Ele sai de todos os cards que o têm.`) &&
-                          void api.del(`/api/repositories/${x.id}`).catch((err) => notify(err.message, true))
+                          api.del(`/api/repositories/${x.id}`).catch((err) => notify(err.message, true))
                         }
                       >
                         ✕
-                      </button>
+                      </ActionButton>
                     </span>
                   ))}
                 </div>
                 <div className="actions">
                   <input className="input" placeholder="Novo repositório" aria-label="Novo repositório" value={newRepository} onChange={(e) => setNewRepository(e.target.value)} />
-                  <button
+                  <ActionButton
                     className="btn"
                     disabled={!newRepository.trim()}
-                    onClick={() =>
-                      void api
+                    busyLabel="Adicionando…"
+                    onAction={() =>
+                      api
                         .post('/api/repositories', { name: newRepository })
                         .then(() => setNewRepository(''))
                         .catch((err) => notify(err.message, true))
                     }
                   >
                     Adicionar repositório
-                  </button>
+                  </ActionButton>
                 </div>
               </div>
             </>
