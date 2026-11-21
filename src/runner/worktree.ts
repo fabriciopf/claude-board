@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { expandHome, paths, type Config } from '../config.js';
 import type { Card } from '../shared/domain.js';
+import { installPushGuard } from './push-guard.js';
 
 export interface Workdir {
   /** Where Claude Code starts: the VS Code workspace when configured, so it loads the same CLAUDE.md, skills, settings and memory. */
@@ -15,6 +16,8 @@ export interface Workdir {
   worktreePath: string | null;
   /** Set when the default base branch was missing and another one was used. */
   baseNote: string | null;
+  /** Set when the worktree's push lock (pre-push hook, D96) could not be installed: why. */
+  guardNote: string | null;
 }
 
 /** The configured VS Code workspace root, or null when unset. */
@@ -32,9 +35,13 @@ export function workspaceDir(config: Config): string | null {
 export function ensureWorkdir(card: Card, config: Config): Workdir {
   const workspace = workspaceDir(config);
   const area = prepareArea(card, config, workspace);
-  if (!workspace) return { cwd: area.dir, workArea: area.dir, addDirs: [], branch: area.branch, worktreePath: area.worktreePath, baseNote: area.baseNote };
+  // The second push lock (D96), refreshed on every run so it follows the current push policy.
+  const failed = area.worktreePath ? installPushGuard(area.worktreePath, card.id, config) : null;
+  const guardNote = failed ? `A trava de push no git deste worktree (hook pre-push) não foi instalada: ${failed}. Nesta execução só a trava do agente vale.` : null;
+  const common = { branch: area.branch, worktreePath: area.worktreePath, baseNote: area.baseNote, guardNote };
+  if (!workspace) return { cwd: area.dir, workArea: area.dir, addDirs: [], ...common };
   const addDirs = area.worktreePath ? [area.worktreePath] : [];
-  return { cwd: workspace, workArea: area.dir, addDirs, branch: area.branch, worktreePath: area.worktreePath, baseNote: area.baseNote };
+  return { cwd: workspace, workArea: area.dir, addDirs, ...common };
 }
 
 export class WorkdirError extends Error {}

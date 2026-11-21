@@ -1,8 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { DEFAULT_CONFIG, protectedBranchList, type Config } from '../config.js';
 import { CARD_HEADER, EXECUTION_HEADER } from '../mcp/http.js';
+import { packageRoot } from './package-root.js';
+import { protectedBranchPattern } from './push-guard.js';
 import { agentLabel, isAgentId, modelFitsAgent, type AgentId, type Card } from '../shared/domain.js';
 
 /**
@@ -83,6 +84,9 @@ export function disallowedTools(policy: Config['prPolicy'], protectedBranches: s
     'git push * --delete *',
     'git push * -d *',
     'git push * :*',
+    // --no-verify skips the worktree's pre-push hook, the second lock (D96).
+    'git push --no-verify*',
+    'git push * --no-verify*',
     // "origin main" and any refspec whose destination is a protected branch (HEAD:main, HEAD:refs/heads/main).
     ...protectedBranches.flatMap((b) => [`git push origin ${b}`, `git push origin ${b} *`, `git push * *:${b}`, `git push * *:refs/heads/${b}`]),
   ];
@@ -95,21 +99,19 @@ export function disallowedTools(policy: Config['prPolicy'], protectedBranches: s
   return rules.flatMap((r) => [`Bash(${r})`, `PowerShell(${r})`]);
 }
 
-const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-
 /**
  * The same rules as `disallowedTools`, as regular expressions over one shell command, each matched
- * from the start (`^(?:…)`). A protected branch ending in `*` (preproduction*) covers any suffix.
+ * from the start (`^(?:…)`). A protected branch ending in `*` (preproduction*) covers any suffix; the
+ * worktree's pre-push hook reads the same `protectedBranchPattern` (D96).
  * The Antigravity ACP client splits a compound command (`cd x && git push`) before matching.
  */
 export function pushDenyPatterns(policy: Config['prPolicy'], protectedBranches: string[]): string[] {
-  const branch = (b: string) => (b.endsWith('*') ? `${escapeRegex(b.slice(0, -1))}[^\\s]*` : escapeRegex(b));
-  const branches = protectedBranches.map(branch).join('|');
+  const branches = protectedBranchPattern(protectedBranches);
   const pushAny = 'git\\s+push\\b';
   if (policy === 'none') return [pushAny, 'gh\\s+pr\\s+create\\b'];
   const force = [
-    // --force, --force-with-lease, -f, --mirror, --delete, -d
-    `${pushAny}.*\\s(--force\\S*|-f|--mirror|--delete|-d)(\\s|$)`,
+    // --force, --force-with-lease, -f, --mirror, --delete, -d, and --no-verify (skips the pre-push hook)
+    `${pushAny}.*\\s(--force\\S*|-f|--mirror|--delete|-d|--no-verify)(\\s|$)`,
     // +refspec (forced) and :branch (deletes the remote branch)
     `${pushAny}.*\\s[+:]\\S*`,
     // origin main, origin main …
@@ -182,16 +184,6 @@ function claudeLaunch(input: LaunchInput): Launch {
 }
 
 // ---------- Antigravity CLI ----------
-
-/** Folder of the running code (src/runner or dist/server/runner → the package root). */
-export function packageRoot(): string {
-  let dir = path.dirname(fileURLToPath(import.meta.url));
-  for (let i = 0; i < 6; i++) {
-    if (fs.existsSync(path.join(dir, 'package.json'))) return dir;
-    dir = path.dirname(dir);
-  }
-  return process.cwd();
-}
 
 /**
  * Antigravity CLI has no flag to append to its system prompt, so the Board's rules go at the top of

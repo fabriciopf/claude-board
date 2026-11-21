@@ -99,7 +99,7 @@ claude -p --output-format stream-json --verbose [--max-turns N] [--model M] [--e
 - **Session name:** on the first run, Claude gives the task a short name (`card_rename`), which becomes the card title and the Claude Code session name. The original title and description stay on the card.
 - **Sound:** when Claude or the runner moves a card to "Waiting for you", "Waiting for a third party" or "In review", the Board plays a short chime. Moves you make yourself are silent. The header toggle turns it off for that browser; with several tabs open, only one plays.
 - **No automatic retry:** whatever fails comes back to you.
-- **Git remotes:** by default Claude neither pushes nor opens PRs (`prPolicy = "none"`). Settings can allow pushing the `cb/*` branch, or pushing and opening a draft PR, when the card asks for it. Force pushes and pushes to the branches in `protectedBranches` are always blocked.
+- **Git remotes:** by default Claude neither pushes nor opens PRs (`prPolicy = "none"`). Settings can allow pushing the `cb/*` branch, or pushing and opening a draft PR, when the card asks for it. Force pushes and pushes to the branches in `protectedBranches` are always blocked, by the agent's rules and by a `pre-push` hook the Board installs in each card's worktree.
 - **Dangerous mode:** only with the "Perigoso: rodar sem permissões" checkbox ticked on the card, which asks for confirmation.
 
 Runs use the same Claude Code login you use interactively, so they draw on the same plan quota.
@@ -246,7 +246,7 @@ The Board's folder is `~/.claude-board`; `CLAUDE_BOARD_HOME` changes it.
 - The Board listens only on `127.0.0.1` and refuses other hosts without `--allow-remote`. Requests whose `Host` header is not local get a 403, which blocks DNS rebinding.
 - There is no login: any process on your machine can call the API.
 - Transcripts may contain sensitive data. They live in `~/.claude-board/transcripts` and are deleted after `transcriptRetentionDays`.
-- The push rules are best effort: they block the common `git push` forms through `--disallowedTools`, not every way a shell could reach a remote.
+- The push rules are best effort: they block the common `git push` forms through `--disallowedTools`, not every way a shell could reach a remote. A card with a repository also gets a `pre-push` hook in its worktree (set through the worktree's own `core.hooksPath`, the repository's hooks still run), which checks what the push actually sends. `git push --no-verify` skips it, and the agent rules refuse that form; a card without a repository runs without the hook.
 
 ## Development
 
