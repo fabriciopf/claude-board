@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { ActionButton } from './ActionButton';
 import { api } from './api';
 
 interface HooksStatus {
@@ -52,13 +53,13 @@ export function HooksPanel({ notify }: { notify: (msg: string, error?: boolean) 
           </div>
           <div className="actions">
             {status.installed ? (
-              <button className="btn" onClick={() => void act('/api/hooks/uninstall', 'Hooks removidos')}>
+              <ActionButton className="btn" busyLabel="Removendo…" onAction={() => act('/api/hooks/uninstall', 'Hooks removidos')}>
                 Remover hooks
-              </button>
+              </ActionButton>
             ) : (
-              <button className="btn primary" onClick={() => void act('/api/hooks/install', 'Hooks instalados (backup feito)')}>
+              <ActionButton className="btn primary" busyLabel="Instalando…" onAction={() => act('/api/hooks/install', 'Hooks instalados (backup feito)')}>
                 Instalar hooks
-              </button>
+              </ActionButton>
             )}
           </div>
         </>

@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { AUTO_CONCURRENCY, DEFAULT_RUN_EFFORT, DEFAULT_RUN_MODEL, MAX_CONCURRENCY, isEffortLevel, isValidModelId, type ConcurrencySetting } from './shared/domain.js';
+import { AUTO_CONCURRENCY, UNLIMITED_CONCURRENCY, DEFAULT_RUN_EFFORT, DEFAULT_RUN_MODEL, MAX_CONCURRENCY, isEffortLevel, isValidModelId, type ConcurrencySetting } from './shared/domain.js';
 
 export interface Config {
   port: number;
@@ -13,7 +13,7 @@ export interface Config {
   /** VS Code workspace root: runs start here to load the same CLAUDE.md, skills, settings and memory. */
   workspaceDir: string | null;
   heartbeatSeconds: number;
-  /** Runs at the same time: 1 to MAX_CONCURRENCY, or 'auto' to pace them by the 5-hour usage (D47). */
+  /** Runs at the same time: 0 to MAX_CONCURRENCY, 'auto' to pace them by the 5-hour usage (D47), or 'unlimited' (D83). */
   maxConcurrency: ConcurrencySetting;
   runTimeoutMinutes: number;
   defaultMaxTurns: number;
@@ -206,12 +206,16 @@ export function saveConfig(current: Config, patch: Partial<Config>): Config {
   return next;
 }
 
-/** 'auto' or a whole number from 1 to MAX_CONCURRENCY (a number may come as text from the settings screen). */
+/**
+ * 'auto', 'unlimited' or a whole number from 0 to MAX_CONCURRENCY (a number may come as text from the
+ * header selector or the settings screen). 0 stops the queue; it is a choice, not the automatic floor (D83).
+ */
 export function parseConcurrency(value: unknown): ConcurrencySetting {
   if (value === AUTO_CONCURRENCY) return AUTO_CONCURRENCY;
+  if (value === UNLIMITED_CONCURRENCY || value === '∞') return UNLIMITED_CONCURRENCY;
   const n = typeof value === 'string' && value.trim() ? Number(value) : value;
-  if (typeof n !== 'number' || !Number.isInteger(n) || n < 1 || n > MAX_CONCURRENCY) {
-    throw new Error(`Execuções simultâneas: use "automático" ou um número inteiro de 1 a ${MAX_CONCURRENCY}.`);
+  if (typeof n !== 'number' || !Number.isInteger(n) || n < 0 || n > MAX_CONCURRENCY) {
+    throw new Error(`Execuções simultâneas: use "automático", "∞" ou um número inteiro de 0 a ${MAX_CONCURRENCY}.`);
   }
   return n;
 }

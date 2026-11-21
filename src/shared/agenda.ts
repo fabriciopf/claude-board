@@ -8,6 +8,8 @@ export interface AgendaEvent {
   end: string | null;
   /** Opens the event in Google Calendar. */
   link: string;
+  /** Video call of the event (Google Meet), when it has one. */
+  meetLink?: string | null;
 }
 
 export interface AgendaState {
@@ -34,12 +36,14 @@ export function parseCalendarEvents(raw: unknown): AgendaEvent[] {
     const start = e.start?.dateTime;
     if (typeof start !== 'string' || Number.isNaN(Date.parse(start))) continue;
     if (Array.isArray(e.attendees) && e.attendees.some((a: any) => a?.self && a.responseStatus === 'declined')) continue;
+    const meet = [e.conferenceUrl, e.hangoutLink].find((u) => typeof u === 'string' && u.startsWith('https://')) ?? null;
     const link = typeof e.htmlLink === 'string' && /^https:\/\//.test(e.htmlLink) ? e.htmlLink : 'https://calendar.google.com/calendar/r';
     out.push({
       title: typeof e.summary === 'string' && e.summary.trim() ? e.summary.trim() : '(sem título)',
       start,
       end: typeof e.end?.dateTime === 'string' ? e.end.dateTime : null,
       link,
+      meetLink: meet,
     });
   }
   return out.sort((a, b) => Date.parse(a.start) - Date.parse(b.start));
@@ -48,6 +52,11 @@ export function parseCalendarEvents(raw: unknown): AgendaEvent[] {
 /** The first commitment that has not started yet. */
 export function nextEvent(events: AgendaEvent[], now: number): AgendaEvent | null {
   return events.find((e) => Date.parse(e.start) > now) ?? null;
+}
+
+/** Commitments happening now: started, and not over yet (D62, card #98 review). */
+export function currentEvents(events: AgendaEvent[], now: number): AgendaEvent[] {
+  return events.filter((e) => e.end !== null && Date.parse(e.start) <= now && now < Date.parse(e.end));
 }
 
 /** "em 12 min", "em 2h05", "em 3 dias". */
