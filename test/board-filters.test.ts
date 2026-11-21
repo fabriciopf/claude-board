@@ -1,24 +1,25 @@
 import { describe, expect, it } from 'vitest';
-import { EMPTY_FILTERS, columnCountText, columnNeedsAttention, countByStatus, filterCards, filterSelectClass, hasActiveFilter, matchesPriority, parseFilters, pruneFilters } from '../src/ui/board-filters';
+import { EMPTY_FILTERS, columnCountText, columnNeedsAttention, countByStatus, filterCards, filterClass, hasActiveFilter, matchesPriority, parseFilters, pruneFilters } from '../src/ui/board-filters';
 import { readFileSync } from 'node:fs';
 
 describe('a filter with an option chosen stands out (card #172)', () => {
-  it('marks only a select with a value', () => {
-    expect(filterSelectClass('')).toBe('input');
-    expect(filterSelectClass('3')).toBe('input filter-on');
+  it('marks only a filter with a value', () => {
+    expect(filterClass('')).toBe('input');
+    expect(filterClass('3')).toBe('input filter-on');
+    expect(filterClass('web')).toBe('input filter-on');
   });
 
-  it('every filter select of the bar uses it, and the sort select does not', () => {
+  it('the search and every filter select of the bar use it, and the sort select does not', () => {
     const src = readFileSync(new URL('../src/ui/FilterBar.tsx', import.meta.url), 'utf8');
-    for (const key of ['appId', 'labelId', 'repositoryId', 'owner', 'due', 'priority']) {
-      expect(src).toContain(`className={filterSelectClass(filters.${key})}`);
+    for (const key of ['text', 'appId', 'labelId', 'repositoryId', 'owner', 'due', 'priority']) {
+      expect(src).toContain(`className={filterClass(filters.${key})}`);
     }
-    expect(src).not.toMatch(/filterSelectClass\(sort/);
+    expect(src).not.toMatch(/filterClass\(sort/);
   });
 
   it('the highlight is orange text and border, not a background', () => {
     const css = readFileSync(new URL('../src/ui/styles.css', import.meta.url), 'utf8');
-    const rule = css.match(/\.toolbar select\.filter-on \{([^}]*)\}/)?.[1] ?? '';
+    const rule = css.match(/\.toolbar \.filter-on \{([^}]*)\}/)?.[1] ?? '';
     expect(rule).toMatch(/(^|[^-])color: var\(--accent\)/);
     expect(rule).toContain('border-color: var(--accent)');
     expect(rule).not.toContain('background');

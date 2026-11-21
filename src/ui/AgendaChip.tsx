@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { nextEvent, untilLabel, type AgendaEvent, type AgendaState } from '../shared/agenda';
+import { CalendarIcon } from './HeaderIcons';
 
 const clock = (iso: string) => new Date(iso).toLocaleString('pt-BR', { weekday: 'short', hour: '2-digit', minute: '2-digit' });
 const hour = (iso: string) => new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
@@ -34,6 +35,7 @@ export function AgendaChip({ agenda }: { agenda: AgendaState | null }) {
       rel="noreferrer"
       title={`Próximo compromisso: ${next.title}, ${clock(next.start)}. Abre no Google Calendar.`}
     >
+      <CalendarIcon />
       <span className="agenda-title">{next.title}</span>
       <strong>{untilLabel(ms)}</strong>
     </a>
@@ -49,8 +51,8 @@ export function AgendaBanner({ events, now }: { events: AgendaEvent[]; now: numb
     <div className="banner info agenda-banner" role="status">
       {events.map((e) => (
         <span key={`${e.start}|${e.title}`} className="agenda-now">
-          <span>
-            <strong>Agora:</strong> {e.title} ({hour(e.start)}–{hour(e.end as string)}), termina{' '}
+          <span className="agenda-now-text">
+            <strong>Agora:</strong> <CalendarIcon /> {e.title} ({hour(e.start)}–{hour(e.end as string)}), termina{' '}
             {untilLabel(Date.parse(e.end as string) - now)}.
           </span>
           {e.meetLink && (

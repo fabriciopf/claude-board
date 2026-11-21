@@ -16,7 +16,7 @@ import { MODAL_SETTLE_MS, nextInColumn } from './next-card';
 import { SettingsView } from './SettingsView';
 import { PENDING_TAB_LABEL, PENDING_VIEW_NAME, TodayView, showPendingTab, todayItems } from './TodayView';
 import { SORT_STORE_KEYS, parseSort, type CardSort } from './card-sort';
-import { PublishChip } from './PublishChip';
+import { PublishBanner, publishVisible } from './PublishBanner';
 import { concurrencyTitle, concurrencyValue } from './runner-label';
 import { ConcurrencySelect } from './ConcurrencySelect';
 import { UsageChip } from './UsageChip';
@@ -318,7 +318,6 @@ export function App() {
             <AgendaChip agenda={data?.agenda ?? null} />
             <AutomationChip tick={automationsTick} onOpen={() => setView('automations')} />
             <UsageChip usage={data?.usage ?? null} />
-            <PublishChip publish={data?.publish ?? null} running={runner.running} onOpen={(id) => setOpenId(id)} notify={notify} reload={load} />
             <ActionButton
               className={'btn small icon-btn' + (runner.paused ? ' primary' : '')}
               busyLabel=""
@@ -474,12 +473,15 @@ export function App() {
       {/* Board-wide warnings live in a strip at the foot of the window, outside the scrolling area (card #173). */}
       <BannerDock>
         {uiUpdate.update && <UpdateBanner update={uiUpdate.update} dismiss={uiUpdate.dismiss} onOpen={(id) => setOpenId(id)} />}
-        {runner?.held && (
-          <div className="banner">
-            {runner.running === 0
-              ? 'Publicando o Board: o servidor reinicia em seguida e a página volta sozinha.'
-              : `Publicando o Board: o servidor reinicia em seguida e a página volta sozinha. ${runner.running === 1 ? 'A execução em curso continua' : `As ${runner.running} execuções em curso continuam`}; nenhuma nova começa até lá.`}
-          </div>
+        {publishVisible(data?.publish ?? null, !!runner?.held) && (
+          <PublishBanner
+            publish={data?.publish ?? null}
+            held={!!runner?.held}
+            running={runner?.running ?? 0}
+            onOpen={(id) => setOpenId(id)}
+            notify={notify}
+            reload={load}
+          />
         )}
         {runner?.paused && (
           <div className="banner">

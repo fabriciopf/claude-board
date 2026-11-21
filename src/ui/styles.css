@@ -324,7 +324,7 @@ pre {
   border: 1px solid transparent;
   border-radius: 6px;
   padding: 0 2px;
-  /* As wide as the chosen option ("0", "∞"), not the longest one ("auto · 12"). */
+  /* As wide as the chosen option ("0", "∞"), not the longest one ("12 (auto)"). */
   field-sizing: content;
   cursor: pointer;
 }
@@ -396,8 +396,8 @@ pre {
   width: 220px;
 }
 
-/* A filter with an option chosen gets orange text and border, no background (card #172); the open list keeps the normal color. */
-.toolbar select.filter-on {
+/* The search with text, or a filter with an option chosen, gets orange text and border, no background (card #172); the open list keeps the normal color. */
+.toolbar .filter-on {
   color: var(--accent);
   border-color: var(--accent);
   font-weight: 600;
@@ -2045,10 +2045,8 @@ html[data-busy] body::before {
     flex: none;
   }
 
-  /* The counters strip scrolls, so the publication pop-over cannot hang from it. */
-  .publish-pop {
-    position: fixed;
-    top: 96px;
+  /* More specific than the base rule below, which comes later in the file. */
+  .publish .publish-pop {
     left: 8px;
     right: 8px;
     width: auto;
@@ -2213,6 +2211,10 @@ html[data-busy] body::before {
   min-width: 0;
 }
 
+.agenda-now-text svg {
+  vertical-align: -3px;
+}
+
 .agenda-now a.btn {
   text-decoration: none;
 }
@@ -2227,8 +2229,35 @@ html[data-busy] body::before {
   text-overflow: ellipsis;
 }
 
-.counter.publish-chip {
+/* Publication strip in the warnings dock (card #173): the whole strip is the button that opens the details. */
+.banner.publish-banner {
+  width: 100%;
+  border: 0;
+  font: inherit;
+  text-align: left;
   cursor: pointer;
+  justify-content: space-between;
+}
+
+.banner.publish-banner:hover {
+  filter: brightness(0.97);
+}
+
+.banner.publish-banner:focus-visible {
+  outline: 2px solid var(--info);
+  outline-offset: 1px;
+}
+
+.publish-banner-text {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.publish-banner-toggle {
+  flex: none;
+  font-weight: 600;
+  white-space: nowrap;
 }
 
 .counter.info {
@@ -2237,13 +2266,14 @@ html[data-busy] body::before {
   font-weight: 600;
 }
 
+/* Opens upward from the dock at the foot; fixed, so the dock's own scroll does not clip it. */
 .publish-pop {
-  position: absolute;
-  right: 0;
-  top: calc(100% + 6px);
+  position: fixed;
+  right: 16px;
+  bottom: calc(var(--dock-h, 0px) + 6px);
   z-index: 50;
   width: min(460px, 90vw);
-  max-height: 70vh;
+  max-height: min(70vh, calc(100dvh - var(--dock-h, 0px) - 80px));
   overflow: auto;
   padding: 12px;
   border-radius: 8px;
