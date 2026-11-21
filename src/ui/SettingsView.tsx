@@ -4,6 +4,7 @@ import { ActionButton, ActionGroup } from './ActionButton';
 import { api } from './api';
 import { AppsPanel } from './AppsPanel';
 import { HooksPanel } from './HooksPanel';
+import { SelfUpdatePanel } from './SelfUpdatePanel';
 import { FIELDS, SETTINGS_TABS, dirtyKeys, followLiveValue, toPatchValue, type Config, type Field, type SettingsTab } from './settings-fields';
 
 interface DoctorCheck {
@@ -342,7 +343,12 @@ export function SettingsView({
             </>
           )}
 
-          {tab === 'git' && <div className="panel">{configFields('git')}</div>}
+          {tab === 'git' && (
+            <>
+              <div className="panel">{configFields('git')}</div>
+              <SelfUpdatePanel notify={notify} />
+            </>
+          )}
 
           {tab === 'claude' && (
             <>

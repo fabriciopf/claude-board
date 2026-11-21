@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import type { App, CardDetail, CardSummary, Comment, Label, PublishState, Repository, RunnerState, UsageSnapshot } from '../shared/domain';
+import type { App, CardDetail, CardSummary, Comment, Label, PublishState, Repository, RunnerState, SelfUpdateState, UsageSnapshot } from '../shared/domain';
 import type { AgendaState } from '../shared/agenda';
 import { requests } from './pending';
 
@@ -46,6 +46,8 @@ export interface BoardData {
   usage: UsageSnapshot | null;
   agenda: AgendaState | null;
   publish: PublishState | null;
+  /** Update of the Board from its git remote (D89). */
+  selfUpdate: SelfUpdateState | null;
 }
 
 export type CardDetailResponse = CardDetail & { openQuestion: Comment | null };

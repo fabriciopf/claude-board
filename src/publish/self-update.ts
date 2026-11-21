@@ -1,0 +1,463 @@
+import { spawn } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
+import { boardHome } from '../config.js';
+import type { AppContext, SelfUpdateControl } from '../context.js';
+import { nowIso } from '../db/index.js';
+import { RuleError } from '../service/rules.js';
+import type { SelfUpdateCommit, SelfUpdatePhase, SelfUpdateState } from '../shared/domain.js';
+import { canonicalDir, git, linkDir, runCommand, syncDir, type CmdResult } from './git.js';
+import { DEFAULT_COMMANDS, isScreenOnly, type Publisher, type PublishCommands } from './publisher.js';
+
+/**
+ * Update of the Board from the git remote it was cloned from (card #183, D89).
+ *
+ * Every new commit on the remote branch (origin/main by default) is a new version. The check fetches
+ * that branch every few hours; the strip at the foot offers "Atualizar" ('notify') or the update
+ * starts on its own ('auto'). Applying reuses the publication's path (D42): merge in a throwaway
+ * worktree, install when the lockfile changed, build, hold the runner, back up the database,
+ * fast-forward the main checkout and restart from a detached process. Runs in progress survive the
+ * restart (D45). A failure leaves the install as it was.
+ *
+ * Commits made here (the Board improving itself, D42) are kept: when the install has commits the
+ * remote does not, the remote branch is merged into the local one and the tests run before applying.
+ * A conflict aborts with the list of files.
+ */
+
+const PACKAGE_FILES = ['package.json', 'package-lock.json'];
+const MAX_COMMITS = 20;
+const FAILURE_KEY = 'selfUpdateFailure';
+
+export interface SelfUpdaterOptions {
+  commands?: Partial<PublishCommands>;
+  run?: (cmd: string, args: string[], cwd: string, env?: NodeJS.ProcessEnv) => Promise<CmdResult>;
+  /** Replaces the detached restart (tests). */
+  restart?: () => Promise<void> | void;
+  /** First check after the server starts. */
+  firstCheckMs?: number;
+  /** Between checks. */
+  checkEveryMs?: number;
+  /** Retry of an automatic update that found a publication under way. */
+  retryMs?: number;
+  /** Limit of one fetch. */
+  fetchTimeoutMs?: number;
+}
+
+class UpdateError extends Error {}
+
+interface Source {
+  remote: string;
+  branch: string;
+  /** remote/branch */
+  ref: string;
+}
+
+/** Web page of the commits of a GitHub remote, or null for any other host. */
+export function githubCommitsUrl(remoteUrl: string, branch: string): string | null {
+  const m = remoteUrl.trim().match(/github\.com[:/]([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/i);
+  return m ? `https://github.com/${m[1]}/${m[2]}/commits/${branch}` : null;
+}
+
+/** git with a time limit and no prompt: a fetch that wants a password fails instead of hanging the server. */
+function gitAsync(cwd: string, args: string[], timeoutMs: number): Promise<CmdResult> {
+  return new Promise((resolve) => {
+    let out = '';
+    const child = spawn('git', args, {
+      cwd: canonicalDir(cwd),
+      env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never' },
+      windowsHide: true,
+      timeout: timeoutMs,
+    });
+    const keep = (d: Buffer) => {
+      out = (out + d.toString()).slice(-8000);
+    };
+    child.stdout.on('data', keep);
+    child.stderr.on('data', keep);
+    child.on('error', (err) => resolve({ ok: false, out: `${out}\n${err.message}`.trim() }));
+    child.on('close', (code, signal) => resolve({ ok: code === 0, out: signal ? `${out}\nTempo esgotado (${Math.round(timeoutMs / 1000)} s).`.trim() : out.trim() }));
+  });
+}
+
+const fence = (text: string) => `\n\n\`\`\`\n${text.trim().split('\n').slice(-30).join('\n').replace(/```/g, "'''")}\n\`\`\``;
+
+export class SelfUpdater implements SelfUpdateControl {
+  private phase: SelfUpdatePhase = 'idle';
+  private detail: string | null = null;
+  private busy: Promise<void> | null = null;
+  private checking: Promise<SelfUpdateState> | null = null;
+  private timers: NodeJS.Timeout[] = [];
+  private retryTimer: NodeJS.Timeout | null = null;
+  private last: Pick<SelfUpdateState, 'source' | 'sourceUrl' | 'behind' | 'ahead' | 'commits' | 'remoteSha' | 'checkedAt' | 'checkError' | 'unavailable'> = {
+    source: null,
+    sourceUrl: null,
+    behind: 0,
+    ahead: 0,
+    commits: [],
+    remoteSha: null,
+    checkedAt: null,
+    checkError: null,
+    unavailable: null,
+  };
+  private commands: PublishCommands;
+  private run: NonNullable<SelfUpdaterOptions['run']>;
+
+  constructor(
+    private ctx: AppContext,
+    private publisher: Publisher,
+    private opts: SelfUpdaterOptions = {},
+  ) {
+    this.commands = { ...DEFAULT_COMMANDS, ...opts.commands };
+    this.run = opts.run ?? runCommand;
+  }
+
+  // ---------- schedule ----------
+
+  /** First check shortly after the server starts, then every few hours. Each one reads the mode again. */
+  schedule(): void {
+    if (this.timers.length) return;
+    const first = setTimeout(() => void this.tick(), this.opts.firstCheckMs ?? 30_000);
+    const every = setInterval(() => void this.tick(), this.opts.checkEveryMs ?? 6 * 3600_000);
+    first.unref?.();
+    every.unref?.();
+    this.timers.push(first, every);
+  }
+
+  close(): void {
+    for (const t of this.timers) clearTimeout(t);
+    this.timers = [];
+    if (this.retryTimer) clearTimeout(this.retryTimer);
+    this.retryTimer = null;
+  }
+
+  private async tick(): Promise<void> {
+    if (this.ctx.config.selfUpdate === 'off' || this.busy) return;
+    try {
+      await this.check();
+    } catch (err) {
+      this.log(`verificação falhou: ${(err as Error).message}`);
+    }
+  }
+
+  /** 'auto': a new version that has not failed already starts on its own. */
+  private maybeAuto(): void {
+    if (this.ctx.config.selfUpdate !== 'auto' || this.busy) return;
+    const s = this.state();
+    if (s.unavailable || !s.behind || !s.remoteSha) return;
+    if (s.failure?.sha === s.remoteSha) return;
+    if (this.publisher.isBusy()) {
+      // A publication is applying; try again in a few minutes instead of waiting for the next check.
+      if (!this.retryTimer) {
+        this.retryTimer = setTimeout(() => {
+          this.retryTimer = null;
+          this.maybeAuto();
+        }, this.opts.retryMs ?? 5 * 60_000);
+        this.retryTimer.unref?.();
+      }
+      return;
+    }
+    this.log(`atualização automática para ${s.remoteSha.slice(0, 7)}`);
+    this.launch();
+  }
+
+  // ---------- state ----------
+
+  isBusy(): boolean {
+    return !!this.busy;
+  }
+
+  /** Waits for the update in progress (tests). */
+  async whenIdle(): Promise<void> {
+    while (this.busy) await this.busy;
+  }
+
+  state(): SelfUpdateState {
+    return {
+      mode: this.ctx.config.selfUpdate,
+      ...this.last,
+      phase: this.phase,
+      detail: this.detail,
+      failure: this.ctx.service.getSetting<SelfUpdateState['failure']>(FAILURE_KEY, null),
+    };
+  }
+
+  private changed(): void {
+    this.ctx.bus.publish({ type: 'self-update.changed' });
+  }
+
+  private setPhase(phase: SelfUpdatePhase, detail: string | null): void {
+    this.phase = phase;
+    this.detail = detail;
+    if (detail) this.log(`${phase}: ${detail}`);
+    this.changed();
+  }
+
+  private log(line: string): void {
+    try {
+      fs.appendFileSync(path.join(boardHome(), 'publish.log'), `${nowIso()} [atualização] ${line}\n`);
+    } catch {
+      /* logging must never break an update */
+    }
+  }
+
+  // ---------- where the versions come from ----------
+
+  /** Why this install cannot update itself, or null. */
+  private unavailableReason(repo: string | null): string | null {
+    if (!repo) return 'Não achei o repositório git de onde o Board roda.';
+    if (this.ctx.config.mirrorRepoPath) {
+      return 'Este Board é a origem do repositório público (D66): ele envia as mudanças para lá, não recebe de lá.';
+    }
+    return null;
+  }
+
+  private source(repo: string): Source | null {
+    const configured = this.ctx.config.selfUpdateSource;
+    const split = (ref: string): Source | null => {
+      const i = ref.indexOf('/');
+      return i > 0 ? { remote: ref.slice(0, i), branch: ref.slice(i + 1), ref } : null;
+    };
+    if (configured) return split(configured);
+    const local = this.ctx.config.publishBranch;
+    const upstream = git(repo, ['rev-parse', '--abbrev-ref', '--symbolic-full-name', `${local}@{upstream}`]);
+    if (upstream.ok && upstream.out && git(repo, ['remote', 'get-url', upstream.out.split('/')[0]]).ok) return split(upstream.out);
+    if (!git(repo, ['remote', 'get-url', 'origin']).ok) return null;
+    const head = git(repo, ['symbolic-ref', '--short', 'refs/remotes/origin/HEAD']);
+    if (head.ok && head.out.startsWith('origin/')) return split(head.out);
+    return split(`origin/${local}`);
+  }
+
+  // ---------- check ----------
+
+  /**
+   * Fetches the remote branch and recomputes what is new. Concurrent calls share one fetch. In 'auto',
+   * a check that finds a new version (the schedule, "Verificar agora", turning the mode on) starts it.
+   */
+  check(): Promise<SelfUpdateState> {
+    if (!this.checking) {
+      this.checking = this.doCheck()
+        .then((s) => {
+          this.maybeAuto();
+          return s;
+        })
+        .finally(() => {
+          this.checking = null;
+        });
+    }
+    return this.checking;
+  }
+
+  private async doCheck(): Promise<SelfUpdateState> {
+    const repo = this.publisher.selfRepo();
+    const unavailable = this.unavailableReason(repo);
+    if (unavailable) {
+      this.last = { ...this.last, unavailable, behind: 0, ahead: 0, commits: [], checkedAt: nowIso() };
+      this.changed();
+      return this.state();
+    }
+    const src = this.source(repo as string);
+    if (!src) {
+      this.last = {
+        ...this.last,
+        unavailable: 'O repositório do Board não tem remoto de onde buscar versões. Instale por `git clone` do repositório público para receber as atualizações.',
+        behind: 0,
+        ahead: 0,
+        commits: [],
+        checkedAt: nowIso(),
+      };
+      this.changed();
+      return this.state();
+    }
+    const idle = this.phase === 'idle';
+    if (idle) this.setPhase('checking', null);
+    try {
+      const fetched = await gitAsync(
+        repo as string,
+        ['fetch', '--quiet', '--no-tags', src.remote, `+refs/heads/${src.branch}:refs/remotes/${src.remote}/${src.branch}`],
+        this.opts.fetchTimeoutMs ?? 60_000,
+      );
+      const remoteUrl = git(repo as string, ['config', '--get', `remote.${src.remote}.url`]).out;
+      const base = { unavailable: null, source: src.ref, sourceUrl: githubCommitsUrl(remoteUrl, src.branch), checkedAt: nowIso() };
+      if (!fetched.ok) {
+        // Keep what the last good fetch found; say why this one failed.
+        this.last = { ...this.last, ...base, checkError: `Não consegui buscar \`${src.ref}\`: ${fetched.out || 'erro do git'}` };
+        this.log(`fetch falhou: ${fetched.out}`);
+      } else {
+        this.last = { ...base, checkError: null, ...this.compare(repo as string, src.ref) };
+      }
+    } finally {
+      if (idle && this.phase === 'checking') this.setPhase('idle', null);
+      else this.changed();
+    }
+    // After the finally: the answer to "Verificar agora" comes back idle, not "checking".
+    return this.state();
+  }
+
+  /** Commits on each side of the local branch and the remote ref (no network). */
+  private compare(repo: string, ref: string): Pick<SelfUpdateState, 'behind' | 'ahead' | 'commits' | 'remoteSha'> {
+    const local = this.ctx.config.publishBranch;
+    const remoteSha = git(repo, ['rev-parse', '--verify', '--quiet', ref]);
+    if (!remoteSha.ok) return { behind: 0, ahead: 0, commits: [], remoteSha: null };
+    const count = (range: string) => Number(git(repo, ['rev-list', '--count', range]).out) || 0;
+    const behind = count(`${local}..${ref}`);
+    const ahead = count(`${ref}..${local}`);
+    const log = git(repo, ['log', '--no-merges', `-${MAX_COMMITS}`, '--format=%H%x1f%s%x1f%cI', `${local}..${ref}`]);
+    const commits: SelfUpdateCommit[] = log.ok
+      ? log.out
+          .split('\n')
+          .filter(Boolean)
+          .map((line) => {
+            const [sha, subject, date] = line.split('\x1f');
+            return { sha, subject, date };
+          })
+      : [];
+    return { behind, ahead, commits, remoteSha: remoteSha.out };
+  }
+
+  // ---------- apply ----------
+
+  /** "Atualizar": refuses when another apply is under way, else starts in the background (the route answers right away; the strip follows the phases). */
+  begin(): void {
+    const s = this.state();
+    if (this.busy) throw new RuleError('self_update_busy', 'A atualização já está em andamento.', 409);
+    if (s.unavailable) throw new RuleError('self_update_unavailable', s.unavailable, 409);
+    if (this.publisher.isBusy()) throw new RuleError('publish_busy', 'Uma publicação do Board está em andamento; atualize quando ela terminar.', 409);
+    this.launch();
+  }
+
+  private launch(): void {
+    if (this.busy) return;
+    this.busy = this.apply()
+      .catch((err) => this.log(`erro interno: ${(err as Error).stack ?? err}`))
+      .finally(() => {
+        this.busy = null;
+        if (this.phase !== 'restarting') {
+          this.setPhase('idle', null);
+          // Deliveries that arrived meanwhile.
+          this.publisher.kick();
+        }
+      });
+  }
+
+  private async apply(): Promise<void> {
+    const repo = this.publisher.selfRepo();
+    const local = this.ctx.config.publishBranch;
+    let tmp: string | null = null;
+    let held = false;
+    let applied = false;
+    let target: string | null = null;
+    try {
+      this.setPhase('preparing', 'Buscando a versão nova');
+      const fresh = await this.check();
+      if (fresh.unavailable) throw new UpdateError(fresh.unavailable);
+      if (fresh.checkError) throw new UpdateError(fresh.checkError);
+      if (!fresh.behind || !fresh.remoteSha || !fresh.source) {
+        this.log('nada novo');
+        return;
+      }
+      target = fresh.remoteSha;
+      const r = repo as string;
+      const head = git(r, ['rev-parse', '--abbrev-ref', 'HEAD']);
+      if (!head.ok || head.out !== local) throw new UpdateError(`O checkout do Board \`${r}\` está em \`${head.out}\`, não em \`${local}\`.`);
+      const origHead = git(r, ['rev-parse', local]).out;
+
+      const diff = git(r, ['diff', '--name-only', `${local}...${target}`]);
+      if (!diff.ok) throw new UpdateError(`Não consegui comparar \`${local}\` com \`${fresh.source}\`: ${diff.out}`);
+      const files = diff.out.split('\n').filter(Boolean);
+      const kind = isScreenOnly(files) ? 'ui' : 'server';
+      const needsInstall = files.some((f) => PACKAGE_FILES.includes(f));
+      const merging = fresh.ahead > 0;
+
+      tmp = path.join(boardHome(), 'publish', `wt-update-${Date.now()}`);
+      fs.mkdirSync(path.dirname(tmp), { recursive: true });
+      const add = git(r, ['worktree', 'add', '--detach', tmp, local]);
+      if (!add.ok) throw new UpdateError(`Não consegui criar a worktree temporária: ${add.out}`);
+      const mainModules = path.join(r, 'node_modules');
+      if (!needsInstall && fs.existsSync(mainModules)) linkDir(path.join(tmp, 'node_modules'), mainModules);
+
+      this.setPhase('preparing', merging ? `Juntando \`${fresh.source}\` com as ${fresh.ahead} mudança(s) feitas aqui` : `Trazendo ${fresh.behind} mudança(s) de \`${fresh.source}\``);
+      const m = merging
+        ? git(tmp, ['merge', '--no-ff', '-m', `merge: atualização de ${fresh.source} (${target.slice(0, 7)})`, target])
+        : git(tmp, ['merge', '--ff-only', target]);
+      if (!m.ok) {
+        const conflicts = git(tmp, ['diff', '--name-only', '--diff-filter=U']).out;
+        git(tmp, ['merge', '--abort']);
+        throw new UpdateError(
+          conflicts
+            ? `A versão nova conflita com mudanças feitas neste Board em: ${conflicts
+                .split('\n')
+                .map((f) => `\`${f}\``)
+                .join(', ')}. Junte \`${fresh.source}\` à \`${local}\` à mão.`
+            : `O merge de \`${fresh.source}\` falhou.${fence(m.out)}`,
+        );
+      }
+
+      const env = { ...process.env };
+      for (const k of Object.keys(env)) if (k.startsWith('CLAUDE_BOARD_') || k.startsWith('FAKE_CLAUDE')) delete env[k];
+      if (needsInstall) await this.step(tmp, 'Instalando dependências', this.commands.install, env);
+      // The remote's code was tested where it was made; a merge with local commits is new code.
+      if (merging) await this.testStep(tmp, env);
+      await this.step(tmp, kind === 'ui' ? 'Compilando a tela' : 'Compilando', kind === 'ui' ? this.commands.buildUi : this.commands.build, env);
+      const builtUi = path.join(tmp, 'dist', 'ui');
+      if (!fs.existsSync(path.join(builtUi, 'index.html'))) throw new UpdateError('O build não gerou `dist/ui/index.html`.');
+      if (kind === 'server' && !fs.existsSync(path.join(tmp, 'dist', 'server', 'cli.js'))) throw new UpdateError('O build não gerou `dist/server/cli.js`.');
+
+      if (kind === 'server') {
+        held = true;
+        this.publisher.setHold(true);
+        this.setPhase('waiting', 'Esperando as execuções que estão começando; as que já rodam continuam depois do reinício');
+        await this.publisher.waitIdleRunner();
+      }
+
+      this.setPhase('applying', `Aplicando na \`${local}\``);
+      const nowHead = git(r, ['rev-parse', local]).out;
+      if (nowHead !== origHead) throw new UpdateError(`A \`${local}\` andou durante a atualização (${origHead.slice(0, 7)} → ${nowHead.slice(0, 7)}).`);
+      const dirty = git(r, ['status', '--porcelain', '--untracked-files=no']);
+      if (!dirty.ok || dirty.out) throw new UpdateError(`O checkout do Board tem alterações não commitadas:${fence(dirty.out)}`);
+      const backup = kind === 'server' ? this.publisher.backupDb() : null;
+      const newHead = git(tmp, ['rev-parse', 'HEAD']).out;
+      const ff = git(r, ['merge', '--ff-only', newHead]);
+      if (!ff.ok) throw new UpdateError(`O fast-forward da \`${local}\` falhou.${fence(ff.out)}`);
+      applied = true;
+      syncDir(builtUi, path.join(r, 'dist', 'ui'));
+      if (kind === 'server') {
+        syncDir(path.join(tmp, 'dist', 'server'), path.join(r, 'dist', 'server'));
+        if (needsInstall) await this.step(r, 'Instalando dependências no checkout do Board', this.commands.install, env);
+      }
+      this.ctx.service.setSetting(FAILURE_KEY, null);
+      this.log(`aplicada: ${local} em ${newHead.slice(0, 7)} (${kind}${backup ? `, backup ${backup}` : ''})`);
+      this.last = { ...this.last, ...this.compare(r, fresh.source) };
+      this.ctx.bus.publish({ type: 'ui.updated' });
+      this.publisher.dropTmp(r, tmp);
+      tmp = null;
+
+      if (kind === 'server') {
+        this.setPhase('restarting', 'Reiniciando o servidor');
+        await (this.opts.restart ?? (() => this.publisher.restartDetached(r)))();
+      }
+    } catch (err) {
+      const message = err instanceof UpdateError ? err.message : `Falha interna: ${(err as Error).message}`;
+      const full = applied ? `Atenção: a \`${local}\` já tinha avançado quando isto falhou; confira o checkout do Board e o \`dist/\`.\n\n${message}` : message;
+      this.ctx.service.setSetting(FAILURE_KEY, { sha: target ?? this.last.remoteSha ?? '', message: full, at: nowIso() });
+      this.log(`abortada: ${full}`);
+      if (tmp && repo) this.publisher.dropTmp(repo, tmp);
+      if (held) this.publisher.setHold(false);
+    }
+  }
+
+  private async step(cwd: string, label: string, [cmd, args]: [string, string[]], env: NodeJS.ProcessEnv): Promise<void> {
+    this.setPhase(this.phase === 'applying' ? 'applying' : 'preparing', label);
+    const r = await this.run(cmd, args, cwd, env);
+    if (!r.ok) throw new UpdateError(`${label}: \`${[cmd, ...args].join(' ')}\` falhou.${fence(r.out)}`);
+  }
+
+  /** Tests, with one serial rerun before blaming the update (as the publication does, card #110). */
+  private async testStep(cwd: string, env: NodeJS.ProcessEnv): Promise<void> {
+    this.setPhase('preparing', 'Rodando os testes');
+    const [cmd, args] = this.commands.test;
+    if ((await this.run(cmd, args, cwd, env)).ok) return;
+    this.setPhase('preparing', 'Repetindo os testes, um arquivo por vez');
+    const [retryCmd, retryArgs] = this.commands.testRetry;
+    const second = await this.run(retryCmd, retryArgs, cwd, env);
+    if (!second.ok) throw new UpdateError(`Rodando os testes: \`${[retryCmd, ...retryArgs].join(' ')}\` falhou também na segunda rodada.${fence(second.out)}`);
+  }
+}

@@ -398,6 +398,47 @@ export interface PublishState {
   detail: string | null;
 }
 
+/**
+ * Update of the Board from the git remote it was cloned from (card #183, D89): every new commit on
+ * the remote branch counts as a new version. 'notify' shows a strip with an "Atualizar" button;
+ * 'auto' applies it on its own; 'off' never checks.
+ */
+export type SelfUpdateMode = 'off' | 'notify' | 'auto';
+export const SELF_UPDATE_MODES: SelfUpdateMode[] = ['off', 'notify', 'auto'];
+export type SelfUpdatePhase = 'idle' | 'checking' | 'preparing' | 'waiting' | 'applying' | 'restarting';
+
+export interface SelfUpdateCommit {
+  sha: string;
+  subject: string;
+  /** Commit date, ISO. */
+  date: string;
+}
+
+export interface SelfUpdateState {
+  mode: SelfUpdateMode;
+  /** Why this install cannot update itself (no remote, it is the source of the public copy); null when it can. */
+  unavailable: string | null;
+  /** Remote branch followed, e.g. origin/main. */
+  source: string | null;
+  /** Web page of the remote's commits, when it is on GitHub. */
+  sourceUrl: string | null;
+  /** Commits on the remote not in this install. */
+  behind: number;
+  /** Commits of this install not on the remote (improvements made here): the update merges instead of fast-forwarding. */
+  ahead: number;
+  /** The newest commits to come, newest first (at most 20). */
+  commits: SelfUpdateCommit[];
+  remoteSha: string | null;
+  checkedAt: string | null;
+  /** The last check failed (network, authentication): why. */
+  checkError: string | null;
+  phase: SelfUpdatePhase;
+  /** What the update is doing now, in words. */
+  detail: string | null;
+  /** The last update that failed; nothing was applied. Cleared by a later update that passes. */
+  failure: { sha: string; message: string; at: string } | null;
+}
+
 /** One plan usage window as Claude Code reports it. */
 export interface UsageWindow {
   /** 0..1 */

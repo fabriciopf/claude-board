@@ -12,7 +12,10 @@ import { VERSION } from '../version.js';
 export { VERSION };
 
 export async function buildApp(ctx: AppContext, opts: { logger?: boolean; serveUi?: boolean; allowAnyHost?: boolean; uiDir?: string } = {}): Promise<FastifyInstance> {
-  const app = Fastify({ logger: opts.logger ?? false, bodyLimit: 5 * 1024 * 1024 });
+  // forceCloseConnections: the live-updates stream of every open tab (/api/events) never goes idle, so
+  // app.close() used to wait for it forever, and a restart after a publication or an update (D89) left
+  // the Board down for the 2 minutes the relaunch waits. Closing them lets the tabs reconnect to the new server.
+  const app = Fastify({ logger: opts.logger ?? false, bodyLimit: 5 * 1024 * 1024, forceCloseConnections: true });
 
   // DNS-rebinding guard: a page on another origin that resolves to 127.0.0.1 must not reach the API.
   const loopback = /^(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/i;
