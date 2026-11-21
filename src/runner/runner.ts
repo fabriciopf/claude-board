@@ -318,8 +318,8 @@ export class Runner implements RunnerControl {
       return this.finish(run, emptyState(), { forcedStatus: 'error', errorMd: (err as Error).message });
     }
     service.setRunFields(card.id, { worktreePath: workdir.worktreePath, branch: workdir.branch });
-    if (workdir.baseNote) {
-      service.addComment(card.id, { author: 'system', kind: 'comment', executionId: run.executionId, bodyMd: workdir.baseNote });
+    for (const note of [workdir.baseNote, workdir.guardNote]) {
+      if (note) service.addComment(card.id, { author: 'system', kind: 'comment', executionId: run.executionId, bodyMd: note });
     }
     // The card's agent (D92, D93): Claude Code unless the card or the settings choose Antigravity CLI.
     const agent = resolveAgent(card, config);

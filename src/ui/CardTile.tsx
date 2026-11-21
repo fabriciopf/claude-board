@@ -1,13 +1,13 @@
 import { forwardRef, type HTMLAttributes, type KeyboardEvent, type MouseEvent } from 'react';
-import { showsChecklistOnTile, type App, type CardSummary, type Label, type Repository } from '../shared/domain';
+import { showsChecklistOnTile, type App, type CardSummary, type Label, type Repository, type Status } from '../shared/domain';
 import { fmtDate, isOverdue } from './api';
 import { toggleLabelsExpanded, useLabelsExpanded } from './label-display';
 import { OwnerAvatar } from './OwnerAvatar';
 import { statusLabel, statusShortLabel, t } from './i18n';
 
-/** Small dot on a card in "Em revisão" not opened since it got there (D84). */
-export function UnseenDot() {
-  return <span className="unseen-dot" role="img" aria-label={t('board.tile.unseen')} title={t('board.tile.unseenTitle', { status: statusLabel('review') })} />;
+/** Small dot on a card in "Em revisão" or "Aguardando você" not opened since it got there (D84, D95). */
+export function UnseenDot({ status }: { status: Status }) {
+  return <span className="unseen-dot" role="img" aria-label={t('board.tile.unseen')} title={t('board.tile.unseenTitle', { status: statusLabel(status) })} />;
 }
 
 /** Checklist items shown on the cover; the rest is summed up as "+N itens". */
@@ -54,7 +54,7 @@ export const CardTile = forwardRef<HTMLDivElement, Props>(function CardTile(
   ].join(' ');
   return (
     <div ref={ref} className={classes} data-card-id={card.id} tabIndex={0} aria-busy={saving || undefined} {...rest}>
-      {card.unseenInReview && <UnseenDot />}
+      {card.unseen && <UnseenDot status={card.status} />}
       {cardLabels.length > 0 && (
         <button
           type="button"

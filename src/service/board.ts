@@ -6,6 +6,7 @@ import {
   AGENTS,
   EFFORT_LEVELS,
   NEWEST_FIRST_STATUSES,
+  UNSEEN_STATUSES,
   isAgentId,
   type AgentId,
   REOPEN_ON_COMMENT,
@@ -261,18 +262,18 @@ export const DEFAULT_LABELS: [string, string][] = [
 
 /** All reads and writes of the board, with the rules of the spec applied here (not only in the UI). */
 /**
- * 1 while a card in "Em revisão" was not opened since it entered the list (D84): its last move into
- * "review" was made by Claude or the runner and no `viewed` event came after it. A move the user made
- * on their own counts as seen; leaving the list drops the mark, since the status no longer matches.
- * Expects the card table aliased as `c`.
+ * 1 while a card in one of the UNSEEN_STATUSES was not opened since it entered that list (D84, D95):
+ * its last move into the current list was made by Claude or the runner and no `viewed` event came after
+ * it. A move the user made on their own counts as seen; leaving the list drops the mark, since the
+ * status no longer matches. Expects the card table aliased as `c`.
  */
-const REVIEW_UNSEEN_SQL = `CASE WHEN c.status = 'review' THEN COALESCE((
+const UNSEEN_SQL = `CASE WHEN c.status IN (${UNSEEN_STATUSES.map((s) => `'${s}'`).join(', ')}) THEN COALESCE((
     SELECT CASE
       WHEN m.author = 'user' THEN 0
       WHEN EXISTS (SELECT 1 FROM events v WHERE v.card_id = c.id AND v.type = 'viewed' AND v.id > m.id) THEN 0
       ELSE 1 END
     FROM events m
-    WHERE m.card_id = c.id AND m.type = 'moved' AND json_extract(m.payload_json, '$.to') = 'review'
+    WHERE m.card_id = c.id AND m.type = 'moved' AND json_extract(m.payload_json, '$.to') = c.status
     ORDER BY m.id DESC LIMIT 1), 0) ELSE 0 END`;
 
 export class BoardService {
@@ -469,13 +470,14 @@ export class BoardService {
   // ---------- events ----------
 
   /**
-   * The user opened the card (D84). Clears the "not seen yet" mark of a card in "Em revisão": records
+   * The user opened the card (D84, D95). Clears the "not seen yet" mark of a card in "Em revisão" or
+   * "Aguardando você": records
    * a `viewed` event only when the mark is on, so opening a card again writes nothing.
    */
   markSeen(id: number): { cleared: boolean } {
     this.getCard(id);
-    const row = this.db.prepare(`SELECT ${REVIEW_UNSEEN_SQL} AS review_unseen FROM cards c WHERE c.id = ?`).get(id) as Row | undefined;
-    if (row?.review_unseen !== 1) return { cleared: false };
+    const row = this.db.prepare(`SELECT ${UNSEEN_SQL} AS unseen FROM cards c WHERE c.id = ?`).get(id) as Row | undefined;
+    if (row?.unseen !== 1) return { cleared: false };
     this.recordEvent(id, 'viewed', {}, 'user');
     this.changed(id);
     return { cleared: true };
@@ -555,7 +557,7 @@ export class BoardService {
             WHERE e.card_id = c.id AND e.type = 'moved' AND json_extract(e.payload_json, '$.to') = c.status),
           c.created_at
         ) AS entered_status_at,
-        ${REVIEW_UNSEEN_SQL} AS review_unseen
+        ${UNSEEN_SQL} AS unseen
       FROM cards c
       ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
       ORDER BY c.position ASC, c.id ASC
@@ -586,7 +588,7 @@ export class BoardService {
         parentTitle: card.parentId ? (titles.get(card.parentId) ?? null) : null,
         subtasks: subtasks.get(card.id) ?? [],
         enteredStatusAt: r.entered_status_at,
-        unseenInReview: r.review_unseen === 1,
+        unseen: r.unseen === 1,
       };
     });
   }

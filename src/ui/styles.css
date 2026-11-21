@@ -1075,7 +1075,7 @@ textarea.input {
   background: var(--surface-2);
 }
 
-/* Not opened since it got to "Em revisão" (D84): a small dot, no text. */
+/* Not opened since it got to "Em revisão" or "Aguardando você" (D84, D95): a small dot, no text. */
 .unseen-dot {
   display: inline-block;
   width: 7px;
