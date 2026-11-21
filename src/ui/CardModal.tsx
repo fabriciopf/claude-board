@@ -880,6 +880,9 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
                   id="f-effort"
                   className="input"
                   value={card.effort ?? ''}
+                  // Antigravity CLI takes no effort (card #191): the select would have no effect.
+                  disabled={agent === 'antigravity'}
+                  title={agent === 'antigravity' ? t('card.effortClaudeOnly') : undefined}
                   onChange={(e) => void patch({ effort: e.target.value || null })}
                 >
                   <option value="">{t('card.fromSettingsWith', { value: effortLabel(defaults.defaultEffort) })}</option>

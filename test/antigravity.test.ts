@@ -165,6 +165,7 @@ describe('runner with the fake agy (ACP)', () => {
     ctx.config.maxConcurrency = 1;
     ctx.config.defaultAgent = 'claude';
     ctx.config.prPolicy = 'none';
+    ctx.config.defaultEffort = 'medium';
     delete process.env.FAKE_AGY_HTTP;
   });
 
@@ -177,12 +178,16 @@ describe('runner with the fake agy (ACP)', () => {
     expect(d.card.title).toBe('Documento pelo Antigravity');
     expect(d.comments.map((c) => c.bodyMd)).toEqual(expect.arrayContaining(['Antigravity trabalhando.', 'O Antigravity escreveu o documento.']));
     const x = d.executions[0];
-    expect(x).toMatchObject({ status: 'success', agent: 'antigravity', model: 'gemini-4-neon-high', effort: 'high', tokensIn: 400, tokensOut: 100 });
+    // Effort is Claude Code's alone: agy is not given it, so the run does not claim one (card #191).
+    expect(x).toMatchObject({ status: 'success', agent: 'antigravity', model: 'gemini-4-neon-high', effort: null, tokensIn: 400, tokensOut: 100 });
     // The session id is agy's own, learned from the stream.
     const call = prompts().at(-1);
     expect(d.card.claudeSessionId).toBe(call.sessionId);
     expect(x.claudeSessionId).toBe(call.sessionId);
-    expect(call.args).toEqual(expect.arrayContaining(['acp', '--model', 'gemini-4-neon-high', '--effort', 'high']));
+    // `agy acp` takes no --model, --effort nor --mode (card #191): the model goes over ACP.
+    expect(call.args).toEqual(['acp']);
+    expect(call.model).toBe('gemini-4-neon-high');
+    expect(call.mode).toBeNull();
     expect(call.entrypoint).toBeNull();
     // The Board's rules ride at the top of the prompt; the MCP server is the card's, over HTTP.
     expect(call.prompt).toMatch(/^<claude-board-rules>[\s\S]*card_submit_for_review[\s\S]*<\/claude-board-rules>/);
@@ -192,6 +197,23 @@ describe('runner with the fake agy (ACP)', () => {
     expect(items.map((i) => i.kind)).toEqual(['user', 'system', 'text', 'tool_use', 'tool_result', 'tool_use', 'tool_result', 'tool_use', 'tool_result', 'text', 'result']);
     expect(items.find((i) => i.kind === 'text')?.text).toBe('Vou ler o card e escrever o documento.');
     expect(items.some((i) => i.title?.startsWith('board:card_submit_for_review'))).toBe(true);
+  });
+
+  it('a card in plan mode sets the plan mode over ACP, and a model agy refuses fails the run with its message', async () => {
+    const plan = queue('Plano', 'Planeje. [fake:success]', { agent: 'antigravity', permissionMode: 'plan', effort: 'max' });
+    await runOnce();
+    const call = prompts().at(-1);
+    expect(call.args).toEqual(['acp']);
+    expect(call.mode).toBe('plan');
+    expect(ctx.service.getCardDetail(plan.id).card.status).toBe('review');
+
+    const before = prompts().length;
+    const bad = queue('Modelo ruim', 'Faça. [fake:success]', { agent: 'antigravity', model: 'modelo-inexistente' });
+    await runOnce();
+    expect(prompts().length).toBe(before);
+    const x = ctx.service.getCardDetail(bad.id).executions[0];
+    expect(x.status).not.toBe('success');
+    expect(x.errorMd ?? '').toContain('session/set_model: unknown model modelo-inexistente');
   });
 
   it('a reply loads the same session without repeating its history; moving the card to Claude Code starts a new one', async () => {

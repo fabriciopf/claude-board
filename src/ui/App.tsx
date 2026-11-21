@@ -31,6 +31,7 @@ import { SelfUpdateBanner, readDismissed } from './SelfUpdateBanner';
 import { selfUpdateView } from './self-update-view';
 import { BannerDock } from './BannerDock';
 import { HelpButton } from './HelpButton';
+import { setDefaultAgent } from './default-agent';
 import { isHelpKey } from './help';
 
 type Theme = 'system' | 'light' | 'dark';
@@ -87,7 +88,9 @@ export function App() {
 
   const load = useCallback(async () => {
     try {
-      setData(await api.get<BoardData>('/api/board'));
+      const board = await api.get<BoardData>('/api/board');
+      setDefaultAgent(board.defaultAgent);
+      setData(board);
       if (view === 'archived') setArchived((await api.get<BoardData>('/api/board?archived=1')).cards);
     } catch (err) {
       notify(t('app.server.unreachable', { error: (err as Error).message }), true);

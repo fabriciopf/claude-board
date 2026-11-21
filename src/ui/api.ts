@@ -44,6 +44,8 @@ export interface BoardData {
   labels: Label[];
   repositories: Repository[];
   runner: RunnerState;
+  /** Agent of the runs of a card that picks none (D98); absent from a server older than it. */
+  defaultAgent?: string;
   usage: UsageSnapshot | null;
   agenda: AgendaState | null;
   publish: PublishState | null;

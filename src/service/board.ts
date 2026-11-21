@@ -550,6 +550,8 @@ export class BoardService {
         (SELECT COUNT(*) FROM checklist_items i WHERE i.card_id = c.id) AS checklist_total,
         (SELECT COUNT(*) FROM comments m WHERE m.card_id = c.id AND m.author != 'system') AS comment_count,
         (SELECT COUNT(*) FROM executions e WHERE e.card_id = c.id AND e.status = 'running') AS running_count,
+        (SELECT COALESCE(e.agent, 'claude') FROM executions e
+          WHERE e.card_id = c.id AND e.status = 'running' ORDER BY e.id DESC LIMIT 1) AS running_agent,
         (SELECT GROUP_CONCAT(cl.label_id) FROM card_labels cl WHERE cl.card_id = c.id) AS label_ids,
         (SELECT GROUP_CONCAT(cr.repository_id) FROM card_repositories cr WHERE cr.card_id = c.id) AS repository_ids,
         COALESCE(
@@ -584,6 +586,7 @@ export class BoardService {
         checklistTotal: r.checklist_total,
         commentCount: r.comment_count,
         running: r.running_count > 0,
+        runningAgent: r.running_agent ?? null,
         hasOpenQuestion: card.status === 'waiting_user' && this.lastQuestion(card.id) !== null,
         parentTitle: card.parentId ? (titles.get(card.parentId) ?? null) : null,
         subtasks: subtasks.get(card.id) ?? [],

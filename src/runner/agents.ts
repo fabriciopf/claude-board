@@ -200,7 +200,10 @@ export interface AcpRunConfig {
   cwd: string;
   prompt: string;
   resumeId: string | null;
+  /** Set with session/set_model after the session opens; null = agy's own default. */
   model: string | null;
+  /** Set with session/set_mode after the session opens ('plan' for a card in plan mode). */
+  mode: string | null;
   maxTurns: number;
   /** Regular expressions of the shell commands the client refuses (`pushDenyPatterns`). */
   denyPatterns: string[];
@@ -223,11 +226,12 @@ export interface AcpRunConfig {
 function antigravityLaunch(input: LaunchInput): Launch {
   const { config, card, runDir, boardUrl, executionId } = input;
   const model = resolveModel(card, config, 'antigravity');
-  const effort = card.effort || config.defaultEffort || null;
+  // `agy acp` takes none of --model, --effort or --mode (agy 1.5.14 exits with "flags provided but
+  // not defined"; card #191). The model and the plan mode go over ACP once the session is open
+  // (session/set_model, session/set_mode); effort is Claude Code's alone, so it is not passed nor
+  // recorded on the run.
+  const mode = card.permissionMode === 'plan' ? 'plan' : null;
   const agyArgs = [...config.antigravityArgsPrefix, 'acp'];
-  if (model) agyArgs.push('--model', model);
-  if (effort) agyArgs.push('--effort', effort);
-  if (card.permissionMode === 'plan') agyArgs.push('--mode', 'plan');
   for (const dir of input.addDirs) agyArgs.push('--add-dir', dir);
   const root = packageRoot();
   const ids = { CLAUDE_BOARD_CARD_ID: String(card.id), CLAUDE_BOARD_EXECUTION_ID: String(executionId), CLAUDE_BOARD_URL: boardUrl };
@@ -238,6 +242,7 @@ function antigravityLaunch(input: LaunchInput): Launch {
     prompt: withBoardRules(input.systemPrompt, input.userPrompt),
     resumeId: input.resumeId,
     model,
+    mode,
     maxTurns: card.maxTurns ?? config.defaultMaxTurns ?? 0,
     denyPatterns: pushDenyPatterns(config.prPolicy, protectedBranchList(config.protectedBranches)),
     mcp: {
@@ -258,7 +263,7 @@ function antigravityLaunch(input: LaunchInput): Launch {
     // The prompt travels in the run file; stdin stays empty.
     stdin: '',
     model,
-    effort,
+    effort: null,
     presetSession: false,
   };
 }

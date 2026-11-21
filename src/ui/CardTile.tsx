@@ -1,8 +1,9 @@
 import { forwardRef, type HTMLAttributes, type KeyboardEvent, type MouseEvent } from 'react';
-import { showsChecklistOnTile, type App, type CardSummary, type Label, type Repository, type Status } from '../shared/domain';
+import { coverAgent, showsChecklistOnTile, type App, type CardSummary, type Label, type Repository, type Status } from '../shared/domain';
 import { fmtDate, isOverdue } from './api';
 import { toggleLabelsExpanded, useLabelsExpanded } from './label-display';
-import { OwnerAvatar } from './OwnerAvatar';
+import { AgentAvatar } from './AgentIcon';
+import { useDefaultAgent } from './default-agent';
 import { statusLabel, statusShortLabel, t } from './i18n';
 
 /** Small dot on a card in "Em revisão" or "Aguardando você" not opened since it got there (D84, D95). */
@@ -32,6 +33,7 @@ export const CardTile = forwardRef<HTMLDivElement, Props>(function CardTile(
   const app = card.appId ? apps.get(card.appId) : undefined;
   const cardLabels = card.labelIds.map((id) => labels.get(id)).filter((l): l is Label => !!l);
   const labelsExpanded = useLabelsExpanded();
+  const defaultAgent = useDefaultAgent();
   // The labels sit inside the clickable tile: the click toggles them and must not open the card.
   const onLabelsClick = (e: MouseEvent) => {
     e.stopPropagation();
@@ -152,7 +154,7 @@ export const CardTile = forwardRef<HTMLDivElement, Props>(function CardTile(
             {card.suggestionConfidence != null ? ` (${Math.round(card.suggestionConfidence * 100)}%)` : ''}
           </span>
         )}
-        <OwnerAvatar owner={card.owner} />
+        <AgentAvatar agent={coverAgent(card, defaultAgent)} running={card.running} />
       </div>
     </div>
   );

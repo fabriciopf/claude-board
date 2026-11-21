@@ -209,6 +209,16 @@ export function agentLabel(id: string | null | undefined): string {
   return AGENT_LABELS[(id as AgentId) ?? 'claude'] ?? id ?? AGENT_LABELS.claude;
 }
 
+/**
+ * Agent shown on the card cover (card #197, D98): the one of the run in progress; otherwise the one
+ * the next run will drive, the card's own or the default of the settings.
+ */
+export function coverAgent(card: Pick<CardSummary, 'agent' | 'runningAgent'>, defaultAgent: string | null | undefined): string {
+  if (card.runningAgent) return card.runningAgent;
+  if (isAgentId(card.agent)) return card.agent;
+  return isAgentId(defaultAgent) ? defaultAgent : 'claude';
+}
+
 /** Command a person types to continue a card's session in a terminal, in the agent that holds it. */
 export function resumeCommand(agent: string | null | undefined, sessionId: string): string {
   if (agent === 'antigravity') return `agy --conversation ${sessionId}`;
@@ -354,6 +364,8 @@ export interface CardSummary extends Card {
   checklist: { text: string; done: boolean }[];
   commentCount: number;
   running: boolean;
+  /** Agent of the run in progress ('claude' for a run from before migration 15); null when nothing runs. */
+  runningAgent: string | null;
   hasOpenQuestion: boolean;
   /** Title of the card this one was split from. */
   parentTitle: string | null;

@@ -251,6 +251,9 @@ async function main() {
     const created = await request('session/new', { cwd: cfg.cwd, mcpServers });
     sessionId = created.sessionId;
   }
+  // `agy acp` takes no --model nor --mode (card #191): both are set on the open session.
+  if (cfg.model) await request('session/set_model', { sessionId, modelId: cfg.model });
+  if (cfg.mode) await request('session/set_mode', { sessionId, modeId: cfg.mode });
   emit({ type: 'system', subtype: 'init', session_id: sessionId, model: cfg.model ?? 'padrão do Antigravity CLI', cwd: cfg.cwd, agent: 'antigravity', mcp: http ? 'http' : 'stdio' });
   const result = await request('session/prompt', { sessionId, prompt: [{ type: 'text', text: cfg.prompt }] });
   const stop = result.stopReason;

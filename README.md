@@ -110,8 +110,9 @@ A card can run in [Antigravity CLI](https://antigravity.google/docs/cli) (`agy`,
 
 ```text
 node bin/agy-acp.mjs runs/<id>/agy-run.json
-  └─ agy acp [--model M] [--effort E] [--mode plan] [--add-dir <worktree>]
-       initialize → session/new (or session/load) with the Board's MCP server → session/prompt
+  └─ agy acp [--add-dir <worktree>]
+       initialize → session/new (or session/load) with the Board's MCP server
+         → session/set_model, session/set_mode plan (when the card asks) → session/prompt
 ```
 
 - **Same card flow:** each session gets the Board's MCP server with the card's headers (over HTTP, or over stdio through `claude-board mcp` when agy offers no HTTP MCP). The Board's rules go at the top of the prompt. Questions, deliveries, splits, retries and "Continue in terminal" (`agy --conversation <id>`) work as with Claude Code. The client writes the run in Claude Code's stream format, so the transcript, turns and tokens show the same way.

@@ -1381,6 +1381,12 @@ textarea.input {
   color: #ffffff;
 }
 
+/* The agent a card runs in, in its own brand colours on a neutral disc (card #197, D98). */
+.avatar.agent {
+  background: var(--column);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+
 .avatar.user {
   background: var(--info-soft);
   color: var(--info);
