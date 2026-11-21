@@ -18,3 +18,10 @@ export function nextInColumn(cards: CardSummary[], approvedId: number, status: S
   if (!others.length) return null;
   return (index >= 0 ? others[index] : undefined) ?? others[0];
 }
+
+/**
+ * How long the card opened by `nextInColumn` keeps its action buttons locked (card #165). Its
+ * "Aprovar" sits where the previous card's was, and a second click that lands as the approval comes
+ * back (measured: about 150 ms after the answer, with the server slow) approved the next card too.
+ */
+export const MODAL_SETTLE_MS = 700;

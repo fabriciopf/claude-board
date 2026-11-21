@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { EFFORT_LABELS, EFFORT_LEVELS, MODEL_OPTIONS, PERMISSION_MODES, REOPEN_ON_COMMENT, STATUS_LABELS, STATUS_SHORT_LABELS, effortLabel, modelLabel, type App, type Card, type Label, type LinkKind, type Repository } from '../shared/domain';
+import { ActionButton, ActionGroup, useBusy } from './ActionButton';
 import { ApiError, api, fmtDate, useServerEvents, type CardDetailResponse } from './api';
 import { latestDelivery } from './delivery';
 import { renderMarkdown } from './markdown';
@@ -19,6 +20,12 @@ interface Props {
   move: (card: Card, status: Card['status']) => Promise<void>;
   /** Called after an approval or an archive, with the card as it was in its column: the parent opens the next one or closes. */
   onLeftColumn: (card: Card) => void;
+  /**
+   * Set when this card opened in place of one just approved or archived (D40): for this long its
+   * action buttons stay locked, so a second click on "Aprovar" that lands as the answer arrives does
+   * not approve the next card, whose button sits in the same spot (card #165).
+   */
+  settleMs?: number;
 }
 
 const LINK_KINDS: { value: LinkKind; label: string }[] = [
@@ -34,7 +41,13 @@ function linkHref(kind: LinkKind, value: string, jiraBaseUrl?: string): string |
   return undefined;
 }
 
-export function CardModal({ cardId, apps, labels, repositories = [], onClose, onOpenCard, notify, move, onLeftColumn }: Props) {
+export function CardModal({ cardId, apps, labels, repositories = [], onClose, onOpenCard, notify, move, onLeftColumn, settleMs = 0 }: Props) {
+  const [settled, setSettled] = useState(settleMs <= 0);
+  useEffect(() => {
+    if (settleMs <= 0) return;
+    const t = window.setTimeout(() => setSettled(true), settleMs);
+    return () => window.clearTimeout(t);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const [detail, setDetail] = useState<CardDetailResponse | null>(null);
   const [editingDesc, setEditingDesc] = useState(false);
   const [desc, setDesc] = useState('');
@@ -44,9 +57,13 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
   const [adjust, setAdjust] = useState('');
   const [showAdjust, setShowAdjust] = useState(false);
   const [newItem, setNewItem] = useState('');
+  // The side panel (Lista, Dono, Projeto, Labels...) opens folded on every modal; d or the strip unfolds it (card #166).
+  const [sideOpen, setSideOpen] = useState(false);
   const [link, setLink] = useState({ kind: 'url' as LinkKind, value: '', title: '' });
   const [live, setLive] = useState<string[]>([]);
   const activityRef = useRef<HTMLDivElement>(null);
+  // Actions with a keyboard path too (Ctrl+Enter, "a"): one in flight per key (card #165).
+  const { track, isBusy } = useBusy();
   // Ctrl+V or drop of an image into any text field of the card (D57).
   const pasteError = (msg: string) => notify(msg, true);
   const descPaste = useImagePaste(setDesc, pasteError);
@@ -95,17 +112,31 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
     void load();
   });
 
-  const run = async (fn: () => Promise<unknown>, ok?: string) => {
+  /** Runs a write, then reloads the card. Resolves to false on error, so a draft is only cleared on success. */
+  const run = async (fn: () => Promise<unknown>, ok?: string): Promise<boolean> => {
     try {
       await fn();
       if (ok) notify(ok);
       await load();
+      return true;
     } catch (err) {
       notify(err instanceof ApiError ? err.message : String(err), true);
+      return false;
     }
   };
 
-  const patch = (body: Record<string, unknown>) => run(() => api.patch(`/api/cards/${cardId}`, body));
+  // A field edit shows at once (a controlled select would otherwise snap back to the old value until
+  // the reload) and the header says "salvando…" until the server answers; an error reloads the truth.
+  const [saving, setSaving] = useState(0);
+  const patch = async (body: Record<string, unknown>) => {
+    setDetail((d) => (d ? { ...d, card: { ...d.card, ...body } } : d));
+    setSaving((n) => n + 1);
+    try {
+      if (!(await run(() => api.patch(`/api/cards/${cardId}`, body)))) await load();
+    } finally {
+      setSaving((n) => n - 1);
+    }
+  };
 
   // Approving or archiving takes the card out of its column. No reload here: the modal moves on to
   // the next card of that column, or closes.
@@ -120,19 +151,41 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
       notify(err instanceof ApiError ? err.message : String(err), true);
     }
   };
-  const approve = () => leaveColumn(() => api.post(`/api/cards/${cardId}/approve`), 'Aprovado');
+  const approve = () => track('approve', () => leaveColumn(() => api.post(`/api/cards/${cardId}/approve`), 'Aprovado'));
   const archive = () => leaveColumn(() => api.post(`/api/cards/${cardId}/archive`, { archived: true }), 'Arquivado');
 
-  // Keyboard: e edits the description, a approves a card in review.
+  const sendReply = (text: string) =>
+    track('reply', () => run(() => api.post(`/api/cards/${cardId}/reply`, { text }), 'Resposta enviada').then((ok) => ok && setReply('')));
+  const sendComment = () =>
+    track('comment', () => run(() => api.post(`/api/cards/${cardId}/comments`, { body: comment })).then((ok) => ok && setComment('')));
+  const sendAdjust = () =>
+    track('adjust', () =>
+      run(() => api.post(`/api/cards/${cardId}/adjust`, { text: adjust }), 'Ajustes enviados').then((ok) => {
+        if (!ok) return;
+        setAdjust('');
+        setShowAdjust(false);
+      }),
+    );
+  const addChecklistItem = () =>
+    track('checklist-add', () => run(() => api.post(`/api/cards/${cardId}/checklist`, { text: newItem })).then((ok) => ok && setNewItem('')));
+  const addLink = () =>
+    track('link-add', () => run(() => api.post(`/api/cards/${cardId}/links`, link)).then((ok) => ok && setLink({ kind: link.kind, value: '', title: '' })));
+
+  // Keyboard: e edits the description, a approves a card in review, d folds or unfolds the side panel.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
       if (target.closest('input, textarea, select')) return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      if (e.key === 'd') {
+        e.preventDefault();
+        setSideOpen((open) => !open);
+      }
       if (e.key === 'e') {
         e.preventDefault();
         setEditingDesc(true);
       }
-      if (e.key === 'a' && detail?.card.status === 'review') {
+      if (e.key === 'a' && detail?.card.status === 'review' && settled) {
         e.preventDefault();
         void approve();
       }
@@ -182,7 +235,7 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
         <button className="btn link modal-close" onClick={onClose} aria-label="Fechar">
           ✕
         </button>
-        <div className="modal-grid">
+        <div className={'modal-grid' + (sideOpen ? '' : ' side-folded')}>
           <div>
             <div className="muted small">
               #{card.id} · em <strong>{STATUS_LABELS[card.status]}</strong>
@@ -193,6 +246,15 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
                   <button className="btn link small" onClick={() => onOpenCard(parent.id)}>
                     #{parent.id} {parent.title}
                   </button>
+                </>
+              )}
+              {/* Only for edits without a button of their own: a busy button already says what it is doing. */}
+              {(saving > 0 || ['labels', 'repositories', 'move'].some(isBusy) || checklist.some((i) => isBusy(`check-${i.id}`))) && (
+                <>
+                  {' · '}
+                  <span className="saving-badge" role="status">
+                    <span className="spinner" /> salvando…
+                  </span>
                 </>
               )}
             </div>
@@ -247,13 +309,15 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
                 <strong>O Claude perguntou:</strong>
                 <div className="md" dangerouslySetInnerHTML={{ __html: renderMarkdown(openQuestion.bodyMd) }} />
                 {openQuestion.options && (
-                  <div className="actions">
-                    {openQuestion.options.map((o) => (
-                      <button key={o} className="btn" onClick={() => void run(() => api.post(`/api/cards/${cardId}/reply`, { text: o }), 'Resposta enviada')}>
-                        {o}
-                      </button>
-                    ))}
-                  </div>
+                  <ActionGroup locked={!settled || isBusy('reply')}>
+                    <div className="actions">
+                      {openQuestion.options.map((o) => (
+                        <ActionButton key={o} className="btn" onAction={() => sendReply(o)}>
+                          {o}
+                        </ActionButton>
+                      ))}
+                    </div>
+                  </ActionGroup>
                 )}
                 <textarea
                   className="input"
@@ -266,19 +330,13 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
                   onChange={(e) => setReply(e.target.value)}
                   onKeyDown={(e) => {
                     e.stopPropagation();
-                    if (e.key === 'Enter' && e.ctrlKey && reply.trim()) {
-                      void run(() => api.post(`/api/cards/${cardId}/reply`, { text: reply }), 'Resposta enviada').then(() => setReply(''));
-                    }
+                    if (e.key === 'Enter' && e.ctrlKey && reply.trim()) void sendReply(reply);
                   }}
                 />
                 <div className="actions">
-                  <button
-                    className="btn primary"
-                    disabled={!reply.trim()}
-                    onClick={() => void run(() => api.post(`/api/cards/${cardId}/reply`, { text: reply }), 'Resposta enviada').then(() => setReply(''))}
-                  >
+                  <ActionButton className="btn primary" disabled={!reply.trim()} busy={isBusy('reply')} busyLabel="Enviando…" onAction={() => sendReply(reply)}>
                     Responder
-                  </button>
+                  </ActionButton>
                 </div>
               </div>
             )}
@@ -292,49 +350,51 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
               </div>
             )}
 
+            <ActionGroup locked={!settled || isBusy('approve')}>
             <div className="actions">
               {['backlog', 'triage', 'waiting_third_party'].includes(card.status) && (
-                <button className="btn primary" onClick={() => void run(() => api.post(`/api/cards/${cardId}/send-to-claude`), 'Card na fila do Claude')}>
+                <ActionButton
+                  className="btn primary"
+                  busyLabel="Mandando…"
+                  onAction={() => run(() => api.post(`/api/cards/${cardId}/send-to-claude`), 'Card na fila do Claude')}
+                >
                   Mandar pro Claude
-                </button>
+                </ActionButton>
               )}
               {card.status === 'triage' && (
                 <>
-                  <button
-                    className="btn"
-                    onClick={() => void run(() => api.post(`/api/triage/${cardId}/accept`, {}), 'Aceito')}
-                  >
+                  <ActionButton className="btn" busyLabel="Aceitando…" onAction={() => run(() => api.post(`/api/triage/${cardId}/accept`, {}), 'Aceito')}>
                     Aceitar ({STATUS_LABELS[card.suggestedStatus && card.suggestedStatus !== 'triage' ? card.suggestedStatus : 'backlog']})
-                  </button>
-                  <button className="btn" onClick={() => void run(() => api.post(`/api/triage/${cardId}/ignore`, {}), 'Ignorado')}>
+                  </ActionButton>
+                  <ActionButton className="btn" busyLabel="Ignorando…" onAction={() => run(() => api.post(`/api/triage/${cardId}/ignore`, {}), 'Ignorado')}>
                     Ignorar
-                  </button>
+                  </ActionButton>
                 </>
               )}
               {card.status === 'review' && (
                 <>
-                  <button className="btn ok" onClick={() => void approve()}>
+                  <ActionButton className="btn ok" busy={isBusy('approve')} busyLabel="Aprovando…" onAction={approve}>
                     Aprovar <span className="kbd">a</span>
-                  </button>
+                  </ActionButton>
                   <button className="btn" onClick={() => setShowAdjust(!showAdjust)}>
                     Pedir ajustes
                   </button>
                 </>
               )}
               {failed && (
-                <button className="btn primary" onClick={() => void run(() => api.post(`/api/cards/${cardId}/retry`), 'Card de volta na fila')}>
+                <ActionButton className="btn primary" busyLabel="Recolocando na fila…" onAction={() => run(() => api.post(`/api/cards/${cardId}/retry`), 'Card de volta na fila')}>
                   Tentar de novo
-                </button>
+                </ActionButton>
               )}
               {running && (
-                <button className="btn danger" onClick={() => void run(() => api.post(`/api/cards/${cardId}/stop`), 'Execução parada')}>
+                <ActionButton className="btn danger" busyLabel="Parando…" onAction={() => run(() => api.post(`/api/cards/${cardId}/stop`), 'Execução parada')}>
                   Parar
-                </button>
+                </ActionButton>
               )}
               {workDir && (
-                <button className="btn" onClick={() => void run(() => api.post(`/api/cards/${cardId}/open-vscode`), 'Abrindo o VS Code')}>
+                <ActionButton className="btn" busyLabel="Abrindo…" onAction={() => run(() => api.post(`/api/cards/${cardId}/open-vscode`), 'Abrindo o VS Code')}>
                   Abrir no VS Code
-                </button>
+                </ActionButton>
               )}
               {card.claudeSessionId && (
                 <button
@@ -344,15 +404,15 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
                   Continuar no terminal
                 </button>
               )}
-              <button
+              <ActionButton
                 className="btn"
-                onClick={() =>
-                  void (card.archived ? run(() => api.post(`/api/cards/${cardId}/archive`, { archived: false }), 'Desarquivado') : archive())
-                }
+                busyLabel={card.archived ? 'Desarquivando…' : 'Arquivando…'}
+                onAction={() => (card.archived ? run(() => api.post(`/api/cards/${cardId}/archive`, { archived: false }), 'Desarquivado') : archive())}
               >
                 {card.archived ? 'Desarquivar' : 'Arquivar'}
-              </button>
+              </ActionButton>
             </div>
+            </ActionGroup>
 
             {showAdjust && card.status === 'review' && (
               <div className="section">
@@ -368,18 +428,9 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
                   onKeyDown={(e) => e.stopPropagation()}
                 />
                 <div className="actions">
-                  <button
-                    className="btn primary"
-                    disabled={!adjust.trim()}
-                    onClick={() =>
-                      void run(() => api.post(`/api/cards/${cardId}/adjust`, { text: adjust }), 'Ajustes enviados').then(() => {
-                        setAdjust('');
-                        setShowAdjust(false);
-                      })
-                    }
-                  >
+                  <ActionButton className="btn primary" disabled={!adjust.trim()} busy={isBusy('adjust')} busyLabel="Enviando…" onAction={sendAdjust}>
                     Enviar ajustes ao Claude
-                  </button>
+                  </ActionButton>
                 </div>
               </div>
             )}
@@ -507,26 +558,29 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
                     type="checkbox"
                     checked={item.done}
                     aria-label={item.text}
-                    onChange={(e) => void run(() => api.patch(`/api/checklist/${item.id}`, { done: e.target.checked }))}
+                    disabled={isBusy(`check-${item.id}`)}
+                    onChange={(e) => {
+                      const doneNow = e.target.checked;
+                      void track(`check-${item.id}`, () => run(() => api.patch(`/api/checklist/${item.id}`, { done: doneNow })));
+                    }}
                   />
                   <span>{item.text}</span>
                   {item.createdBy === 'claude' && <span className="pill">Claude</span>}
-                  <button className="btn link small" aria-label="Remover item" onClick={() => void run(() => api.del(`/api/checklist/${item.id}`))}>
+                  <ActionButton className="btn link small" aria-label="Remover item" onAction={() => run(() => api.del(`/api/checklist/${item.id}`))}>
                     ✕
-                  </button>
+                  </ActionButton>
                 </div>
               ))}
               <input
                 className="input"
                 style={{ width: '100%', marginTop: 4 }}
-                placeholder="Adicionar item (Enter)"
+                placeholder={isBusy('checklist-add') ? 'Adicionando…' : 'Adicionar item (Enter)'}
+                aria-busy={isBusy('checklist-add') || undefined}
                 value={newItem}
                 onChange={(e) => setNewItem(e.target.value)}
                 onKeyDown={(e) => {
                   e.stopPropagation();
-                  if (e.key === 'Enter' && newItem.trim()) {
-                    void run(() => api.post(`/api/cards/${cardId}/checklist`, { text: newItem })).then(() => setNewItem(''));
-                  }
+                  if (e.key === 'Enter' && newItem.trim()) void addChecklistItem();
                 }}
               />
             </div>
@@ -552,272 +606,301 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
                 onChange={(e) => setComment(e.target.value)}
                 onKeyDown={(e) => {
                   e.stopPropagation();
-                  if (e.key === 'Enter' && e.ctrlKey && comment.trim()) {
-                    void run(() => api.post(`/api/cards/${cardId}/comments`, { body: comment })).then(() => setComment(''));
-                  }
+                  if (e.key === 'Enter' && e.ctrlKey && comment.trim()) void sendComment();
                 }}
               />
               <div className="actions">
-                <button
-                  className="btn small"
-                  disabled={!comment.trim()}
-                  onClick={() => void run(() => api.post(`/api/cards/${cardId}/comments`, { body: comment })).then(() => setComment(''))}
-                >
+                <ActionButton className="btn small" disabled={!comment.trim()} busy={isBusy('comment')} busyLabel="Enviando…" onAction={sendComment}>
                   Comentar
-                </button>
+                </ActionButton>
               </div>
             </div>
           </div>
 
-          <aside className="sidebar">
-            <div className="field">
-              <label htmlFor="f-status">Lista</label>
-              <select
-                id="f-status"
-                className="input"
-                value={card.status}
-                disabled={running}
-                onChange={(e) => void move(card, e.target.value as Card['status']).then(load)}
+          {!sideOpen ? (
+            <button
+              className="side-expand"
+              onClick={() => setSideOpen(true)}
+              title="Mostrar os detalhes (d)"
+              aria-label="Mostrar os detalhes do card"
+              aria-expanded={false}
+              aria-controls="card-side"
+            >
+              <span className="side-expand-arrow" aria-hidden="true">
+                ‹
+              </span>
+              <span className="side-expand-title">Detalhes</span>
+              <span className="kbd">d</span>
+            </button>
+          ) : (
+            <aside className="sidebar" id="card-side">
+              <button
+                className="side-collapse"
+                onClick={() => setSideOpen(false)}
+                title="Recolher os detalhes (d)"
+                aria-expanded={true}
+                aria-controls="card-side"
               >
-                {Object.entries(STATUS_LABELS).map(([value, label]) => (
-                  <option key={value} value={value} disabled={value === 'running' || value === 'triage'}>
-                    {label}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="field">
-              <label htmlFor="f-owner">Dono</label>
-              <select id="f-owner" className="input" value={card.owner} onChange={(e) => void patch({ owner: e.target.value })}>
-                <option value="user">Você</option>
-                <option value="claude">Claude</option>
-              </select>
-            </div>
-            <div className="field">
-              <label htmlFor="f-app">Projeto</label>
-              <select
-                id="f-app"
-                className="input"
-                value={card.appId ?? ''}
-                onChange={(e) => void patch({ appId: e.target.value ? Number(e.target.value) : null })}
-              >
-                <option value="">Sem projeto</option>
-                {apps
-                  .filter((a) => !a.archived || a.id === card.appId)
-                  .map((a) => (
-                    <option key={a.id} value={a.id}>
-                      {a.name}
-                    </option>
-                  ))}
-              </select>
-              {apps.length === 0 && <span className="muted small">Cadastre os projetos em Configurações.</span>}
-            </div>
-            <div className="field">
-              <label>Labels</label>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                {labels.map((l) => {
-                  const on = card.labelIds.includes(l.id);
-                  return (
-                    <button
-                      key={l.id}
-                      className="label-chip"
-                      style={{ background: l.color, opacity: on ? 1 : 0.35, border: 0, cursor: 'pointer' }}
-                      aria-pressed={on}
-                      onClick={() =>
-                        void run(() =>
-                          api.put(`/api/cards/${cardId}/labels`, {
-                            labelIds: on ? card.labelIds.filter((x) => x !== l.id) : [...card.labelIds, l.id],
-                          }),
-                        )
-                      }
-                    >
-                      {l.name}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-            <div className="field">
-              <label id="f-repositories">Repositórios</label>
-              <div role="group" aria-labelledby="f-repositories" style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                {repositories.map((x) => {
-                  const ids = card.repositoryIds ?? [];
-                  const on = ids.includes(x.id);
-                  return (
-                    <button
-                      key={x.id}
-                      className={'repo-chip toggle' + (on ? ' on' : '')}
-                      aria-pressed={on}
-                      onClick={() =>
-                        void run(() =>
-                          api.put(`/api/cards/${cardId}/repositories`, {
-                            repositoryIds: on ? ids.filter((y) => y !== x.id) : [...ids, x.id],
-                          }),
-                        )
-                      }
-                    >
-                      {x.name}
-                    </button>
-                  );
-                })}
-              </div>
-              {repositories.length === 0 && <span className="muted small">Cadastre os repositórios em Configurações.</span>}
-            </div>
-            <div className="field">
-              <label htmlFor="f-priority">Prioridade</label>
-              <select id="f-priority" className="input" value={card.priority} onChange={(e) => void patch({ priority: Number(e.target.value) })}>
-                <option value={1}>1 · Alta</option>
-                <option value={2}>2 · Média-alta</option>
-                <option value={3}>3 · Normal</option>
-                <option value={4}>4 · Baixa</option>
-              </select>
-            </div>
-            <div className="field">
-              <label htmlFor="f-due">Prazo</label>
-              <input id="f-due" type="date" className="input" value={card.dueDate ?? ''} onChange={(e) => void patch({ dueDate: e.target.value || null })} />
-            </div>
-            <div className="field">
-              <label htmlFor="f-repo">Repositório (caminho local)</label>
-              <input
-                id="f-repo"
-                className="input"
-                defaultValue={card.repoPath ?? ''}
-                placeholder="vazio = pasta de trabalho do Board"
-                onBlur={(e) => e.target.value !== (card.repoPath ?? '') && void patch({ repoPath: e.target.value.trim() || null })}
-                onKeyDown={(e) => e.stopPropagation()}
-              />
-            </div>
-            <div className="field">
-              <label htmlFor="f-base">Branch base</label>
-              <input
-                id="f-base"
-                className="input"
-                defaultValue={card.baseBranch ?? ''}
-                placeholder="padrão da configuração"
-                onBlur={(e) => e.target.value !== (card.baseBranch ?? '') && void patch({ baseBranch: e.target.value.trim() || null })}
-                onKeyDown={(e) => e.stopPropagation()}
-              />
-            </div>
-            {card.branch && (
-              <div className="muted small">
-                Branch: <code>{card.branch}</code>
-                <br />
-                Worktree: <code>{card.worktreePath}</code>
-              </div>
-            )}
-            <div className="field">
-              <label htmlFor="f-perm">Modo de permissão</label>
-              <select
-                id="f-perm"
-                className="input"
-                value={card.permissionMode ?? ''}
-                onChange={(e) => void patch({ permissionMode: e.target.value || null })}
-              >
-                <option value="">padrão da configuração</option>
-                {PERMISSION_MODES.filter((m) => m !== 'bypassPermissions').map((m) => (
-                  <option key={m} value={m}>
-                    {m}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="field">
-              <label htmlFor="f-model">Modelo</label>
-              <select id="f-model" className="input" value={card.model ?? ''} onChange={(e) => void patch({ model: e.target.value || null })}>
-                <option value="">padrão da configuração ({modelLabel(defaults.defaultModel)})</option>
-                {[...MODEL_OPTIONS, ...(card.model && !MODEL_OPTIONS.some((m) => m.id === card.model) ? [{ id: card.model, label: card.model }] : [])].map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="field">
-              <label htmlFor="f-effort">Effort</label>
-              <select id="f-effort" className="input" value={card.effort ?? ''} onChange={(e) => void patch({ effort: e.target.value || null })}>
-                <option value="">padrão da configuração ({effortLabel(defaults.defaultEffort)})</option>
-                {EFFORT_LEVELS.map((l) => (
-                  <option key={l} value={l}>
-                    {EFFORT_LABELS[l]}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="field">
-              <label htmlFor="f-turns">Máx. de turnos</label>
-              <input
-                id="f-turns"
-                type="number"
-                min={1}
-                className="input"
-                defaultValue={card.maxTurns ?? ''}
-                placeholder="sem limite"
-                onBlur={(e) => void patch({ maxTurns: e.target.value ? Number(e.target.value) : null })}
-                onKeyDown={(e) => e.stopPropagation()}
-              />
-            </div>
-            <label className="small" style={{ display: 'flex', gap: 6, alignItems: 'flex-start' }}>
-              <input
-                type="checkbox"
-                checked={card.dangerousAllowed}
-                onChange={(e) => {
-                  if (
-                    e.target.checked &&
-                    !window.confirm(
-                      'Liberar o modo sem permissões (bypassPermissions)? O Claude poderá rodar qualquer comando sem pedir. Só faça isso em tarefa isolada.',
-                    )
-                  ) {
-                    return;
-                  }
-                  void patch({ dangerousAllowed: e.target.checked });
-                }}
-              />
-              <span>Perigoso: rodar sem permissões</span>
-            </label>
-
-            <div className="field">
-              <label>Links</label>
-              {card.links.map((l, i) => {
-                const href = linkHref(l.kind, l.value, defaults.jiraBaseUrl);
-                return (
-                  <div key={i} className="small" style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-                    <span className="pill">{l.kind}</span>
-                    {href ? (
-                      <a href={href} target="_blank" rel="noreferrer" style={{ overflowWrap: 'anywhere' }}>
-                        {l.title || l.value}
-                      </a>
-                    ) : (
-                      <span style={{ overflowWrap: 'anywhere' }}>{l.title || l.value}</span>
-                    )}
-                    <button className="btn link small" aria-label="Remover link" onClick={() => void run(() => api.del(`/api/cards/${cardId}/links/${i}`))}>
-                      ✕
-                    </button>
-                  </div>
-                );
-              })}
-              <div className="link-add">
-                <select className="input" value={link.kind} onChange={(e) => setLink({ ...link, kind: e.target.value as LinkKind })} aria-label="Tipo de link">
-                  {LINK_KINDS.map((k) => (
-                    <option key={k.value} value={k.value}>
-                      {k.label}
+                Detalhes <span className="side-expand-arrow" aria-hidden="true">›</span> <span className="kbd">d</span>
+              </button>
+              <div className="field">
+                <label htmlFor="f-status">Lista</label>
+                <select
+                  id="f-status"
+                  className="input"
+                  value={card.status}
+                  disabled={running || isBusy('move')}
+                  aria-busy={isBusy('move') || undefined}
+                  onChange={(e) => {
+                    const to = e.target.value as Card['status'];
+                    void track('move', () => move(card, to).then(load));
+                  }}
+                >
+                  {Object.entries(STATUS_LABELS).map(([value, label]) => (
+                    <option key={value} value={value} disabled={value === 'running' || value === 'triage'}>
+                      {label}
                     </option>
                   ))}
                 </select>
-                <input
+              </div>
+              <div className="field">
+                <label htmlFor="f-owner">Dono</label>
+                <select id="f-owner" className="input" value={card.owner} onChange={(e) => void patch({ owner: e.target.value })}>
+                  <option value="user">Você</option>
+                  <option value="claude">Claude</option>
+                </select>
+              </div>
+              <div className="field">
+                <label htmlFor="f-app">Projeto</label>
+                <select
+                  id="f-app"
                   className="input"
-                  placeholder="URL, chave ou caminho (Enter)"
-                  value={link.value}
-                  onChange={(e) => setLink({ ...link, value: e.target.value })}
-                  onKeyDown={(e) => {
-                    e.stopPropagation();
-                    if (e.key === 'Enter' && link.value.trim()) {
-                      void run(() => api.post(`/api/cards/${cardId}/links`, link)).then(() => setLink({ kind: link.kind, value: '', title: '' }));
-                    }
-                  }}
+                  value={card.appId ?? ''}
+                  onChange={(e) => void patch({ appId: e.target.value ? Number(e.target.value) : null })}
+                >
+                  <option value="">Sem projeto</option>
+                  {apps
+                    .filter((a) => !a.archived || a.id === card.appId)
+                    .map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.name}
+                      </option>
+                    ))}
+                </select>
+                {apps.length === 0 && <span className="muted small">Cadastre os projetos em Configurações.</span>}
+              </div>
+              <div className="field">
+                <label>Labels</label>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                  {labels.map((l) => {
+                    const on = card.labelIds.includes(l.id);
+                    return (
+                      <button
+                        key={l.id}
+                        className="label-chip"
+                        style={{ background: l.color, opacity: on ? 1 : 0.35, border: 0, cursor: 'pointer' }}
+                        aria-pressed={on}
+                        disabled={isBusy('labels')}
+                        onClick={() =>
+                          void track('labels', () =>
+                            run(() =>
+                              api.put(`/api/cards/${cardId}/labels`, {
+                                labelIds: on ? card.labelIds.filter((x) => x !== l.id) : [...card.labelIds, l.id],
+                              }),
+                            ),
+                          )
+                        }
+                      >
+                        {l.name}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              <div className="field">
+                <label id="f-repositories">Repositórios</label>
+                <div role="group" aria-labelledby="f-repositories" style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                  {repositories.map((x) => {
+                    const ids = card.repositoryIds ?? [];
+                    const on = ids.includes(x.id);
+                    return (
+                      <button
+                        key={x.id}
+                        className={'repo-chip toggle' + (on ? ' on' : '')}
+                        aria-pressed={on}
+                        disabled={isBusy('repositories')}
+                        onClick={() =>
+                          void track('repositories', () =>
+                            run(() =>
+                              api.put(`/api/cards/${cardId}/repositories`, {
+                                repositoryIds: on ? ids.filter((y) => y !== x.id) : [...ids, x.id],
+                              }),
+                            ),
+                          )
+                        }
+                      >
+                        {x.name}
+                      </button>
+                    );
+                  })}
+                </div>
+                {repositories.length === 0 && <span className="muted small">Cadastre os repositórios em Configurações.</span>}
+              </div>
+              <div className="field">
+                <label htmlFor="f-priority">Prioridade</label>
+                <select id="f-priority" className="input" value={card.priority} onChange={(e) => void patch({ priority: Number(e.target.value) })}>
+                  <option value={1}>1 · Alta</option>
+                  <option value={2}>2 · Média-alta</option>
+                  <option value={3}>3 · Normal</option>
+                  <option value={4}>4 · Baixa</option>
+                </select>
+              </div>
+              <div className="field">
+                <label htmlFor="f-due">Prazo</label>
+                <input id="f-due" type="date" className="input" value={card.dueDate ?? ''} onChange={(e) => void patch({ dueDate: e.target.value || null })} />
+              </div>
+              <div className="field">
+                <label htmlFor="f-repo">Repositório (caminho local)</label>
+                <input
+                  id="f-repo"
+                  className="input"
+                  defaultValue={card.repoPath ?? ''}
+                  placeholder="vazio = pasta de trabalho do Board"
+                  onBlur={(e) => e.target.value !== (card.repoPath ?? '') && void patch({ repoPath: e.target.value.trim() || null })}
+                  onKeyDown={(e) => e.stopPropagation()}
                 />
               </div>
-            </div>
-          </aside>
+              <div className="field">
+                <label htmlFor="f-base">Branch base</label>
+                <input
+                  id="f-base"
+                  className="input"
+                  defaultValue={card.baseBranch ?? ''}
+                  placeholder="padrão da configuração"
+                  onBlur={(e) => e.target.value !== (card.baseBranch ?? '') && void patch({ baseBranch: e.target.value.trim() || null })}
+                  onKeyDown={(e) => e.stopPropagation()}
+                />
+              </div>
+              {card.branch && (
+                <div className="muted small">
+                  Branch: <code>{card.branch}</code>
+                  <br />
+                  Worktree: <code>{card.worktreePath}</code>
+                </div>
+              )}
+              <div className="field">
+                <label htmlFor="f-perm">Modo de permissão</label>
+                <select
+                  id="f-perm"
+                  className="input"
+                  value={card.permissionMode ?? ''}
+                  onChange={(e) => void patch({ permissionMode: e.target.value || null })}
+                >
+                  <option value="">padrão da configuração</option>
+                  {PERMISSION_MODES.filter((m) => m !== 'bypassPermissions').map((m) => (
+                    <option key={m} value={m}>
+                      {m}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="field">
+                <label htmlFor="f-model">Modelo</label>
+                <select id="f-model" className="input" value={card.model ?? ''} onChange={(e) => void patch({ model: e.target.value || null })}>
+                  <option value="">padrão da configuração ({modelLabel(defaults.defaultModel)})</option>
+                  {[...MODEL_OPTIONS, ...(card.model && !MODEL_OPTIONS.some((m) => m.id === card.model) ? [{ id: card.model, label: card.model }] : [])].map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="field">
+                <label htmlFor="f-effort">Effort</label>
+                <select id="f-effort" className="input" value={card.effort ?? ''} onChange={(e) => void patch({ effort: e.target.value || null })}>
+                  <option value="">padrão da configuração ({effortLabel(defaults.defaultEffort)})</option>
+                  {EFFORT_LEVELS.map((l) => (
+                    <option key={l} value={l}>
+                      {EFFORT_LABELS[l]}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="field">
+                <label htmlFor="f-turns">Máx. de turnos</label>
+                <input
+                  id="f-turns"
+                  type="number"
+                  min={1}
+                  className="input"
+                  defaultValue={card.maxTurns ?? ''}
+                  placeholder="sem limite"
+                  onBlur={(e) => void patch({ maxTurns: e.target.value ? Number(e.target.value) : null })}
+                  onKeyDown={(e) => e.stopPropagation()}
+                />
+              </div>
+              <label className="small" style={{ display: 'flex', gap: 6, alignItems: 'flex-start' }}>
+                <input
+                  type="checkbox"
+                  checked={card.dangerousAllowed}
+                  onChange={(e) => {
+                    if (
+                      e.target.checked &&
+                      !window.confirm(
+                        'Liberar o modo sem permissões (bypassPermissions)? O Claude poderá rodar qualquer comando sem pedir. Só faça isso em tarefa isolada.',
+                      )
+                    ) {
+                      return;
+                    }
+                    void patch({ dangerousAllowed: e.target.checked });
+                  }}
+                />
+                <span>Perigoso: rodar sem permissões</span>
+              </label>
+
+              <div className="field">
+                <label>Links</label>
+                {card.links.map((l, i) => {
+                  const href = linkHref(l.kind, l.value, defaults.jiraBaseUrl);
+                  return (
+                    <div key={i} className="small" style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                      <span className="pill">{l.kind}</span>
+                      {href ? (
+                        <a href={href} target="_blank" rel="noreferrer" style={{ overflowWrap: 'anywhere' }}>
+                          {l.title || l.value}
+                        </a>
+                      ) : (
+                        <span style={{ overflowWrap: 'anywhere' }}>{l.title || l.value}</span>
+                      )}
+                      <ActionButton className="btn link small" aria-label="Remover link" onAction={() => run(() => api.del(`/api/cards/${cardId}/links/${i}`))}>
+                        ✕
+                      </ActionButton>
+                    </div>
+                  );
+                })}
+                <div className="link-add">
+                  <select className="input" value={link.kind} onChange={(e) => setLink({ ...link, kind: e.target.value as LinkKind })} aria-label="Tipo de link">
+                    {LINK_KINDS.map((k) => (
+                      <option key={k.value} value={k.value}>
+                        {k.label}
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    className="input"
+                    placeholder={isBusy('link-add') ? 'Adicionando…' : 'URL, chave ou caminho (Enter)'}
+                  aria-busy={isBusy('link-add') || undefined}
+                    value={link.value}
+                    onChange={(e) => setLink({ ...link, value: e.target.value })}
+                    onKeyDown={(e) => {
+                      e.stopPropagation();
+                      if (e.key === 'Enter' && link.value.trim()) void addLink();
+                    }}
+                  />
+                </div>
+              </div>
+            </aside>
+          )}
         </div>
       </div>
     </div>
