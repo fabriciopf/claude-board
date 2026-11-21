@@ -87,6 +87,7 @@ export function rowToCard(r: Row, labelIds: number[] = [], repositoryIds: number
     originalTitle: r.original_title ?? null,
     originalDescriptionMd: r.original_description_md ?? null,
     parentId: r.parent_id ?? null,
+    automationId: r.automation_id ?? null,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
     completedAt: r.completed_at ?? null,
@@ -175,6 +176,8 @@ export interface CardInput {
   suggestedStatus?: Status | null;
   suggestionConfidence?: number | null;
   suggestionEvidence?: string | null;
+  /** The automation creating the card (D72). */
+  automationId?: number | null;
 }
 
 export interface CardPatch {
@@ -627,8 +630,8 @@ export class BoardService {
         `INSERT INTO cards (title, description_md, status, position, owner, app_id, priority, due_date, origin,
            repo_path, base_branch, permission_mode, max_turns, model, effort, links_json,
            suggested_status, suggestion_confidence, suggestion_evidence, created_at, updated_at, completed_at,
-           parent_id, dangerous_allowed)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           parent_id, dangerous_allowed, automation_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         title,
@@ -655,6 +658,7 @@ export class BoardService {
         status === 'done' ? now : null,
         extra.parentId ?? null,
         extra.dangerousAllowed ? 1 : 0,
+        input.automationId ?? null,
       );
     const cardId = Number(r.lastInsertRowid);
     for (const labelId of input.labelIds ?? []) {
