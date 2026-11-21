@@ -607,6 +607,22 @@ pre {
   cursor: default;
 }
 
+/* Counter split by agent (D99): "rodando 1 de 3 (auto) Claude · 2 de 2 Antigravity". */
+.runner-agent {
+  color: var(--text-muted);
+}
+
+.runner-part-agent::before {
+  content: '·';
+  color: var(--text-muted);
+  margin-right: 2px;
+}
+
+.runner-quota {
+  color: var(--danger);
+  font-weight: 600;
+}
+
 /* One line tall: the "5 horas" and "Semana" lines scroll up through it, every 5 s. */
 .usage-viewport {
   display: inline-block;

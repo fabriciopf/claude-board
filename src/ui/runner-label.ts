@@ -1,4 +1,4 @@
-import { AUTO_CONCURRENCY, CONCURRENCY_PRESETS, UNLIMITED_CONCURRENCY, concurrencyOptionLabel, type ConcurrencyInfo } from '../shared/domain';
+import { ANTIGRAVITY_CONCURRENCY_PRESETS, AUTO_CONCURRENCY, CONCURRENCY_PRESETS, UNLIMITED_CONCURRENCY, concurrencyOptionLabel, type AntigravityLane, type ConcurrencyInfo } from '../shared/domain';
 import { t } from './i18n';
 
 /** Tooltip of the header counter, "rodando N de <seletor>" (D83). The automatic limit is never below one (MIN_RUNS). */
@@ -29,6 +29,26 @@ export function concurrencyOptions(c: ConcurrencyInfo): { value: string; label: 
     value,
     label: value === AUTO_CONCURRENCY && c.mode === 'auto' ? `${c.limit} (auto)` : concurrencyOptionLabel(value),
   }));
+}
+
+/** The Antigravity CLI limit as the header selector shows it (D99). */
+export function antigravityConcurrencyValue(limit: number | null): string {
+  return limit === null ? UNLIMITED_CONCURRENCY : String(limit);
+}
+
+/** Choices of the Antigravity CLI selector: no automatic mode, plus a number from config.json outside the presets. */
+export function antigravityConcurrencyOptions(limit: number | null): { value: string; label: string }[] {
+  const current = antigravityConcurrencyValue(limit);
+  const values = ANTIGRAVITY_CONCURRENCY_PRESETS.includes(current) ? [...ANTIGRAVITY_CONCURRENCY_PRESETS] : insertNumber(ANTIGRAVITY_CONCURRENCY_PRESETS, current);
+  return values.map((value) => ({ value, label: concurrencyOptionLabel(value) }));
+}
+
+/** Tooltip of the Antigravity CLI part of the counter, with the last quota error when there is one. */
+export function antigravityTitle(lane: AntigravityLane): string {
+  const base = t('settings.conc.titleAntigravity');
+  if (!lane.quota) return base;
+  const time = new Date(lane.quota.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return `${base}\n\n${t('settings.conc.quotaAntigravity', { time, message: lane.quota.message })}`;
 }
 
 /** Puts a number among the presets in numeric order (between auto and ∞). */

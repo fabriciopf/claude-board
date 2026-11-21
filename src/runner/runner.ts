@@ -4,8 +4,8 @@ import path from 'node:path';
 import { paths } from '../config.js';
 import type { AppContext, RunnerControl } from '../context.js';
 import { nowIso } from '../db/index.js';
-import { AUTO_CONCURRENCY, UNLIMITED_CONCURRENCY, type AgentId, type Card, type ConcurrencyInfo, type ExecutionStatus, type Status } from '../shared/domain.js';
-import { agentName, buildLaunch, resolveAgent, type Launch } from './agents.js';
+import { AUTO_CONCURRENCY, UNLIMITED_CONCURRENCY, runLane, type AgentId, type AgentQuotaNote, type Card, type ConcurrencyInfo, type ExecutionStatus, type Status } from '../shared/domain.js';
+import { agentName, buildLaunch, isQuotaError, resolveAgent, type Launch } from './agents.js';
 import { BurnMeter, decideAuto, typicalRunMinutes, type RunTiming } from './auto-concurrency.js';
 import { isAlive, killTree, processStartTimes, spawnDetached } from './process.js';
 import { buildSystemPrompt, buildUserPrompt, splitCandidate, type PromptKind } from './prompt.js';
@@ -16,6 +16,8 @@ import { ensureWorkdir } from './worktree.js';
 interface ActiveRun {
   executionId: number;
   cardId: number;
+  /** Which concurrency limit the run counts against (D99). */
+  lane: AgentId;
   pid: number | null;
   cancelled: boolean;
   /** Why it was stopped, when not by the user (a publication). */
@@ -29,6 +31,7 @@ interface ActiveRun {
 interface RunningRow {
   id: number;
   card_id: number;
+  agent: string | null;
   pid: number | null;
   spawned_at: string | null;
   transcript_path: string | null;
@@ -171,7 +174,11 @@ export class Runner implements RunnerControl {
 
   // ---------- heartbeat ----------
 
-  /** How many runs may be going now: the fixed number from settings (0 included), no ceiling, or the automatic pace (D47, D83). */
+  /**
+   * How many Claude Code runs may be going now: the fixed number from settings (0 included), no
+   * ceiling, or the automatic pace (D47, D83). Antigravity CLI runs do not spend the Claude plan and
+   * have their own limit (D99), so they are left out here and in the BurnMeter.
+   */
   concurrency(now = Date.now()): ConcurrencyInfo {
     const setting = this.ctx.config.maxConcurrency;
     if (setting === UNLIMITED_CONCURRENCY) return { mode: 'unlimited', limit: null, reason: '' };
@@ -179,12 +186,33 @@ export class Runner implements RunnerControl {
     return decideAuto({ usage: this.ctx.usage?.get() ?? null, now, rate: this.meter.measure(now), runs: this.runTiming(now) });
   }
 
-  /** How long the runs in progress have been going, and how long a run usually takes (last 40 finished). */
+  /** Antigravity CLI runs that may be going at the same time (D99); null = no ceiling. */
+  antigravityLimit(): number | null {
+    const setting = this.ctx.config.antigravityConcurrency;
+    if (setting === UNLIMITED_CONCURRENCY) return null;
+    return Math.max(0, Math.floor(Number(setting)) || 0);
+  }
+
+  /** Runs this Board follows that count against an agent's limit. */
+  private activeOf(lane: AgentId): number {
+    let n = 0;
+    for (const r of this.active.values()) if (r.lane === lane) n++;
+    return n;
+  }
+
+  /** The automatic pace learns from Claude Code runs only: an Antigravity run does not move the 5-hour window (D99). */
+  private updateMeter(): void {
+    this.meter.setRunning(this.activeOf('claude'));
+  }
+
+  /** How long the Claude Code runs in progress have been going, and how long one usually takes (last 40 finished). */
   private runTiming(now: number): RunTiming {
     const minutes = (from: string, to: number) => (to - Date.parse(from)) / 60000;
-    const running = this.ctx.db.prepare("SELECT started_at FROM executions WHERE status = 'running'").all() as { started_at: string }[];
+    // A run without an agent is from before D92, so Claude Code.
+    const claude = "(agent IS NULL OR agent = 'claude')";
+    const running = this.ctx.db.prepare(`SELECT started_at FROM executions WHERE status = 'running' AND ${claude}`).all() as { started_at: string }[];
     const finished = this.ctx.db
-      .prepare('SELECT started_at, ended_at FROM executions WHERE ended_at IS NOT NULL ORDER BY id DESC LIMIT 40')
+      .prepare(`SELECT started_at, ended_at FROM executions WHERE ended_at IS NOT NULL AND ${claude} ORDER BY id DESC LIMIT 40`)
       .all() as { started_at: string; ended_at: string }[];
     return {
       ages: running.map((r) => Math.max(0, minutes(r.started_at, now))).filter(Number.isFinite),
@@ -192,10 +220,14 @@ export class Runner implements RunnerControl {
     };
   }
 
-  /** Starts as many queued cards as concurrency allows. Returns how many started. */
+  /**
+   * Starts as many queued cards as concurrency allows, each against its agent's limit (D99): with the
+   * Claude Code side full, an Antigravity card further down the queue still starts. Returns how many started.
+   */
   tick(): number {
     if (this.closed) return 0;
     const { limit, reason } = this.concurrency();
+    const limits: Record<AgentId, number | null> = { claude: limit, antigravity: this.antigravityLimit() };
     // The automatic limit moves with time and usage: let the header know when it changes.
     const key = `${limit}|${reason}`;
     if (key !== this.lastConcurrency) {
@@ -204,9 +236,10 @@ export class Runner implements RunnerControl {
     }
     // A publication holds new runs apart from the user's pause, so it never undoes a pause of theirs.
     if (this.isPaused() || this.ctx.service.getSetting('publishHold', false)) return 0;
+    const free = (lane: AgentId) => limits[lane] === null || this.activeOf(lane) < limits[lane]!;
     let started = 0;
-    while (limit === null || this.active.size < limit) {
-      const card = this.ctx.service.nextReadyCard();
+    for (;;) {
+      const card = this.ctx.service.nextReadyCard((c) => free(runLane(resolveAgent(c, this.ctx.config))));
       if (!card || this.active.has(card.id)) break;
       this.launch(card);
       started++;
@@ -220,14 +253,16 @@ export class Runner implements RunnerControl {
     const kind: PromptKind = !resume ? 'first' : ((card.nextPromptKind as PromptKind | null) ?? 'requeue');
     const nextPrompt = card.nextPrompt;
 
-    // Synchronous bookkeeping first, so the next tick cannot pick the same card.
+    // Synchronous bookkeeping first, so the next tick cannot pick the same card. The agent is written
+    // now, not when the work dir is ready, so the counter by agent (D99) is right from the start.
+    const agent = resolveAgent(card, this.ctx.config);
     const r = db
-      .prepare("INSERT INTO executions (card_id, started_at, status, prompt_kind, claude_session_id) VALUES (?, ?, 'running', ?, ?)")
-      .run(card.id, nowIso(), kind, resume ? card.claudeSessionId : null);
+      .prepare("INSERT INTO executions (card_id, started_at, status, prompt_kind, claude_session_id, agent) VALUES (?, ?, 'running', ?, ?, ?)")
+      .run(card.id, nowIso(), kind, resume ? card.claudeSessionId : null, agent);
     const executionId = Number(r.lastInsertRowid);
-    const run: ActiveRun = { executionId, cardId: card.id, pid: null, cancelled: false, timedOut: false, detached: false, timer: null };
+    const run: ActiveRun = { executionId, cardId: card.id, lane: runLane(agent), pid: null, cancelled: false, timedOut: false, detached: false, timer: null };
     this.active.set(card.id, run);
-    this.meter.setRunning(this.active.size);
+    this.updateMeter();
     service.setNextPrompt(card.id, null, null);
     // The card may be renamed during the run; keep what the user wrote first.
     service.snapshotOriginal(card.id);
@@ -245,7 +280,7 @@ export class Runner implements RunnerControl {
       .finally(() => {
         if (run.timer) clearTimeout(run.timer);
         this.active.delete(run.cardId);
-        this.meter.setRunning(this.active.size);
+        this.updateMeter();
         this.inflight.delete(p);
         this.nudge();
       });
@@ -506,7 +541,14 @@ export class Runner implements RunnerControl {
       target = 'waiting_user';
       const detail = state.result?.text || opts.stderr?.trim().split('\n').slice(-12).join('\n') || '';
       errorMd = `A execução falhou${subtype ? ` (${subtype})` : ''}${opts.exitCode != null ? `, código de saída ${opts.exitCode}` : ''}.${detail ? `\n\n${detail}` : ''}`;
+      // The Board reads no usage of the Google quota: an error that says so is the only sign (D99).
+      if (runLane(row?.agent) === 'antigravity' && isQuotaError(detail)) {
+        this.setAntigravityQuota({ at: nowIso(), message: detail.trim().split('\n').slice(-3).join(' ').slice(0, 300) });
+        errorMd += '\n\nParece o limite de cota do Google: o cabeçalho mostra o aviso ao lado das execuções do Antigravity CLI.';
+      }
     }
+    // A finished Antigravity run shows the quota is back.
+    if (status === 'success' && runLane(row?.agent) === 'antigravity') this.setAntigravityQuota(null);
 
     if (state.result?.permissionDenials && status !== 'success') {
       errorMd = `${errorMd ?? ''}\n\n${state.result.permissionDenials} chamada(s) de ferramenta foram negadas por permissão.`.trim();
@@ -534,6 +576,14 @@ export class Runner implements RunnerControl {
     if (target === 'review') this.ctx.publisher?.onDelivered(run.cardId);
   }
 
+  /** Last quota error of an Antigravity run, shown in the header until a run of it succeeds (D99). */
+  private setAntigravityQuota(note: AgentQuotaNote | null): void {
+    const { service, bus } = this.ctx;
+    if (!note && !service.getSetting<AgentQuotaNote | null>('antigravityQuota', null)) return;
+    service.setSetting('antigravityQuota', note);
+    bus.publish({ type: 'runner.changed' });
+  }
+
   // ---------- housekeeping ----------
 
   private closeOrphan(executionId: number, cardId: number, status: ExecutionStatus, errorMd: string): void {
@@ -554,7 +604,7 @@ export class Runner implements RunnerControl {
   recover(): void {
     const { db, service, bus } = this.ctx;
     const rows = db
-      .prepare("SELECT id, card_id, pid, spawned_at, transcript_path, stream_offset FROM executions WHERE status = 'running'")
+      .prepare("SELECT id, card_id, agent, pid, spawned_at, transcript_path, stream_offset FROM executions WHERE status = 'running'")
       .all() as unknown as RunningRow[];
     const live = rows.filter((r) => r.pid && isAlive(r.pid));
     const starts = live.some((r) => r.spawned_at) ? processStartTimes(live.map((r) => r.pid!)) : new Map<number, number>();
@@ -563,12 +613,12 @@ export class Runner implements RunnerControl {
       const alive = live.includes(r);
       const startedAt = r.pid ? starts.get(r.pid) : undefined;
       const ours = alive && !!r.spawned_at && startedAt != null && Math.abs(startedAt - Date.parse(r.spawned_at)) <= PID_MATCH_MS;
-      const run: ActiveRun = { executionId: r.id, cardId: r.card_id, pid: r.pid, cancelled: false, timedOut: false, detached: false, timer: null };
+      const run: ActiveRun = { executionId: r.id, cardId: r.card_id, lane: runLane(r.agent), pid: r.pid, cancelled: false, timedOut: false, detached: false, timer: null };
       if (ours && r.transcript_path) {
         followed.add(r.card_id);
         this.active.set(r.card_id, run);
         // A run followed again after a restart counts for the automatic pace like one started here.
-        this.meter.setRunning(this.active.size);
+        this.updateMeter();
         this.track(run, this.reattach(run, r.transcript_path, r.stream_offset ?? 0, Date.parse(r.spawned_at!)));
         service.recordEvent(r.card_id, 'execution_reattached', { executionId: r.id, pid: r.pid }, 'system');
         bus.publish({ type: 'execution.progress', cardId: r.card_id, executionId: r.id, data: { line: 'O Board reiniciou; a execução continua.' } });

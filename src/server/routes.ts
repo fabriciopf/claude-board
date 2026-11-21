@@ -51,7 +51,7 @@ export async function registerApi(app: FastifyInstance, ctx: AppContext): Promis
       apps: s.listApps(true),
       labels: s.listLabels(),
       repositories: s.listRepositories(),
-      runner: runnerState(ctx.db, isPaused(ctx), ctx.runner?.concurrency?.()),
+      runner: runnerState(ctx.db, isPaused(ctx), ctx.runner?.concurrency?.(), ctx.config),
       // The cover of a card without its own agent shows this one (D98).
       defaultAgent: ctx.config.defaultAgent,
       usage: ctx.usage?.get() ?? null,
@@ -98,14 +98,14 @@ export async function registerApi(app: FastifyInstance, ctx: AppContext): Promis
     return selfUpdate().state();
   });
 
-  app.get('/api/runner', async () => runnerState(ctx.db, isPaused(ctx), ctx.runner?.concurrency?.()));
+  app.get('/api/runner', async () => runnerState(ctx.db, isPaused(ctx), ctx.runner?.concurrency?.(), ctx.config));
 
   app.post('/api/runner/pause', async (req) => {
     const paused = !!(req.body as Body)?.paused;
     if (ctx.runner) ctx.runner.setPaused(paused);
     else s.setSetting('runnerPaused', paused);
     ctx.bus.publish({ type: 'runner.changed' });
-    return runnerState(ctx.db, isPaused(ctx), ctx.runner?.concurrency?.());
+    return runnerState(ctx.db, isPaused(ctx), ctx.runner?.concurrency?.(), ctx.config);
   });
 
   // ---------- cards ----------

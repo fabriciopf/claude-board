@@ -20,8 +20,8 @@ import { TodayView, pendingTabLabel, pendingViewName, showPendingTab, todayItems
 import { SORT_STORE_KEYS, parseSort, type CardSort } from './card-sort';
 import { PublishBanner, publishLevel, publishVisible } from './PublishBanner';
 import type { Notice } from './notices';
-import { concurrencyTitle, concurrencyValue } from './runner-label';
-import { ConcurrencySelect } from './ConcurrencySelect';
+import { antigravityConcurrencyValue, antigravityTitle, concurrencyTitle, concurrencyValue } from './runner-label';
+import { AntigravityConcurrencySelect, ConcurrencySelect } from './ConcurrencySelect';
 import { UsageChip } from './UsageChip';
 import { AgendaBanner, AgendaChip, useNow } from './AgendaChip';
 import { currentEvents } from '../shared/agenda';
@@ -301,7 +301,7 @@ export function App() {
       ),
     });
   }
-  if (!runner?.paused && runner?.concurrency?.mode === 'auto' && (runner.concurrency.limit ?? Infinity) <= runner.running && readyCount > 0) {
+  if (!runner?.paused && runner?.concurrency?.mode === 'auto' && (runner.concurrency.limit ?? Infinity) <= (runner.claudeRunning ?? runner.running) && readyCount > 0) {
     notices.push({
       key: 'auto',
       level: 'warning',
@@ -389,10 +389,27 @@ export function App() {
             <div className="counters">
               {/* Runs and the 5-hour session in one pill: the automatic mode paces the first by the second (D83). */}
               <span className="counter runner-usage">
-                <span className="runner-part" title={concurrencyTitle(runner.concurrency)}>
-                  {runner.running > 0 && <span className="spinner" />} {t('app.runner.running')} <strong>{runner.running}</strong>
-                  {runner.concurrency && <ConcurrencySelect concurrency={runner.concurrency} onChanged={() => void load()} notify={notify} />}
-                </span>
+                {runner.antigravity?.shown && runner.concurrency ? (
+                  // Each agent against its own limit (D99): "rodando 1 de 3 (auto) Claude · 2 de 2 Antigravity".
+                  <>
+                    <span className="runner-part" title={concurrencyTitle(runner.concurrency)}>
+                      {runner.running > 0 && <span className="spinner" />} {t('app.runner.running')} <strong>{runner.claudeRunning ?? 0}</strong>
+                      <ConcurrencySelect concurrency={runner.concurrency} onChanged={() => void load()} notify={notify} />
+                      <span className="runner-agent">Claude</span>
+                    </span>
+                    <span className="runner-part runner-part-agent" title={antigravityTitle(runner.antigravity)}>
+                      <strong>{runner.antigravity.running}</strong>
+                      <AntigravityConcurrencySelect limit={runner.antigravity.limit} onChanged={() => void load()} notify={notify} />
+                      <span className="runner-agent">Antigravity</span>
+                      {runner.antigravity.quota && <span className="runner-quota">{t('settings.conc.quotaShort')}</span>}
+                    </span>
+                  </>
+                ) : (
+                  <span className="runner-part" title={concurrencyTitle(runner.concurrency)}>
+                    {runner.running > 0 && <span className="spinner" />} {t('app.runner.running')} <strong>{runner.running}</strong>
+                    {runner.concurrency && <ConcurrencySelect concurrency={runner.concurrency} onChanged={() => void load()} notify={notify} />}
+                  </span>
+                )}
                 <span className="counter-sep" aria-hidden="true" />
                 <UsageChip usage={data?.usage ?? null} />
               </span>
@@ -549,6 +566,7 @@ export function App() {
           repositories={data.repositories}
           notify={notify}
           liveConcurrency={runner?.concurrency ? concurrencyValue(runner.concurrency) : undefined}
+          liveAntigravityConcurrency={runner?.antigravity ? antigravityConcurrencyValue(runner.antigravity.limit) : undefined}
         />
       )}
 

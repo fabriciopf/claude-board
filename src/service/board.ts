@@ -1112,16 +1112,24 @@ export class BoardService {
 
   // ---------- runner support ----------
 
-  nextReadyCard(): Card | null {
-    const r = this.db
+  /**
+   * The first card of the queue, or the first one `accept` takes: the runner skips the cards whose
+   * agent has no free slot, so an Antigravity card behind a Claude one still starts (D99).
+   */
+  nextReadyCard(accept?: (card: Card) => boolean): Card | null {
+    const rows = this.db
       .prepare(
         `SELECT c.* FROM cards c
          WHERE c.status = 'ready' AND c.archived = 0
            AND NOT EXISTS (SELECT 1 FROM executions e WHERE e.card_id = c.id AND e.status = 'running')
-         ORDER BY c.priority ASC, c.position ASC, c.id ASC LIMIT 1`,
+         ORDER BY c.priority ASC, c.position ASC, c.id ASC`,
       )
-      .get() as Row | undefined;
-    return r ? rowToCard(r, this.labelIdsOf(r.id), this.repositoryIdsOf(r.id)) : null;
+      .all() as Row[];
+    for (const r of rows) {
+      const card = rowToCard(r, this.labelIdsOf(r.id), this.repositoryIdsOf(r.id));
+      if (!accept || accept(card)) return card;
+    }
+    return null;
   }
 
   setRunFields(id: number, fields: { worktreePath?: string | null; branch?: string | null; claudeSessionId?: string | null }): void {

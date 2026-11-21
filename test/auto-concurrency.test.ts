@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { DEFAULT_CONFIG, loadConfig, saveConfig } from '../src/config.js';
+import { DEFAULT_CONFIG, loadConfig, parseAgentConcurrency, saveConfig } from '../src/config.js';
 import {
   BurnMeter,
   DEFAULT_RUN_MINUTES,
@@ -16,7 +16,9 @@ import {
   decideAuto,
   typicalRunMinutes,
 } from '../src/runner/auto-concurrency.js';
+import { isQuotaError } from '../src/runner/agents.js';
 import { Runner } from '../src/runner/runner.js';
+import { runnerState } from '../src/service/runner-state.js';
 import { AUTO_CONCURRENCY, MAX_CONCURRENCY, type UsageSnapshot } from '../src/shared/domain.js';
 import { makeContext, tempDir } from './helpers.js';
 
@@ -348,5 +350,168 @@ describe('runner reads the runs in progress and the typical run length from its 
     expect(c.reason).toMatch(/execução típica de 10 min/);
     expect(c.reason).toMatch(/as 1 em andamento devem gastar/);
     expect(c.reason).toMatch(/reserva de .* para mais 1 com folga/);
+  });
+});
+
+describe('two agents: the automatic pace is Claude Code only, Antigravity CLI has its own limit (card #196, D99)', () => {
+  const ctx = makeContext({
+    claudeBin: 'claude-board-no-such-binary',
+    antigravityBin: 'claude-board-no-such-agy',
+    antigravityConcurrency: 2,
+    heartbeatSeconds: 3600,
+  });
+  let runner: Runner;
+  beforeAll(() => {
+    runner = new Runner(ctx);
+    ctx.runner = runner;
+  });
+  afterAll(async () => {
+    await runner.close();
+  });
+  const state = () => runnerState(ctx.db, false, runner.concurrency(), ctx.config);
+  const queue = (title: string, agent: 'claude' | 'antigravity' | null) => {
+    const c = ctx.service.createCard({ title, owner: 'claude', agent }, 'user', 'manual');
+    ctx.service.moveCard(c.id, { status: 'ready' }, 'user');
+    return c;
+  };
+  const closeRunning = () => ctx.db.prepare("UPDATE executions SET status = 'error', ended_at = started_at WHERE status = 'running'").run();
+
+  it('the counter shows no split while Antigravity CLI is not in use', () => {
+    expect(state().antigravity).toMatchObject({ running: 0, limit: 2, shown: false, quota: null });
+  });
+
+  it('each agent fills its own slots: with Claude Code full, the Antigravity cards behind it still start', () => {
+    // Usage ahead of time: the automatic mode keeps Claude Code to one run.
+    const s = snap(0.6, 0.2, { observedAt: new Date().toISOString() });
+    s.fiveHour!.resetsAt = Math.round((Date.now() + 0.8 * WINDOW_MINUTES * MIN) / 1000);
+    ctx.service.setSetting('usageSnapshot', s);
+    const c1 = queue('Claude 1', 'claude');
+    const c2 = queue('Claude 2', null);
+    const a1 = queue('Antigravity 1', 'antigravity');
+    const a2 = queue('Antigravity 2', 'antigravity');
+    const a3 = queue('Antigravity 3', 'antigravity');
+    expect(state().antigravity?.shown).toBe(true);
+    expect(runner.concurrency().limit).toBe(1);
+
+    const t0 = Date.now();
+    expect(runner.tick()).toBe(3);
+    const ready = [c1, c2, a1, a2, a3].filter((c) => ctx.service.getCard(c.id).status === 'ready').map((c) => c.title);
+    expect(ready).toEqual(['Claude 2', 'Antigravity 3']);
+    // Each run records its agent from the start, and the meter counted only the Claude Code one.
+    const agents = ctx.db.prepare('SELECT agent FROM executions ORDER BY id').all() as { agent: string }[];
+    expect(agents.map((r) => r.agent)).toEqual(['claude', 'antigravity', 'antigravity']);
+    const meter = (runner as unknown as { meter: BurnMeter }).meter;
+    // About 1 run-minute (the step may start a few ms after t0 on a busy machine); 3 would mean every run counted.
+    expect(meter.runMinutes(t0, t0 + MIN)).toBeCloseTo(1, 1);
+  });
+
+  it('Antigravity at 0 holds only its own cards; ∞ has no ceiling', async () => {
+    await runner.drain(5000);
+    ctx.config.antigravityConcurrency = 0;
+    ctx.config.maxConcurrency = 0;
+    expect(runner.tick()).toBe(0);
+    ctx.config.maxConcurrency = AUTO_CONCURRENCY;
+    ctx.config.antigravityConcurrency = 'unlimited';
+    expect(runner.antigravityLimit()).toBeNull();
+    expect(state().antigravity?.limit).toBeNull();
+    ctx.config.antigravityConcurrency = 2;
+    // Leave the queue empty for the tests below.
+    for (const c of ctx.service.listCards()) if (c.status === 'ready') ctx.service.moveCard(c.id, { status: 'todo' }, 'user');
+  });
+
+  it('the counter says how many runs are of each agent', () => {
+    closeRunning();
+    const card = ctx.service.createCard({ title: 'Contagem', owner: 'claude' }, 'user', 'manual');
+    const insert = ctx.db.prepare("INSERT INTO executions (card_id, started_at, status, agent) VALUES (?, ?, 'running', ?)");
+    const now = new Date().toISOString();
+    for (const agent of ['claude', null, 'antigravity', 'antigravity', 'antigravity', 'gemini']) insert.run(card.id, now, agent);
+    const r = state();
+    expect(r.running).toBe(6);
+    // A run without an agent is from before D92 (Claude Code); an old 'gemini' run is Google's.
+    expect(r.claudeRunning).toBe(2);
+    expect(r.antigravity).toMatchObject({ running: 4, limit: 2, shown: true });
+    closeRunning();
+  });
+
+  it('the automatic reasoning counts only the Claude Code runs in progress and their length', () => {
+    const now = Date.now();
+    const iso = (minAgo: number) => new Date(now - minAgo * MIN).toISOString();
+    const card = ctx.service.createCard({ title: 'Histórico misto', owner: 'claude' }, 'user', 'manual');
+    const insert = ctx.db.prepare('INSERT INTO executions (card_id, started_at, ended_at, status, agent) VALUES (?, ?, ?, ?, ?)');
+    // Claude Code: one run going, and the 10-minute runs as the last finished. Antigravity: long runs, finished and going.
+    for (let i = 0; i < 6; i++) insert.run(card.id, iso(400 - i * 10), iso(300 - i * 10), 'success', 'antigravity');
+    for (let i = 0; i < 40; i++) insert.run(card.id, iso(200 - i), iso(190 - i), 'success', 'claude');
+    for (let i = 0; i < 6; i++) insert.run(card.id, iso(100 - i * 10), iso(10), 'success', 'antigravity');
+    insert.run(card.id, iso(4), null, 'running', 'claude');
+    insert.run(card.id, iso(30), null, 'running', 'antigravity');
+    insert.run(card.id, iso(20), null, 'running', 'antigravity');
+    const resetsAt = Math.round((now + 0.5 * WINDOW_MINUTES * MIN) / 1000);
+    const reading = (u: number, minAgo: number): UsageSnapshot => ({ fiveHour: { utilization: u, resetsAt, status: 'allowed' }, sevenDay: null, observedAt: iso(minAgo) });
+    ctx.service.setSetting('usageSnapshot', reading(0.4, 0));
+    const meter = new BurnMeter();
+    meter.setRunning(1, now - 10 * MIN);
+    meter.sample(reading(0.38, 10), now - 10 * MIN);
+    meter.sample(reading(0.4, 0), now);
+    (runner as unknown as { meter: BurnMeter }).meter = meter;
+    const c = runner.concurrency(now);
+    expect(c.reason).toMatch(/as 1 em andamento devem gastar/);
+    expect(c.reason).toMatch(/execução típica de 10 min/);
+    closeRunning();
+  });
+
+  it('an Antigravity run that fails on quota leaves a notice in the header until one of its runs succeeds', () => {
+    const dir = tempDir();
+    const finishFrom = (agent: string, result: object) => {
+      const card = ctx.service.createCard({ title: `Cota ${agent}`, owner: 'claude' }, 'user', 'manual');
+      ctx.service.moveCard(card.id, { status: 'running' }, 'system');
+      const transcript = path.join(dir, `${card.id}.jsonl`);
+      fs.writeFileSync(transcript, JSON.stringify({ type: 'result', ...result }) + '\n');
+      ctx.db
+        .prepare("INSERT INTO executions (card_id, started_at, status, agent, transcript_path) VALUES (?, ?, 'running', ?, ?)")
+        .run(card.id, new Date().toISOString(), agent, transcript);
+      runner.recover();
+      return ctx.db.prepare('SELECT error_md FROM executions WHERE card_id = ?').get(card.id) as { error_md: string | null };
+    };
+    const quotaText = 'session/prompt: 429 RESOURCE_EXHAUSTED: Individual quota reached';
+    // The same error from Claude Code is not about the Google quota.
+    finishFrom('claude', { subtype: 'error_during_execution', is_error: true, result: quotaText });
+    expect(state().antigravity?.quota).toBeNull();
+    const failed = finishFrom('antigravity', { subtype: 'error_during_execution', is_error: true, result: quotaText });
+    expect(failed.error_md).toMatch(/limite de cota do Google/);
+    const r = state();
+    expect(r.antigravity?.shown).toBe(true);
+    expect(r.antigravity?.quota?.message).toMatch(/RESOURCE_EXHAUSTED/);
+    finishFrom('antigravity', { subtype: 'success', is_error: false, result: 'feito' });
+    expect(state().antigravity?.quota).toBeNull();
+  });
+
+  it('reads a quota or rate-limit error and nothing else', () => {
+    for (const yes of ['429 Too Many Requests', 'RESOURCE_EXHAUSTED', 'Quota exceeded for model', 'rate limit reached', 'insufficient credits']) {
+      expect(isQuotaError(yes), yes).toBe(true);
+    }
+    for (const no of ['', null, 'permission denied', 'O Antigravity parou: refusal.', 'ENOENT agy']) {
+      expect(isQuotaError(no), String(no)).toBe(false);
+    }
+  });
+
+  it('the Antigravity limit is 2 by default, a whole number or ∞, never automatic', () => {
+    expect(DEFAULT_CONFIG.antigravityConcurrency).toBe(2);
+    const home = tempDir();
+    const before = process.env.CLAUDE_BOARD_HOME;
+    process.env.CLAUDE_BOARD_HOME = home;
+    try {
+      const base = loadConfig();
+      expect(base.antigravityConcurrency).toBe(2);
+      expect(saveConfig(base, { antigravityConcurrency: '4' as never }).antigravityConcurrency).toBe(4);
+      expect(saveConfig(base, { antigravityConcurrency: 0 }).antigravityConcurrency).toBe(0);
+      expect(saveConfig(base, { antigravityConcurrency: '∞' as never }).antigravityConcurrency).toBe('unlimited');
+      expect(() => saveConfig(base, { antigravityConcurrency: 'auto' as never })).toThrow(/não há modo automático/);
+      for (const bad of ['', -1, 21, 2.5, 'dois']) {
+        expect(() => saveConfig(base, { antigravityConcurrency: bad as never }), String(bad)).toThrow(/0 a 20/);
+      }
+      expect(parseAgentConcurrency('unlimited')).toBe('unlimited');
+    } finally {
+      process.env.CLAUDE_BOARD_HOME = before;
+    }
   });
 });

@@ -148,6 +148,7 @@ export function SettingsView({
   repositories = [],
   notify,
   liveConcurrency,
+  liveAntigravityConcurrency,
 }: {
   apps: App[];
   labels: Label[];
@@ -155,6 +156,8 @@ export function SettingsView({
   notify: (msg: string, error?: boolean) => void;
   /** maxConcurrency as the runner has it now: the header selector may change it while this screen is open (D83). */
   liveConcurrency?: string;
+  /** antigravityConcurrency as the runner has it now, for the same reason (D99). */
+  liveAntigravityConcurrency?: string;
 }) {
   const [tab, setTab] = useState<SettingsTab>(readTab);
   const [config, setConfig] = useState<Config | null>(null);
@@ -183,6 +186,15 @@ export function SettingsView({
     }
     // Only a change of the live value (or the first load) matters; the draft is read, not watched.
   }, [liveConcurrency, config === null]);
+
+  useEffect(() => {
+    if (!config || liveAntigravityConcurrency === undefined) return;
+    const next = followLiveValue('antigravityConcurrency', config, draft, liveAntigravityConcurrency);
+    if (next) {
+      setConfig(next.config);
+      setDraft(next.draft);
+    }
+  }, [liveAntigravityConcurrency, config === null]);
 
   const dirty = dirtyKeys(config, draft);
 

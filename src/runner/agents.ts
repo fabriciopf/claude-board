@@ -64,6 +64,16 @@ export function resolveModel(card: Pick<Card, 'model'>, config: Config, agent: A
   return own || fallback || null;
 }
 
+/**
+ * Whether a failed run's text reads as a quota or rate-limit error (D99). ACP has no quota field (its
+ * `usage` is tokens and context window), so the error is the only sign the Board gets of the Google
+ * quota. The words come from the Google APIs (RESOURCE_EXHAUSTED, 429) and from what agy users report.
+ */
+export function isQuotaError(text: string | null | undefined): boolean {
+  if (!text) return false;
+  return /\bquota\b|rate[ _-]?limit|resource[ _]exhausted|\b429\b|too many requests|insufficient credits?|out of credits/i.test(text);
+}
+
 export function agentName(agent: string): string {
   return agentLabel(agent);
 }
