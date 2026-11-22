@@ -147,7 +147,7 @@ Each firing creates a card in "Ready for the agent" with the instruction as its 
 | --- | --- |
 | Schedule | A 5-field cron in the Board's local time. While the previous card is still queued and has not started, the next turn is skipped. A turn missed while the Board was off fires once when it comes back. |
 | Watch | Every few minutes (15 by default, 5 at least), a short `claude -p` session looks for new items in a claude.ai connector: Gmail, Slack, Google Calendar, Google Drive, Jira or Notion. Each new item becomes a card, and an item already seen never comes back. The session may only call the read tools of those connectors, so an e-mail cannot make it send or delete anything. |
-| URL | `POST /api/automations/hook/<token>` from n8n, a script or a Slack workflow. The request body goes into the card. Off the local machine this needs `--allow-remote`. |
+| URL | `POST /api/automations/hook/<token>` from n8n, a script or a Slack workflow. The request body goes into the card. Off the local machine this needs `--insecure-lan` (the API has no authentication). |
 
 You can also turn each automation on and off, or run it now. An automation stays on the list after it runs until you delete it. Below the list, **Últimas execuções** shows the latest 50 runs: when, which automation, why (schedule, by hand, URL, watch), how it ended (card created, skipped, failed, nothing new) and the card with its current list. A watch that keeps finding nothing updates one line with a count.
 
@@ -247,7 +247,7 @@ The Board's folder is `~/.dexm`; `DEXM_HOME` changes it.
 
 ## Security
 
-- The Board listens only on `127.0.0.1` and refuses other hosts without `--allow-remote`. Requests whose `Host` header is not local get a 403, which blocks DNS rebinding.
+- The Board listens only on `127.0.0.1` and refuses any other host (`0.0.0.0`, a LAN address) unless started with `--insecure-lan`, which prints a warning on every start; the old `--allow-remote` still works as an alias. `dexm doctor` warns when `host` is not loopback. Requests whose `Host` header is not local get a 403, which blocks DNS rebinding.
 - There is no login: any process on your machine can call the API.
 - Transcripts may contain sensitive data. They live in `~/.dexm/transcripts` and are deleted after `transcriptRetentionDays`.
 - The push rules are best effort: they block the common `git push` forms through `--disallowedTools`, not every way a shell could reach a remote. A card with a repository also gets a `pre-push` hook in its worktree (set through the worktree's own `core.hooksPath`, the repository's hooks still run), which checks what the push actually sends. `git push --no-verify` skips it, and the agent rules refuse that form; a card without a repository runs without the hook.

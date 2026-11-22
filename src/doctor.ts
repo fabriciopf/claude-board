@@ -3,6 +3,8 @@ import net from 'node:net';
 import path from 'node:path';
 import spawn from 'cross-spawn';
 import { boardHome, claudeHomeDir, expandHome, type Config } from './config.js';
+import { INSECURE_LAN_FLAG, isLoopbackHost } from './server/bind-guard.js';
+import { CLI_NAME } from './shared/brand.js';
 
 export interface DoctorCheck {
   name: string;
@@ -115,6 +117,17 @@ export async function runDoctor(config: Config, opts: { checkPort?: boolean } = 
     writable = false;
   }
   checks.push({ name: 'Pasta do Board', ok: writable, required: true, detail: boardHome() });
+
+  // Card #223: the API has no authentication, so a host outside the loopback exposes it to the network.
+  const loopback = isLoopbackHost(config.host);
+  checks.push({
+    name: 'Host da API',
+    ok: loopback,
+    required: false,
+    detail: loopback
+      ? `${config.host} (só esta máquina alcança a API)`
+      : `${config.host} não é loopback: a API não tem autenticação, e o "${CLI_NAME} start" recusa subir sem ${INSECURE_LAN_FLAG}. Com a flag, qualquer aparelho da rede muda a configuração e aprova cards. Volte o host para 127.0.0.1`,
+  });
 
   if (opts.checkPort !== false) {
     const free = await portFree(config.host, config.port);

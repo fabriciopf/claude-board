@@ -3,8 +3,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { runCommand, type CmdResult } from '../src/publish/git.js';
-import { blockedHits, githubSlug, pickMergeMethod, splitList } from '../src/publish/mirror.js';
+import { blockedHits, githubSlug, isEnvFile, pickMergeMethod, secretHits, splitList, textSecretHits } from '../src/publish/mirror.js';
 import { MIRROR_OFF_NOTE, Publisher } from '../src/publish/publisher.js';
+import { DEFAULT_CONFIG } from '../src/config.js';
 import { makeContext, tempDir } from './helpers.js';
 
 const fakeBuild = path.resolve('test/fake-build.mjs');
@@ -222,6 +223,31 @@ describe('public mirror on "Concluída" (D66)', () => {
     expect(comments(card.id)).toMatch(/Não enviei ao repositório público[\s\S]*src\/b\.ts: const host[\s\S]*acme-interno/);
   });
 
+  it('stops a secret even with no blocked terms configured, without repeating it on the card (card #220)', async () => {
+    ctx.config.mirrorBlockTerms = '';
+    // Built by parts: a literal token in this file would block the mirror of the Board itself.
+    const token = ['ghp', 'aB3dE5gH7jK9mN1pQ3sT5vX7zA9cE1gI3kM5'].join('_');
+    const card = publishedCard('Token', { 'src/b.ts': `export const auth = "${token}";\n` });
+    ctx.service.approve(card.id);
+    await publisher.mirror.whenIdle();
+    expect(remoteBranches()).toEqual(['main']);
+    expect(ghCalls).toEqual([]);
+    const text = comments(card.id);
+    expect(text).toMatch(/tem cara de segredo[\s\S]*src\/b\.ts:1: token do GitHub, `ghp_… \(40 caracteres\)`/);
+    expect(text).not.toContain(token);
+  });
+
+  it('pushes as before when the diff has no secret, .env templates included (card #220)', async () => {
+    const card = publishedCard('Sem segredo', {
+      '.env.example': 'ANTHROPIC_API_KEY=\nPORT=4310\n',
+      'src/b.ts': 'const key = process.env.ANTHROPIC_API_KEY; // sk-... vem do ambiente\nconst re = /ghp_[A-Za-z0-9]{36}/;\n',
+    });
+    ctx.service.approve(card.id);
+    await publisher.mirror.whenIdle();
+    expect(remoteBranches()).toContain(`cb/${card.id}-sem-segredo`);
+    expect(comments(card.id)).not.toMatch(/cara de segredo/);
+  });
+
   it('does nothing for cards of other projects, cards without published work, or with the mirror off', async () => {
     const other = ctx.service.createCard({ title: 'Outro', descriptionMd: 'x', owner: 'claude' }, 'user', 'manual');
     ctx.service.moveCard(other.id, { status: 'review' }, 'system');
@@ -295,6 +321,23 @@ describe('public mirror on "Concluída" (D66)', () => {
 describe('merge on "Concluída" when the account can write (card #211)', () => {
   const WRITE = { p: { admin: false, maintain: false, push: true, pull: true }, m: true, s: true, r: true };
   const merges = () => ghCalls.filter((a) => a[1] === 'merge');
+
+  // Off by default since card #220: these tests turn it on, as the user does in Configurações.
+  beforeEach(() => {
+    ctx.config.mirrorAutoMerge = true;
+  });
+
+  it('comes off by default, so a fresh install opens draft PRs and never asks for merge access (card #220)', async () => {
+    expect(DEFAULT_CONFIG.mirrorAutoMerge).toBe(false);
+    ctx.config.mirrorAutoMerge = DEFAULT_CONFIG.mirrorAutoMerge;
+    repoInfo = WRITE;
+    const card = publishedCard('Padrao', { 'src/b.ts': 'export const b = 3;\n' });
+    ctx.service.approve(card.id);
+    await publisher.mirror.whenIdle();
+    expect(ghCalls.some((a) => a[0] === 'api')).toBe(false);
+    expect(merges()).toEqual([]);
+    expect(ghCalls.find((a) => a[1] === 'create')).toContain('--draft');
+  });
 
   it('opens the PR ready and merges it, pinned to the pushed commit', async () => {
     repoInfo = WRITE;
@@ -414,5 +457,60 @@ describe('mirror helpers', () => {
     expect(blockedHits(diff, ['stays'])).toEqual(['x: new STAYS line (termo "stays")']);
     expect(blockedHits(diff, [])).toEqual([]);
     expect(splitList(' a, b ,,c\nd ')).toEqual(['a', 'b', 'c', 'd']);
+  });
+
+  it('recognizes each built-in secret shape, and leaves look-alikes alone (card #220)', () => {
+    // Every fake credential is assembled at run time, so this file never carries one.
+    const j = (...p: string[]) => p.join('');
+    const body = 'A1b2C3d4E5f6G7h8J9k0L1m2N3p4Q5r6S7t8';
+    const shapes: [string, string][] = [
+      ['token do GitHub', j('gh', 'p_', body)],
+      ['token do GitHub', j('gh', 's_', body)],
+      ['token fino do GitHub', j('github', '_pat_', '11ABCDEFG0123456789_abcdefghij')],
+      ['chave da Anthropic', j('sk', '-ant-', 'api03-', body)],
+      ['chave sk- (OpenAI, OpenRouter e similares)', j('sk', '-or-v1-', body)],
+      ['chave sk- (OpenAI, OpenRouter e similares)', j('sk', '-proj-', body)],
+      ['token do Slack', j('xo', 'xb-', '1234567890-abcdefABCDEF')],
+      ['chave de acesso da AWS', j('AK', 'IA', 'IOSFODNN7EXAMPLE')],
+      ['chave de API do Google', j('AI', 'za', 'SyA1b2C3d4E5f6G7h8J9k0L1m2N3p4Q5r6S')],
+      ['chave secreta do Stripe', j('sk', '_live_', body)],
+      ['chave privada', j('-----BEGIN ', 'OPENSSH ', 'PRIVATE KEY-----')],
+      ['chave privada', j('-----BEGIN ', 'PRIVATE KEY-----')],
+    ];
+    for (const [rule, secret] of shapes) {
+      const diff = ['+++ b/src/x.ts', '@@ -0,0 +7,2 @@', '+ok', `+const s = "${secret}";`].join('\n');
+      const hits = secretHits(diff);
+      expect(hits, secret).toHaveLength(1);
+      expect(hits[0], secret).toBe(`src/x.ts:8: ${rule}, \`${secret.slice(0, 4)}… (${secret.length} caracteres)\``);
+      expect(hits[0]).not.toContain(secret);
+    }
+    expect(textSecretHits('título do PR', `Card #1: ${j('gh', 'p_', body)}`)).toHaveLength(1);
+
+    // Look-alikes: placeholders, the patterns themselves, words that end in "sk-", removed lines.
+    const clean = [
+      '+++ b/src/y.ts',
+      '@@ -1,3 +1,4 @@',
+      '+const re = /gh[pousr]_[A-Za-z0-9]{36,}/;',
+      '+// ANTHROPIC_API_KEY=sk-ant-... (vem do ambiente)',
+      '+const id = "desk-0123456789abcdefghijklmn";',
+      '+const k = "AKIAEXAMPLE";',
+      '+// -----BEGIN PUBLIC KEY-----',
+      `-const old = "${j('gh', 'p_', body)}";`,
+    ].join('\n');
+    expect(secretHits(clean)).toEqual([]);
+    expect(secretHits('')).toEqual([]);
+  });
+
+  it('flags .env assignments with a value, but not templates, comments or empty values (card #220)', () => {
+    const diff = (file: string, ...lines: string[]) => [`+++ b/${file}`, '@@ -0,0 +1,9 @@', ...lines.map((l) => `+${l}`)].join('\n');
+    expect(secretHits(diff('.env', '# comentário=x', 'EMPTY=', 'QUOTED=""', 'DB_PASSWORD=hunter2'))).toEqual([
+      '.env:4: variável com valor num arquivo `.env` (`DB_PASSWORD`)',
+    ]);
+    expect(secretHits(diff('apps/x/.env.local', 'export TOKEN = abc'))).toHaveLength(1);
+    expect(secretHits(diff('.env.example', 'TOKEN=abc'))).toEqual([]);
+    expect(secretHits(diff('src/env.ts', 'TOKEN=abc'))).toEqual([]);
+    expect(isEnvFile('prod.env')).toBe(true);
+    expect(isEnvFile('.env.sample')).toBe(false);
+    expect(isEnvFile('.envrc')).toBe(false);
   });
 });

@@ -123,7 +123,7 @@ export const DEFAULT_CONFIG: Config = {
   mirrorExclude: 'DECISIONS.md',
   mirrorGhUser: '',
   mirrorBlockTerms: '',
-  mirrorAutoMerge: true,
+  mirrorAutoMerge: false,
   selfUpdate: 'notify',
   selfUpdateSource: '',
   selfUpdateAuthors: '',

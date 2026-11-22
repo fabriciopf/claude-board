@@ -979,6 +979,23 @@ textarea.input {
   flex: 0 0 44px;
 }
 
+/* A shown column with no card (card #227): as wide as its header, title and count side by side, and it does not grow. */
+.column.empty {
+  flex: 0 0 auto;
+}
+
+.column.empty .column-title {
+  flex: none;
+}
+
+.column.empty .column-head {
+  gap: 8px;
+}
+
+.column.empty .column-foot {
+  padding: 0 4px 6px;
+}
+
 /* Concluída folded: pushed to the right edge, and kept there while the board scrolls sideways. */
 .column.collapsed-right {
   margin-left: auto;

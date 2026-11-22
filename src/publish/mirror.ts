@@ -13,7 +13,7 @@ import { isBoardEnvKey } from '../shared/brand.js';
  * in another checkout (`mirrorRepoPath`) whose origin is on GitHub. When a card of the Board reaches
  * "Concluída", the tree of the publish branch, without the excluded paths (DECISIONS.md), becomes one
  * commit on top of the mirror's base branch, is pushed to a `cb/<id>-<slug>` branch and gets a draft
- * PR. When the gh account can write to the public repository (`mirrorAutoMerge`, card #211), the PR
+ * PR. When the gh account can write to the public repository (`mirrorAutoMerge`, card #211; off by default since card #220), the PR
  * is opened ready and merged at once. Everything happens in the mirror's object store: its working tree and checked-out branch stay
  * as they are. Never forced, never to a protected branch.
  */
@@ -71,6 +71,86 @@ export function blockedHits(diff: string, terms: string[], max = 15): string[] {
     if (hits.length >= max) break;
   }
   return hits;
+}
+
+/**
+ * Built-in secret rules (card #220), always on, whatever `mirrorBlockTerms` says. Gitleaks style: the
+ * shape of a token or key, not a word. Each pattern needs the full body of the credential, so a
+ * pattern written in code (`ghp_[A-Za-z0-9]{36}`) or a placeholder (`sk-...`) does not match itself.
+ */
+export const SECRET_RULES: { name: string; re: RegExp }[] = [
+  { name: 'token do GitHub', re: /\bgh[pousr]_[A-Za-z0-9]{36,}/ },
+  { name: 'token fino do GitHub', re: /\bgithub_pat_[A-Za-z0-9_]{22,}/ },
+  { name: 'chave da Anthropic', re: /(?<![A-Za-z0-9])sk-ant-[A-Za-z0-9_-]{20,}/ },
+  { name: 'chave sk- (OpenAI, OpenRouter e similares)', re: /(?<![A-Za-z0-9_-])sk-(?!ant-)[A-Za-z0-9_-]{20,}/ },
+  { name: 'token do Slack', re: /\bxox[abprs]-[A-Za-z0-9-]{10,}/ },
+  { name: 'chave de acesso da AWS', re: /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/ },
+  { name: 'chave de API do Google', re: /\bAIza[0-9A-Za-z_-]{35}/ },
+  { name: 'chave secreta do Stripe', re: /\b[rs]k_live_[0-9A-Za-z]{20,}/ },
+  { name: 'token do Notion', re: /\b(?:secret_[A-Za-z0-9]{43}|ntn_[A-Za-z0-9]{40,})/ },
+  { name: 'chave privada', re: /-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----/ },
+];
+
+/** `.env`, `.env.local`, `prod.env`…, but not the templates that exist to be committed. */
+export function isEnvFile(file: string): boolean {
+  const base = file.split('/').pop() ?? '';
+  if (!/^(?:\.env(?:\..+)?|.+\.env)$/i.test(base)) return false;
+  return !/\.(?:example|sample|template|dist|defaults?)$/i.test(base);
+}
+
+/** `KEY=value` with a value: what makes a `.env` line a secret. */
+const ENV_ASSIGNMENT = /^\s*(?:export\s+)?[A-Za-z_][A-Za-z0-9_.]*\s*=\s*(?!["']?\s*["']?\s*$)\S/;
+
+/** Shows the kind of credential without writing it again in a comment: the first 4 characters and the length. */
+function mask(secret: string): string {
+  return `${secret.slice(0, 4)}… (${secret.length} caracteres)`;
+}
+
+/** Secrets in a piece of text, masked. */
+function secretsIn(text: string): { rule: string; masked: string }[] {
+  const out: { rule: string; masked: string }[] = [];
+  for (const { name, re } of SECRET_RULES) {
+    const m = re.exec(text);
+    if (m) out.push({ rule: name, masked: mask(m[0]) });
+  }
+  return out;
+}
+
+/**
+ * Lines a diff adds that look like a secret, as `file:line: rule (masked)`. Never prints the line:
+ * the comment on the card and the publish log must not carry the credential again.
+ */
+export function secretHits(diff: string, max = 15): string[] {
+  const hits: string[] = [];
+  let file = '';
+  let lineNo = 0;
+  for (const line of diff.split('\n')) {
+    if (line.startsWith('+++ ')) {
+      file = line.replace(/^\+\+\+ (b\/)?/, '');
+      continue;
+    }
+    const hunk = /^@@ -\d+(?:,\d+)? \+(\d+)/.exec(line);
+    if (hunk) {
+      lineNo = Number(hunk[1]);
+      continue;
+    }
+    if (!line.startsWith('+') || line.startsWith('+++')) continue;
+    const text = line.slice(1);
+    const where = `${file}:${lineNo}`;
+    lineNo++;
+    const found = secretsIn(text).map((s) => `${where}: ${s.rule}, \`${s.masked}\``);
+    if (!found.length && isEnvFile(file) && !/^\s*#/.test(text) && ENV_ASSIGNMENT.test(text)) {
+      found.push(`${where}: variável com valor num arquivo \`.env\` (\`${text.split('=')[0].trim()}\`)`);
+    }
+    hits.push(...found);
+    if (hits.length >= max) return hits.slice(0, max);
+  }
+  return hits;
+}
+
+/** Secrets in a piece of text (PR title). */
+export function textSecretHits(label: string, text: string): string[] {
+  return secretsIn(text).map((s) => `${label}: ${s.rule}, \`${s.masked}\``);
 }
 
 /** The same check on a piece of text (PR title, commit message). */
@@ -250,9 +330,21 @@ export class Mirror {
       return { status: 'unchanged', branch: openPr ? branch : null, prUrl: openPr, merged: !!merged?.ok };
     }
 
-    // 5. Guard: private terms in the lines added, the title or the message.
+    // 5. Guards: secrets (built-in, always on), then private terms, in the lines added and the title.
     const title = `Card #${card.id}: ${card.title}`;
-    const diff = git(mirror, ['diff', '--unified=0', parentTree, tree]).out;
+    const diffRun = git(mirror, ['diff', '--unified=0', parentTree, tree]);
+    // Without the diff there is nothing to scan: failing closed beats pushing unchecked.
+    if (!diffRun.ok) throw new MirrorError(`Não consegui gerar o diff para a varredura de segredos:${fence(diffRun.out)}`);
+    const diff = diffRun.out;
+    const secrets = [...textSecretHits('título do PR', title), ...secretHits(diff)];
+    if (secrets.length) {
+      service.recordEvent(cardId, 'mirror_blocked', { secrets: secrets.length }, 'system');
+      this.comment(
+        cardId,
+        `Não enviei ao repositório público: o que iria tem cara de segredo (token, chave ou \`.env\` com valor).\n\n${secrets.map((h) => `- ${h}`).join('\n')}\n\nEssa varredura é embutida e não tem lista para editar. Tire o segredo do código (num teste, monte o valor falso por partes) e comente no card para tentar de novo. Se for uma credencial de verdade, troque-a: ela já está no histórico do Board.`,
+      );
+      return { status: 'blocked', hits: secrets };
+    }
     const hits = [...textHits('título do PR', title, terms), ...blockedHits(diff, terms)];
     if (hits.length) {
       service.recordEvent(cardId, 'mirror_blocked', { hits: hits.length }, 'system');
