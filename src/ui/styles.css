@@ -383,8 +383,14 @@ pre {
 }
 
 .brand-mark {
-  width: 18px;
-  height: 18px;
+  /* Card #201: the reference image cut out on a transparent background, used as a mask so it takes the
+     text color (navy on light, near-white on dark): a white figure alone would vanish on the light header.
+     22 px, not 18: the face and the bolt vanish below that. */
+  width: 22px;
+  height: 22px;
+  background-color: var(--text);
+  -webkit-mask: url('./assets/deus-ex-machina.png') center / contain no-repeat;
+  mask: url('./assets/deus-ex-machina.png') center / contain no-repeat;
   flex: none;
 }
 
