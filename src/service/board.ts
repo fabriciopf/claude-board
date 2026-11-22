@@ -22,6 +22,7 @@ import {
   type CardLink,
   type CardRef,
   type CardSummary,
+  type CardTokens,
   type ChecklistItem,
   type Comment,
   type CommentKind,
@@ -574,6 +575,7 @@ export class BoardService {
         .all(...ids) as Row[];
       for (const i of all) items.set(i.card_id, [...(items.get(i.card_id) ?? []), { text: i.text, done: bool(i.done) }]);
     }
+    const tokens = this.tokensOf(rows.map((r) => r.id as number));
     const { subtasks, titles } = this.relatives(rows);
     return rows.map((r) => {
       const labelIds = r.label_ids ? String(r.label_ids).split(',').map(Number) : [];
@@ -592,8 +594,35 @@ export class BoardService {
         subtasks: subtasks.get(card.id) ?? [],
         enteredStatusAt: r.entered_status_at,
         unseen: r.unseen === 1,
+        tokens: tokens.get(card.id) ?? null,
       };
     });
+  }
+
+  /** Tokens of the listed cards' runs, split by agent, in one query for the whole list (card #204, D105). */
+  private tokensOf(ids: number[]): Map<number, CardTokens> {
+    const out = new Map<number, CardTokens>();
+    if (!ids.length) return out;
+    const rows = this.db
+      .prepare(
+        `SELECT card_id, COALESCE(agent, 'claude') AS agent, SUM(tokens_in) AS input, SUM(tokens_out) AS output, COUNT(*) AS runs
+          FROM executions WHERE card_id IN (${ids.map(() => '?').join(',')})
+          GROUP BY card_id, COALESCE(agent, 'claude')`,
+      )
+      .all(...ids) as Row[];
+    for (const r of rows) {
+      const t = out.get(r.card_id) ?? { input: 0, output: 0, runs: 0, byAgent: [] };
+      t.input += r.input;
+      t.output += r.output;
+      t.runs += r.runs;
+      t.byAgent.push({ agent: r.agent, input: r.input, output: r.output, runs: r.runs });
+      out.set(r.card_id, t);
+    }
+    for (const [id, t] of out) {
+      if (t.input + t.output === 0) out.delete(id);
+      else t.byAgent.sort((a, b) => b.input + b.output - (a.input + a.output));
+    }
+    return out;
   }
 
   /** Tasks of the listed cards and titles of their origin cards, in two queries for the whole list. */

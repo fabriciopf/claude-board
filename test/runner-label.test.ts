@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { antigravityConcurrencyOptions, antigravityConcurrencyValue, antigravityTitle, concurrencyOptions, concurrencyTitle, concurrencyValue, insertNumber } from '../src/ui/runner-label.js';
+import { antigravityConcurrencyOptions, antigravityConcurrencyValue, antigravityTitle, concurrencyOptions, concurrencyTitle, concurrencyValue, insertNumber, showRunnerPill } from '../src/ui/runner-label.js';
 import { ANTIGRAVITY_CONCURRENCY_PRESETS, CONCURRENCY_PRESETS, type AntigravityLane } from '../src/shared/domain.js';
 
 describe('Antigravity CLI part of the counter (D99, D100)', () => {
@@ -99,5 +99,29 @@ describe('runner and session share one pill in the header (D83)', () => {
     expect(pill).not.toMatch(/app\.runner\.running/);
     const { app: messages } = await import('../src/ui/i18n/app');
     for (const lang of Object.values(messages)) expect(Object.keys(lang)).not.toContain('runner.running');
+  });
+
+  it('the pill shows only while a run of any agent is going (card #209)', () => {
+    expect(showRunnerPill(null)).toBe(false);
+    expect(showRunnerPill(undefined)).toBe(false);
+    expect(showRunnerPill({ running: 0 })).toBe(false);
+    expect(showRunnerPill({ running: 1 })).toBe(true);
+    // `running` counts every agent, so an Antigravity run alone keeps the pill (claudeRunning 0).
+    expect(showRunnerPill({ running: 1, claudeRunning: 0 } as { running: number })).toBe(true);
+  });
+
+  it('the header wraps the whole pill in showRunnerPill, and leaves the other chips outside it (card #209)', async () => {
+    const fs = await import('node:fs');
+    const app = fs.readFileSync(new URL('../src/ui/App.tsx', import.meta.url), 'utf8');
+    const gate = app.indexOf('{showRunnerPill(runner) && (');
+    expect(gate).toBeGreaterThan(-1);
+    const pillAt = app.indexOf('className="counter runner-usage"');
+    const usageAt = app.indexOf('<UsageChip');
+    const closeAt = app.indexOf(')}', app.indexOf('</span>', usageAt));
+    expect(gate).toBeLessThan(pillAt);
+    // Nothing between the gate and the pill, and the gate closes right after the pill, before the agenda chip.
+    expect(app.slice(gate, pillAt).replace(/\{showRunnerPill\(runner\) && \(\s*<span\s*/, '')).toBe('');
+    expect(closeAt).toBeLessThan(app.indexOf('<AgendaChip'));
+    expect(app.slice(app.indexOf('</span>', usageAt) + '</span>'.length, closeAt).trim()).toBe('');
   });
 });
