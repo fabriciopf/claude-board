@@ -28,8 +28,8 @@ export const UNSEEN_STATUSES: readonly Status[] = ['review', 'waiting_user'];
 export const STATUS_LABELS: Record<Status, string> = {
   triage: 'Triagem',
   backlog: 'Não iniciada',
-  ready: 'Pronta para o Claude',
-  running: 'Em andamento (Claude)',
+  ready: 'Pronta para o agente',
+  running: 'Em andamento (agente)',
   waiting_user: 'Aguardando você',
   waiting_third_party: 'Aguardando terceiro',
   review: 'Em revisão',
@@ -39,14 +39,14 @@ export const STATUS_LABELS: Record<Status, string> = {
 /** What each list is for, shown in the column's info button. */
 export const STATUS_DESCRIPTIONS: Record<Status, string> = {
   triage: 'Sugestões vindas da importação do histórico e das sessões do VS Code, ainda não aceitas. Abra o card para aceitar, ajustar ou ignorar.',
-  backlog: 'Tarefas aceitas que ainda não estão com o Claude. Use "Mandar pro Claude" ou arraste para a fila quando quiser que ele comece.',
-  ready: 'A fila do Claude. O runner pega daqui o próximo card, pela prioridade e depois pela posição na lista.',
-  running: 'O Claude está trabalhando nestes cards agora. Só o runner põe cards aqui; para interromper, use "Parar" dentro do card.',
-  waiting_user: 'O Claude fez uma pergunta ou a execução parou. Responda ou use "Tentar de novo" dentro do card; o card volta para a fila.',
+  backlog: 'Tarefas aceitas que ainda não estão com o agente. Use "Mandar pro agente" ou arraste para a fila quando quiser que ele comece.',
+  ready: 'A fila do agente. O runner pega daqui o próximo card, pela prioridade e depois pela posição na lista.',
+  running: 'O agente está trabalhando nestes cards agora. Só o runner põe cards aqui; para interromper, use "Parar" dentro do card.',
+  waiting_user: 'O agente fez uma pergunta ou a execução parou. Responda ou use "Tentar de novo" dentro do card; o card volta para a fila.',
   waiting_third_party:
-    'Depende de outra pessoa, de deploy ou de acesso; o motivo fica registrado no card. Um card que o Claude dividiu em tarefas espera aqui até você aprovar todas.',
-  review: 'O Claude terminou e entregou um resumo. Confira e aprove, ou peça ajustes, que voltam para o Claude na mesma sessão. Um comentário seu também devolve o card para a fila do Claude.',
-  done: 'Trabalho aprovado por você. Só você move um card para cá. Um comentário seu devolve o card para a fila do Claude.',
+    'Depende de outra pessoa, de deploy ou de acesso; o motivo fica registrado no card. Um card que o agente dividiu em tarefas espera aqui até você aprovar todas.',
+  review: 'O agente terminou e entregou um resumo. Confira e aprove, ou peça ajustes, que voltam para o agente na mesma sessão. Um comentário seu também devolve o card para a fila do agente.',
+  done: 'Trabalho aprovado por você. Só você move um card para cá. Um comentário seu devolve o card para a fila do agente.',
 };
 
 /** A user comment on a card in one of these lists sends it back to Claude's queue (D39). */
@@ -149,6 +149,18 @@ export interface AgyModelQuota {
   remaining: number;
   /** Unix seconds. */
   resetsAt: number;
+}
+
+/** The quota that limits the Antigravity runs, read as a window like the Claude ones (card #198 review). */
+export interface AgyUsageWindow {
+  /** Model whose quota it is (models of a group share it). */
+  model: string;
+  /** Used share, 0..1 (1 - quota_remaining). */
+  utilization: number;
+  /** Unix seconds. */
+  resetsAt: number;
+  /** The weekly window; else the five-hour one. */
+  weekly: boolean;
 }
 
 /** A reading of the Google quota of Antigravity CLI (D100). */
@@ -487,6 +499,8 @@ export interface AntigravityLane {
   concurrency?: ConcurrencyInfo;
   /** Last reading of the Google quota (D100), null before the first. */
   usage?: AgyQuotaReading | null;
+  /** The quota that limits the Antigravity runs, as one window for the usage ticker (card #198 review). */
+  window?: AgyUsageWindow | null;
   /** Whether the header shows the split by agent: Antigravity is the default, has a card in the queue, a run going or a quota note. */
   shown: boolean;
   quota: AgentQuotaNote | null;
@@ -505,6 +519,8 @@ export interface RunnerState {
   /** Runs of Claude Code, the ones `concurrency` limits (D99). */
   claudeRunning?: number;
   antigravity?: AntigravityLane;
+  /** Agent of the cards that choose none: the usage ticker shows its usage when no run is going (card #198 review). */
+  defaultAgent?: AgentId;
   /** A publication of the Board holds new runs until the running ones end (D42). */
   held?: boolean;
   /** Absent when the runner is not active in this process. */
