@@ -15,6 +15,7 @@ const base: SelfUpdateState = {
   remoteSha: 'abc',
   checkedAt: '2026-11-21T12:00:00Z',
   checkError: null,
+  untrusted: null,
   phase: 'idle',
   detail: null,
   failure: null,
@@ -61,5 +62,15 @@ describe('self-update strip', () => {
   it('links one commit on GitHub only', () => {
     expect(commitUrl(base.sourceUrl, 'f00')).toBe('https://github.com/fabriciopf/claude-board/commit/f00');
     expect(commitUrl(null, 'f00')).toBeNull();
+  });
+});
+
+describe('self-update strip when automatic mode does not trust the commits (card #225)', () => {
+  it('says the automatic update is waiting instead of starting', () => {
+    expect(selfUpdateView({ ...base, mode: 'auto' }, null)?.text).toContain('começa em instantes');
+    const v = selfUpdateView({ ...base, mode: 'auto', untrusted: 'o commit abc não tem assinatura' }, null);
+    expect(v?.kind).toBe('available');
+    expect(v?.text).toContain('esperou');
+    expect(v?.text).not.toContain('começa em instantes');
   });
 });

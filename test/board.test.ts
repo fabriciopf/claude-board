@@ -115,7 +115,7 @@ describe('REST API', () => {
     expect(detail.card.position).toBe(512.5);
     expect(detail.events.some((e: any) => e.type === 'moved' && e.payload.to === 'review')).toBe(true);
 
-    const approved = await app.inject({ method: 'POST', url: `/api/cards/${card.id}/approve` });
+    const approved = await app.inject({ method: 'POST', url: `/api/cards/${card.id}/approve`, payload: {} });
     expect(approved.json().status).toBe('done');
     await app.close();
   });

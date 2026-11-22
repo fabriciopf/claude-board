@@ -38,7 +38,7 @@ describe('a recurring automation stays after it runs', () => {
     const ctx = makeContext();
     const app = await buildApp(ctx, { serveUi: false });
     const a = (await app.inject({ method: 'POST', url: '/api/automations', payload: { request: 'x', draft: schedule } })).json().automation;
-    await app.inject({ method: 'POST', url: `/api/automations/${a.id}/run` });
+    await app.inject({ method: 'POST', url: `/api/automations/${a.id}/run`, payload: {} });
     const list = (await app.inject({ method: 'GET', url: '/api/automations' })).json();
     expect(list.automations.map((x: { id: number }) => x.id)).toEqual([a.id]);
     expect(list.runs).toHaveLength(1);

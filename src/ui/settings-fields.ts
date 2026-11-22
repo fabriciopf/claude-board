@@ -96,6 +96,7 @@ export const FIELDS: Field[] = [
     hasHint: true,
   }),
   field({ key: 'selfUpdateSource', tab: 'git', type: 'text', hasHint: true }),
+  field({ key: 'selfUpdateAuthors', tab: 'git', type: 'text', hasHint: true }),
   field({ key: 'defaultBaseBranch', tab: 'git', type: 'text' }),
   field({ key: 'worktreeRoot', tab: 'git', type: 'text', emptyIsNull: true, hasHint: true }),
   field({

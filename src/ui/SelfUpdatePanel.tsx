@@ -80,6 +80,7 @@ export function SelfUpdatePanel({ notify }: { notify: (msg: string, error?: bool
           {state?.checkedAt && !state.unavailable && <span className="muted"> {t('app.selfUpdate.lastCheck', { date: fmtDate(state.checkedAt) })}</span>}
         </p>
         {state?.checkError && <p className="small" style={{ margin: 0, color: 'var(--danger)' }}>{state.checkError}</p>}
+        {state?.mode === 'auto' && state.untrusted && <p className="small" style={{ margin: 0, color: 'var(--warn)' }}>{`${t('app.selfUpdate.untrusted')} ${state.untrusted}`}</p>}
         {state?.failure && <pre className="publish-error">{`${t('app.selfUpdate.lastFailure', { date: fmtDate(state.failure.at) })}\n${state.failure.message}`}</pre>}
         <p className="small muted" style={{ margin: 0 }}>
           {t('app.selfUpdate.explain')}
