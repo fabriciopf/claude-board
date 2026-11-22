@@ -429,6 +429,18 @@ export interface CardSummary extends Card {
   enteredStatusAt: string;
   /** In "Em revisão" or "Aguardando você" and not opened since Claude or the runner put it there (D84, D95). */
   unseen: boolean;
+  /** Tokens of all the card's runs (card #204, D105); null when the card never ran or no run counted tokens. */
+  tokens: CardTokens | null;
+}
+
+/** Tokens summed over a card's runs, as each run counts them (D14): input includes the cache read and written. */
+export interface CardTokens {
+  input: number;
+  output: number;
+  /** Runs summed, including the one in progress. */
+  runs: number;
+  /** Split by agent, largest first; one entry when every run used the same agent. */
+  byAgent: { agent: string; input: number; output: number; runs: number }[];
 }
 
 export interface Comment {

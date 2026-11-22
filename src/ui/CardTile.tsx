@@ -5,6 +5,7 @@ import { toggleLabelsExpanded, useLabelsExpanded } from './label-display';
 import { AgentAvatar } from './AgentIcon';
 import { useDefaultAgent } from './default-agent';
 import { statusLabel, statusShortLabel, t } from './i18n';
+import { tokenBadge } from './token-badge';
 
 /** Small dot on a card in "Em revisão" or "Aguardando você" not opened since it got there (D84, D95). */
 export function UnseenDot({ status }: { status: Status }) {
@@ -45,6 +46,7 @@ export const CardTile = forwardRef<HTMLDivElement, Props>(function CardTile(
   const cardRepos = (card.repositoryIds ?? []).map((id) => repositories?.get(id)).filter((x): x is Repository => !!x);
   const pr = card.links.find((l) => l.kind === 'pr');
   const overdue = card.status !== 'done' && isOverdue(card.dueDate);
+  const tokens = tokenBadge(card.tokens);
   const classes = [
     'card',
     `priority-${card.priority}`,
@@ -141,6 +143,11 @@ export const CardTile = forwardRef<HTMLDivElement, Props>(function CardTile(
           </span>
         ))}
         {card.commentCount > 0 && <span className="badge">💬 {card.commentCount}</span>}
+        {tokens && (
+          <span className="badge tokens-badge" title={tokens.title}>
+            {tokens.text}
+          </span>
+        )}
         {card.dueDate && <span className={'badge' + (overdue ? ' overdue' : '')}>⏱ {fmtDate(card.dueDate, false).slice(0, 5)}</span>}
         {pr && <span className="badge">PR</span>}
         {card.automationId !== null && (
