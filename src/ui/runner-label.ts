@@ -1,5 +1,13 @@
-import { ANTIGRAVITY_CONCURRENCY_PRESETS, AUTO_CONCURRENCY, CONCURRENCY_PRESETS, UNLIMITED_CONCURRENCY, concurrencyOptionLabel, type AntigravityLane, type ConcurrencyInfo } from '../shared/domain';
+import { ANTIGRAVITY_CONCURRENCY_PRESETS, AUTO_CONCURRENCY, CONCURRENCY_PRESETS, UNLIMITED_CONCURRENCY, concurrencyOptionLabel, type AntigravityLane, type ConcurrencyInfo, type RunnerState } from '../shared/domain';
 import { t } from './i18n';
+
+/**
+ * Whether the header shows the runner pill, the runs counter plus the usage ticker (card #209): only while
+ * a run of any agent is going. Idle, the pill leaves the header; the concurrency setting stays in Settings.
+ */
+export function showRunnerPill(runner: Pick<RunnerState, 'running'> | null | undefined): boolean {
+  return !!runner && runner.running > 0;
+}
 
 /** Tooltip of the header counter, "N de <seletor>" (D83; no "rodando" since card #208). The automatic limit is never below one (MIN_RUNS). */
 export function concurrencyTitle(c: ConcurrencyInfo | undefined): string {

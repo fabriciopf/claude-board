@@ -13,19 +13,22 @@ import { isBoardEnvKey } from '../shared/brand.js';
  * in another checkout (`mirrorRepoPath`) whose origin is on GitHub. When a card of the Board reaches
  * "Concluída", the tree of the publish branch, without the excluded paths (DECISIONS.md), becomes one
  * commit on top of the mirror's base branch, is pushed to a `cb/<id>-<slug>` branch and gets a draft
- * PR. Everything happens in the mirror's object store: its working tree and checked-out branch stay
+ * PR. When the gh account can write to the public repository (`mirrorAutoMerge`, card #211), the PR
+ * is opened ready and merged at once. Everything happens in the mirror's object store: its working tree and checked-out branch stay
  * as they are. Never forced, never to a protected branch.
  */
 
 export interface MirrorOptions {
   run?: (cmd: string, args: string[], cwd: string, env?: NodeJS.ProcessEnv) => Promise<CmdResult>;
+  /** Wait between merge attempts (tests use 0). */
+  mergeRetryMs?: number;
 }
 
 export type MirrorOutcome =
   | { status: 'off' }
-  | { status: 'unchanged'; branch: string | null; prUrl: string | null }
+  | { status: 'unchanged'; branch: string | null; prUrl: string | null; merged: boolean }
   | { status: 'blocked'; hits: string[] }
-  | { status: 'pushed'; branch: string; commit: string; prUrl: string | null; updated: boolean }
+  | { status: 'pushed'; branch: string; commit: string; prUrl: string | null; updated: boolean; merged: boolean }
   | { status: 'failed'; message: string };
 
 class MirrorError extends Error {}
@@ -79,6 +82,7 @@ export function textHits(label: string, text: string, terms: string[]): string[]
 export class Mirror {
   private chain: Promise<unknown> = Promise.resolve();
   private run: NonNullable<MirrorOptions['run']>;
+  private retryMs: number;
 
   constructor(
     private ctx: AppContext,
@@ -86,6 +90,7 @@ export class Mirror {
     opts: MirrorOptions = {},
   ) {
     this.run = opts.run ?? runCommand;
+    this.retryMs = opts.mergeRetryMs ?? 4000;
   }
 
   enabled(): boolean {
@@ -231,11 +236,18 @@ export class Mirror {
       if (n > 20) throw new MirrorError(`Branches \`${stem}-*\` demais no repositório público.`);
     }
 
+    // A reused branch behind the public base: the base becomes a second parent of the new commit, so
+    // the PR has no conflict. The tree stays the Board's, which is what the branch exists to carry.
+    const behindBase = parent !== baseSha.out && !git(mirror, ['merge-base', '--is-ancestor', baseSha.out, parent]).ok;
     const parentTree = git(mirror, ['rev-parse', `${parent}^{tree}`]).out;
-    if (parentTree === tree) {
+    // Asked only when a PR is about to exist: a blocked push or an unchanged tree without PR never calls gh for it.
+    const checkAccess = async () => (config.mirrorAutoMerge && slug ? this.mergeAccess(slug, mirror, env) : null);
+    if (parentTree === tree && !behindBase) {
       const where = openPr ? `O PR aberto já tem a \`${source}\` atual: ${openPr}` : `O repositório público (\`${base}\`) já está igual à \`${source}\` do Board.`;
-      this.comment(cardId, `Nada a enviar ao repositório público. ${where}`);
-      return { status: 'unchanged', branch: openPr ? branch : null, prUrl: openPr };
+      const access = openPr ? await checkAccess() : null;
+      const merged = openPr && access?.method ? await this.mergePr(cardId, openPr, parent, slug as string, access.method, mirror, env) : null;
+      this.comment(cardId, [`Nada a enviar ao repositório público. ${where}`, merged?.note].filter(Boolean).join('\n\n'));
+      return { status: 'unchanged', branch: openPr ? branch : null, prUrl: openPr, merged: !!merged?.ok };
     }
 
     // 5. Guard: private terms in the lines added, the title or the message.
@@ -251,10 +263,18 @@ export class Mirror {
       return { status: 'blocked', hits };
     }
 
+    const access = await checkAccess();
+
     // 6. Commit (author = the mirror's own git identity) and push, never forced.
     const stat = git(mirror, ['diff', '--stat', parentTree, tree]).out;
-    const message = `${title}\n\nSynced from the Board's ${source} (${sourceSha.slice(0, 7)}).`;
-    const commit = await this.must('Criar o commit', 'git', ['commit-tree', tree, '-p', parent, '-m', message], mirror, env);
+    const message = [
+      title,
+      '',
+      `Synced from the Board's ${source} (${sourceSha.slice(0, 7)}).`,
+      ...(behindBase ? ['', `Also merges ${base} (${baseSha.out.slice(0, 7)}), resolved to the Board's tree.`] : []),
+    ].join('\n');
+    const parents = behindBase ? ['-p', parent, '-p', baseSha.out] : ['-p', parent];
+    const commit = await this.must('Criar o commit', 'git', ['commit-tree', tree, ...parents, '-m', message], mirror, env);
     const sha = commit.trim().split('\n').pop() as string;
     await this.must('Push', 'git', ['push', '--quiet', 'origin', `${sha}:refs/heads/${branch}`], mirror, env);
     service.recordEvent(cardId, 'mirrored', { branch, commit: sha, source: sourceSha }, 'system');
@@ -271,28 +291,102 @@ export class Mirror {
         stat,
         '```',
       ].join('\n');
-      const pr = await this.run('gh', ['pr', 'create', '--repo', slug, '--base', base, '--head', branch, '--draft', '--title', title, '--body', body], mirror, env);
+      // Draft only when it will wait for someone: a PR about to be merged skips that step.
+      const draft = access?.method ? [] : ['--draft'];
+      const pr = await this.run('gh', ['pr', 'create', '--repo', slug, '--base', base, '--head', branch, ...draft, '--title', title, '--body', body], mirror, env);
       if (!pr.ok) {
         this.comment(cardId, `Push feito na branch \`${branch}\` (\`${sha.slice(0, 7)}\`) do repositório público, mas o PR não abriu.${fence(pr.out)}`);
-        return { status: 'pushed', branch, commit: sha, prUrl: null, updated: false };
+        return { status: 'pushed', branch, commit: sha, prUrl: null, updated: false, merged: false };
       }
       prUrl = /https:\/\/\S+/.exec(pr.out)?.[0] ?? null;
     }
+    const merged = prUrl && access?.method ? await this.mergePr(cardId, prUrl, sha, slug as string, access.method, mirror, env) : null;
     if (prUrl) {
       try {
-        service.addLink(cardId, { kind: 'pr', value: prUrl, title: `PR (rascunho) no repositório público` }, 'system');
+        const kind = merged?.ok ? 'mesclado' : access?.method ? 'aberto' : 'rascunho';
+        service.addLink(cardId, { kind: 'pr', value: prUrl, title: `PR (${kind}) no repositório público` }, 'system');
       } catch {
         /* the card may have been deleted */
       }
     }
+    const opened = access?.method ? 'PR aberto' : 'PR aberto em rascunho';
     const lines = [
       openPr
         ? `Repositório público atualizado: novo commit \`${sha.slice(0, 7)}\` na branch \`${branch}\`, no PR que já estava aberto: ${openPr}`
-        : `Push feito para o repositório público na branch \`${branch}\` (\`${sha.slice(0, 7)}\`)${prUrl ? ` e PR aberto em rascunho: ${prUrl}` : slug ? '' : '; o \`origin\` não é do GitHub, então não abri PR'}.`,
+        : `Push feito para o repositório público na branch \`${branch}\` (\`${sha.slice(0, 7)}\`)${prUrl ? ` e ${opened}: ${prUrl}` : slug ? '' : '; o \`origin\` não é do GitHub, então não abri PR'}.`,
       `É a \`${source}\` do Board (\`${sourceSha.slice(0, 7)}\`) inteira sobre a \`${base}\` pública: inclui o que outros cards publicaram e ainda não estava lá.`,
+      behindBase
+        ? `A \`${base}\` pública tinha andado desde que a branch foi aberta: o commit também a mescla (\`${baseSha.out.slice(0, 7)}\`), com a árvore do Board valendo nos conflitos.`
+        : null,
+      merged?.note ?? (prUrl && access && !access.method ? access.why : null),
       fence(stat).trim(),
     ];
-    this.comment(cardId, lines.join('\n\n'));
-    return { status: 'pushed', branch, commit: sha, prUrl, updated: !!openPr };
+    this.comment(cardId, lines.filter(Boolean).join('\n\n'));
+    return { status: 'pushed', branch, commit: sha, prUrl, updated: !!openPr, merged: !!merged?.ok };
   }
+
+  /**
+   * Whether the gh account may merge into the public repository, and how (card #211). `method` is
+   * null when it cannot: no write permission, no merge method allowed, or the check itself failed.
+   */
+  private async mergeAccess(slug: string, cwd: string, env: NodeJS.ProcessEnv): Promise<{ method: MergeMethod | null; why: string }> {
+    const r = await this.run('gh', ['api', `repos/${slug}`, '--jq', '{p: .permissions, m: .allow_merge_commit, s: .allow_squash_merge, r: .allow_rebase_merge}'], cwd, env);
+    let info: { p?: Record<string, boolean> | null; m?: boolean | null; s?: boolean | null; r?: boolean | null };
+    try {
+      if (!r.ok) throw new Error();
+      info = JSON.parse(r.out.split('\n').pop() as string);
+    } catch {
+      return { method: null, why: `Não mesclei: não consegui ler a permissão da conta no \`${slug}\`, então o PR ficou em rascunho.${fence(r.out)}` };
+    }
+    const p = info.p ?? {};
+    if (!p.push && !p.maintain && !p.admin) return { method: null, why: `Não mesclei: a conta não tem escrita no \`${slug}\`, então o PR ficou em rascunho para quem tem.` };
+    const method = pickMergeMethod(info);
+    if (!method) return { method: null, why: `Não mesclei: o \`${slug}\` não aceita nenhum tipo de merge de PR.` };
+    return { method, why: '' };
+  }
+
+  /** Takes the PR out of draft and merges it, pinned to the commit just pushed. */
+  private async mergePr(
+    cardId: number,
+    url: string,
+    head: string,
+    slug: string,
+    method: MergeMethod,
+    cwd: string,
+    env: NodeJS.ProcessEnv,
+  ): Promise<{ ok: boolean; note: string }> {
+    const view = await this.run('gh', ['pr', 'view', url, '--repo', slug, '--json', 'isDraft', '--jq', '.isDraft'], cwd, env);
+    if (view.ok && view.out.trim().split('\n').pop() === 'true') {
+      const ready = await this.run('gh', ['pr', 'ready', url, '--repo', slug], cwd, env);
+      if (!ready.ok) return { ok: false, note: `Não mesclei: o PR não saiu do rascunho.${fence(ready.out)}` };
+    }
+    // GitHub computes mergeability in the background: right after the push it can still say "not mergeable".
+    let out = '';
+    for (let attempt = 1; attempt <= MERGE_ATTEMPTS; attempt++) {
+      const r = await this.run('gh', ['pr', 'merge', url, '--repo', slug, `--${method}`, '--match-head-commit', head], cwd, env);
+      if (r.ok) {
+        this.ctx.service.recordEvent(cardId, 'mirror_merged', { url, head, method }, 'system');
+        return { ok: true, note: `PR mesclado na hora (merge ${MERGE_LABEL[method]}), porque a conta tem escrita no \`${slug}\`.` };
+      }
+      out = r.out;
+      if (attempt < MERGE_ATTEMPTS) await new Promise((res) => setTimeout(res, this.retryMs));
+    }
+    this.ctx.service.recordEvent(cardId, 'mirror_merge_failed', { url, head }, 'system');
+    return { ok: false, note: `O PR ficou aberto: o merge falhou ${MERGE_ATTEMPTS} vezes. Mescle à mão em ${url}.${fence(out)}` };
+  }
+}
+
+export type MergeMethod = 'merge' | 'squash' | 'rebase';
+const MERGE_ATTEMPTS = 3;
+const MERGE_LABEL: Record<MergeMethod, string> = { merge: 'com commit de merge', squash: 'squash', rebase: 'rebase' };
+
+/**
+ * Merge commit first, as the public history has been merged by hand so far; squash or rebase only
+ * when the repository forbids it. A field GitHub left out (null) counts as allowed.
+ */
+export function pickMergeMethod(info: { m?: boolean | null; s?: boolean | null; r?: boolean | null }): MergeMethod | null {
+  if (info.m !== false) return 'merge';
+  if (info.s !== false) return 'squash';
+  if (info.r !== false) return 'rebase';
+  return null;
 }

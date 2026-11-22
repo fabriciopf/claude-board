@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { runCommand, type CmdResult } from '../src/publish/git.js';
-import { blockedHits, githubSlug, splitList } from '../src/publish/mirror.js';
+import { blockedHits, githubSlug, pickMergeMethod, splitList } from '../src/publish/mirror.js';
 import { MIRROR_OFF_NOTE, Publisher } from '../src/publish/publisher.js';
 import { makeContext, tempDir } from './helpers.js';
 
@@ -76,7 +76,33 @@ function setup() {
   fs.writeFileSync(path.join(mirror, 'DECISIONS.md'), '# outra versão\n');
 }
 
-/** git runs for real; gh is simulated (pr list / pr create). */
+/** What `gh api repos/<slug>` answers (card #211); null = the call fails, as in the D66 tests. */
+let repoInfo: { p: Record<string, boolean>; m?: boolean; s?: boolean; r?: boolean } | null;
+let drafts: Set<string>;
+/** Merges that fail before one goes through (GitHub still computing mergeability). */
+let mergeFailures: number;
+
+/** Merge as GitHub does it: refused when it would conflict (main not in the head), else a merge commit on main. */
+function ghMerge(url: string, args: string[]): CmdResult {
+  const branch = [...openPrs].find(([, u]) => u === url)?.[0];
+  if (!branch) return { ok: false, out: 'no PR' };
+  if (drafts.has(url)) return { ok: false, out: 'Pull request is still a draft' };
+  if (mergeFailures > 0) {
+    mergeFailures--;
+    return { ok: false, out: 'Pull request is not mergeable' };
+  }
+  const head = git(bare, 'rev-parse', `refs/heads/${branch}`);
+  if (args[args.indexOf('--match-head-commit') + 1] !== head) return { ok: false, out: 'Head branch was modified' };
+  const main = git(bare, 'rev-parse', 'main');
+  const behind = spawnSync('git', ['merge-base', '--is-ancestor', main, head], { cwd: bare }).status !== 0;
+  if (behind) return { ok: false, out: 'Pull request is not mergeable: the merge commit cannot be cleanly created' };
+  const merge = git(bare, '-c', 'user.name=GitHub', '-c', 'user.email=noreply@github.com', 'commit-tree', `${head}^{tree}`, '-p', main, '-p', head, '-m', `Merge ${branch}`);
+  git(bare, 'update-ref', 'refs/heads/main', merge);
+  openPrs.delete(branch);
+  return { ok: true, out: `Merged ${url}` };
+}
+
+/** git runs for real; gh is simulated (pr list / create / view / ready / merge, api repos). */
 async function run(cmd: string, args: string[], cwd: string, env?: NodeJS.ProcessEnv): Promise<CmdResult> {
   if (cmd !== 'gh') return runCommand(cmd, args, cwd, env);
   ghCalls.push(args);
@@ -85,8 +111,16 @@ async function run(cmd: string, args: string[], cwd: string, env?: NodeJS.Proces
     const head = args[args.indexOf('--head') + 1];
     const url = `https://github.com/acme/board/pull/${openPrs.size + 1}`;
     openPrs.set(head, url);
-    return { ok: true, out: `Creating draft pull request\n${url}` };
+    if (args.includes('--draft')) drafts.add(url);
+    return { ok: true, out: `Creating pull request\n${url}` };
   }
+  if (args[0] === 'api' && args[1] === 'repos/acme/board' && repoInfo) return { ok: true, out: JSON.stringify(repoInfo) };
+  if (args[0] === 'pr' && args[1] === 'view') return { ok: true, out: String(drafts.has(args[2])) };
+  if (args[0] === 'pr' && args[1] === 'ready') {
+    drafts.delete(args[2]);
+    return { ok: true, out: 'ready' };
+  }
+  if (args[0] === 'pr' && args[1] === 'merge') return ghMerge(args[2], args);
   return { ok: false, out: `gh ${args.join(' ')} não simulado` };
 }
 
@@ -114,8 +148,11 @@ beforeEach(() => {
   setup();
   ghCalls = [];
   openPrs = new Map();
+  repoInfo = null;
+  drafts = new Set();
+  mergeFailures = 0;
   ctx = makeContext({ selfRepoPath: repo, publishBranch: 'master', autoPublish: true, mirrorRepoPath: mirror, mirrorBaseBranch: 'main', mirrorExclude: 'DECISIONS.md' });
-  publisher = new Publisher(ctx, { commands, restart: () => undefined, pollMs: 20, mirror: { run } });
+  publisher = new Publisher(ctx, { commands, restart: () => undefined, pollMs: 20, mirror: { run, mergeRetryMs: 0 } });
   ctx.publisher = publisher;
 });
 
@@ -255,7 +292,116 @@ describe('public mirror on "Concluída" (D66)', () => {
   });
 });
 
+describe('merge on "Concluída" when the account can write (card #211)', () => {
+  const WRITE = { p: { admin: false, maintain: false, push: true, pull: true }, m: true, s: true, r: true };
+  const merges = () => ghCalls.filter((a) => a[1] === 'merge');
+
+  it('opens the PR ready and merges it, pinned to the pushed commit', async () => {
+    repoInfo = WRITE;
+    const card = publishedCard('Mescla', { 'src/b.ts': 'export const b = 2;\n' });
+    ctx.service.approve(card.id);
+    await publisher.mirror.whenIdle();
+
+    const branch = `cb/${card.id}-mescla`;
+    const create = ghCalls.find((a) => a[1] === 'create') as string[];
+    expect(create).not.toContain('--draft');
+    expect(merges()).toHaveLength(1);
+    expect(merges()[0]).toEqual(expect.arrayContaining(['--merge', '--match-head-commit', git(bare, 'rev-parse', branch)]));
+    // main now has the card's work, without the excluded file.
+    expect(remoteFiles('main')).toContain('src/b.ts');
+    expect(remoteFiles('main')).not.toContain('DECISIONS.md');
+    expect(ctx.service.getCard(card.id).links).toContainEqual(expect.objectContaining({ kind: 'pr', title: 'PR (mesclado) no repositório público' }));
+    expect(comments(card.id)).toMatch(/PR mesclado na hora \(merge com commit de merge\)/);
+  });
+
+  it('without write permission keeps the draft PR and says why', async () => {
+    repoInfo = { p: { admin: false, maintain: false, push: false, pull: true }, m: true, s: true, r: true };
+    const card = publishedCard('Sem escrita', { 'src/b.ts': 'x\n' });
+    ctx.service.approve(card.id);
+    await publisher.mirror.whenIdle();
+    expect(ghCalls.find((a) => a[1] === 'create')).toContain('--draft');
+    expect(merges()).toEqual([]);
+    expect(remoteFiles('main')).not.toContain('src/b.ts');
+    expect(comments(card.id)).toMatch(/a conta não tem escrita no `acme\/board`/);
+  });
+
+  it('with mirrorAutoMerge off does not even ask for the permission', async () => {
+    repoInfo = WRITE;
+    ctx.config.mirrorAutoMerge = false;
+    const card = publishedCard('Desligado', { 'src/b.ts': 'x\n' });
+    ctx.service.approve(card.id);
+    await publisher.mirror.whenIdle();
+    expect(ghCalls.some((a) => a[0] === 'api')).toBe(false);
+    expect(ghCalls.find((a) => a[1] === 'create')).toContain('--draft');
+    expect(merges()).toEqual([]);
+  });
+
+  it('a reused branch behind the public main gets main as second parent, with the Board tree, and merges', async () => {
+    // First conclusion without permission: a draft PR stays open.
+    repoInfo = { p: { push: false }, m: true };
+    const card = publishedCard('Conflito', { 'src/a.ts': 'export const a = 2;\n' });
+    ctx.service.approve(card.id);
+    await publisher.mirror.whenIdle();
+    const branch = `cb/${card.id}-conflito`;
+    const first = git(bare, 'rev-parse', branch);
+
+    // Someone merges into the public main a change to the same line.
+    git(mirror, 'fetch', '-q', 'origin', 'main');
+    git(mirror, 'checkout', '-q', '-b', 'tmp', 'origin/main');
+    fs.writeFileSync(path.join(mirror, 'src', 'a.ts'), 'export const a = 99;\n');
+    git(mirror, 'commit', '-q', '-am', 'public edit');
+    git(mirror, 'push', '-q', 'origin', 'tmp:main');
+    git(mirror, 'checkout', '-q', 'main');
+    const publicMain = git(bare, 'rev-parse', 'main');
+
+    // Reopened, concluded again, now with permission.
+    repoInfo = WRITE;
+    ctx.service.moveCard(card.id, { status: 'review' }, 'system');
+    fs.writeFileSync(path.join(repo, 'src', 'b.ts'), 'v2\n');
+    git(repo, 'add', '-A');
+    git(repo, 'commit', '-q', '-m', 'fix');
+    ctx.service.approve(card.id);
+    await publisher.mirror.whenIdle();
+
+    const parents = git(bare, 'rev-list', '--parents', '-n', '1', 'main^2').split(' ').slice(1);
+    expect(parents).toEqual([first, publicMain]);
+    expect(git(bare, 'show', 'main:src/a.ts')).toBe('export const a = 2;');
+    expect(git(bare, 'show', 'main:src/b.ts')).toBe('v2');
+    expect(ghCalls.some((a) => a[1] === 'ready')).toBe(true);
+    expect(merges()).toHaveLength(1);
+    expect(comments(card.id)).toMatch(/A `main` pública tinha andado[\s\S]*PR mesclado na hora/);
+  });
+
+  it('retries a merge GitHub refuses at first, and leaves the PR open after three refusals', async () => {
+    repoInfo = WRITE;
+    mergeFailures = 2;
+    const ok = publishedCard('Demora', { 'src/b.ts': 'x\n' });
+    ctx.service.approve(ok.id);
+    await publisher.mirror.whenIdle();
+    expect(merges()).toHaveLength(3);
+    expect(remoteFiles('main')).toContain('src/b.ts');
+
+    ghCalls = [];
+    mergeFailures = 5;
+    const stuck = publishedCard('Travado', { 'src/c.ts': 'y\n' });
+    ctx.service.approve(stuck.id);
+    await publisher.mirror.whenIdle();
+    expect(merges()).toHaveLength(3);
+    expect(remoteFiles('main')).not.toContain('src/c.ts');
+    expect(ctx.service.getCard(stuck.id).links).toContainEqual(expect.objectContaining({ title: 'PR (aberto) no repositório público' }));
+    expect(comments(stuck.id)).toMatch(/O PR ficou aberto: o merge falhou 3 vezes/);
+  });
+});
+
 describe('mirror helpers', () => {
+  it('prefers a merge commit and falls back to squash, then rebase', () => {
+    expect(pickMergeMethod({ m: true, s: true, r: true })).toBe('merge');
+    expect(pickMergeMethod({ m: false, s: true, r: true })).toBe('squash');
+    expect(pickMergeMethod({ m: false, s: false, r: true })).toBe('rebase');
+    expect(pickMergeMethod({ m: false, s: false, r: false })).toBeNull();
+    expect(pickMergeMethod({})).toBe('merge');
+  });
+
   it('reads GitHub owner/name from https and ssh URLs', () => {
     expect(githubSlug('https://github.com/fabriciopf/claude-board.git')).toBe('fabriciopf/claude-board');
     expect(githubSlug('git@github.com:fabriciopf/claude-board.git')).toBe('fabriciopf/claude-board');

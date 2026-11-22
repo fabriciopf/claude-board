@@ -20,7 +20,7 @@ import { TodayView, pendingTabLabel, pendingViewName, showPendingTab, todayItems
 import { SORT_STORE_KEYS, parseSort, type CardSort } from './card-sort';
 import { PublishBanner, publishLevel, publishVisible } from './PublishBanner';
 import type { Notice } from './notices';
-import { antigravityConcurrencyValue, antigravityTitle, concurrencyTitle, concurrencyValue } from './runner-label';
+import { antigravityConcurrencyValue, antigravityTitle, concurrencyTitle, concurrencyValue, showRunnerPill } from './runner-label';
 import { AntigravityConcurrencySelect, ConcurrencySelect } from './ConcurrencySelect';
 import { UsageChip } from './UsageChip';
 import { AgentMark } from './AgentIcon';
@@ -40,6 +40,8 @@ type Theme = 'system' | 'light' | 'dark';
 
 const themeLabel = (theme: Theme) => t(`app.theme.${theme}`);
 const NEXT_THEME: Record<Theme, Theme> = { system: 'light', light: 'dark', dark: 'system' };
+/** While runs report progress, the board reloads at most this often, so the tokens on a running card move (D105). */
+const PROGRESS_RELOAD_MS = 15000;
 
 function readStore(key: string): string | null {
   try {
@@ -145,13 +147,24 @@ export function App() {
 
   // Coalesce bursts of server events into one reload.
   const reloadTimer = useRef<number>(0);
+  const progressTimer = useRef<number>(0);
   const cardsRef = useRef<CardSummary[]>([]);
   cardsRef.current = data?.cards ?? [];
   const soundRef = useRef(sound);
   soundRef.current = sound;
   const uiUpdate = useUiUpdate();
   useServerEvents((msg) => {
-    if (msg.type === 'execution.progress') return;
+    if (msg.type === 'execution.progress') {
+      // The tokens on a running card's cover grow with each step: refresh the board at most once per
+      // PROGRESS_RELOAD_MS while runs report progress (card #204, D105).
+      if (!progressTimer.current) {
+        progressTimer.current = window.setTimeout(() => {
+          progressTimer.current = 0;
+          void load();
+        }, PROGRESS_RELOAD_MS);
+      }
+      return;
+    }
     if (msg.type === 'automations.changed') {
       setAutomationsTick((t) => t + 1);
       return;
@@ -386,32 +399,35 @@ export function App() {
         {runner && (
           <>
             <div className="counters">
-              {/* Runs and the 5-hour session in one pill: the automatic mode paces the first by the second (D83). */}
-              <span className="counter runner-usage">
-                {runner.antigravity?.shown && runner.concurrency ? (
-                  // Each agent against its own limit (D99), its mark before its count (card #198 review):
-                  // "[Claude] 1 de 3 (auto) · [Antigravity] 2 de 2". The mark carries the name; no spinner and no
-                  // "rodando" before the count (card #208).
-                  <>
+              {/* Runs and the 5-hour session in one pill: the automatic mode paces the first by the second (D83).
+                  Only while something runs (card #209). */}
+              {showRunnerPill(runner) && (
+                <span className="counter runner-usage">
+                  {runner.antigravity?.shown && runner.concurrency ? (
+                    // Each agent against its own limit (D99), its mark before its count (card #198 review):
+                    // "[Claude] 1 de 3 (auto) · [Antigravity] 2 de 2". The mark carries the name; no spinner and no
+                    // "rodando" before the count (card #208).
+                    <>
+                      <span className="runner-part" title={concurrencyTitle(runner.concurrency)}>
+                        <AgentMark agent="claude" /> <strong>{runner.claudeRunning ?? 0}</strong>
+                        <ConcurrencySelect concurrency={runner.concurrency} onChanged={() => void load()} notify={notify} />
+                      </span>
+                      <span className="runner-part runner-part-agent" title={antigravityTitle(runner.antigravity)}>
+                        <AgentMark agent="antigravity" /> <strong>{runner.antigravity.running}</strong>
+                        <AntigravityConcurrencySelect lane={runner.antigravity} onChanged={() => void load()} notify={notify} />
+                        {runner.antigravity.quota && <span className="runner-quota">{t('settings.conc.quotaShort')}</span>}
+                      </span>
+                    </>
+                  ) : (
                     <span className="runner-part" title={concurrencyTitle(runner.concurrency)}>
-                      <AgentMark agent="claude" /> <strong>{runner.claudeRunning ?? 0}</strong>
-                      <ConcurrencySelect concurrency={runner.concurrency} onChanged={() => void load()} notify={notify} />
+                      <AgentMark agent="claude" /> <strong>{runner.running}</strong>
+                      {runner.concurrency && <ConcurrencySelect concurrency={runner.concurrency} onChanged={() => void load()} notify={notify} />}
                     </span>
-                    <span className="runner-part runner-part-agent" title={antigravityTitle(runner.antigravity)}>
-                      <AgentMark agent="antigravity" /> <strong>{runner.antigravity.running}</strong>
-                      <AntigravityConcurrencySelect lane={runner.antigravity} onChanged={() => void load()} notify={notify} />
-                      {runner.antigravity.quota && <span className="runner-quota">{t('settings.conc.quotaShort')}</span>}
-                    </span>
-                  </>
-                ) : (
-                  <span className="runner-part" title={concurrencyTitle(runner.concurrency)}>
-                    <AgentMark agent="claude" /> <strong>{runner.running}</strong>
-                    {runner.concurrency && <ConcurrencySelect concurrency={runner.concurrency} onChanged={() => void load()} notify={notify} />}
-                  </span>
-                )}
-                <span className="counter-sep" aria-hidden="true" />
-                <UsageChip usage={data?.usage ?? null} agents={runner} />
-              </span>
+                  )}
+                  <span className="counter-sep" aria-hidden="true" />
+                  <UsageChip usage={data?.usage ?? null} agents={runner} />
+                </span>
+              )}
               <AgendaChip agenda={data?.agenda ?? null} />
               <AutomationChip tick={automationsTick} onOpen={() => setView('automations')} />
               {'Notification' in window && Notification.permission === 'default' && (

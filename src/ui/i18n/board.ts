@@ -43,6 +43,11 @@ export const board = defineMessages(
     'tile.agent': 'Roda no {name}',
     'tile.agentRunning': 'Rodando no {name}',
     'tile.automation': '⟳ automação',
+    'tile.tokens': '{total} tokens',
+    'tile.tokensTitle': 'Tokens das execuções deste card: {total} (entrada {input}, com o cache; saída {output}), em {runs}.',
+    'tile.tokensAgent': '{name}: {total} em {runs}',
+    'tile.tokensOneRun': '1 execução',
+    'tile.tokensRuns': '{count} execuções',
     'tile.suggests': 'sugere: {status}',
 
     // Owner avatar (OwnerAvatar.tsx)
@@ -153,6 +158,11 @@ export const board = defineMessages(
       'tile.agent': 'Runs in {name}',
       'tile.agentRunning': 'Running in {name}',
       'tile.automation': '⟳ automation',
+      'tile.tokens': '{total} tokens',
+      'tile.tokensTitle': 'Tokens of this card’s runs: {total} (input {input}, cache included; output {output}), in {runs}.',
+      'tile.tokensAgent': '{name}: {total} in {runs}',
+      'tile.tokensOneRun': '1 run',
+      'tile.tokensRuns': '{count} runs',
       'tile.suggests': 'suggests: {status}',
 
       'owner.user': 'you',
@@ -257,6 +267,11 @@ export const board = defineMessages(
       'tile.agent': 'Se ejecuta en {name}',
       'tile.agentRunning': 'Ejecutándose en {name}',
       'tile.automation': '⟳ automatización',
+      'tile.tokens': '{total} tokens',
+      'tile.tokensTitle': 'Tokens de las ejecuciones de esta tarjeta: {total} (entrada {input}, con la caché; salida {output}), en {runs}.',
+      'tile.tokensAgent': '{name}: {total} en {runs}',
+      'tile.tokensOneRun': '1 ejecución',
+      'tile.tokensRuns': '{count} ejecuciones',
       'tile.suggests': 'sugiere: {status}',
 
       'owner.user': 'tú',
