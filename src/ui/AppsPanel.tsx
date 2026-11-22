@@ -47,7 +47,7 @@ function AppRow({ app, notify }: { app: App; notify: (msg: string, error?: boole
 }
 
 /**
- * Apps a card can be about (e.g. "Conciliação bancária", "NFS-e", "Claude Board"). Usually a folder of
+ * Apps a card can be about (e.g. "Conciliação bancária", "NFS-e", "Deus Ex Machina"). Usually a folder of
  * the workspace: the panel suggests the repositories and the monorepo apps it finds there.
  */
 export function AppsPanel({ apps, notify }: { apps: App[]; notify: (msg: string, error?: boolean) => void }) {

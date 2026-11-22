@@ -32,6 +32,24 @@ if (args[0] === 'acp') {
 const http = process.env.FAKE_AGY_HTTP !== '0';
 const log = (entry) => process.env.FAKE_AGY_LOG && fs.appendFileSync(process.env.FAKE_AGY_LOG, JSON.stringify(entry) + '\n');
 
+// Print mode (`agy -p … --output-format stream-json`), used by the quota reading (D100). A prompt that
+// opens /swarm gets the swarm tool's step with the quotas in FAKE_AGY_QUOTA (the JSON of `quotas`), as
+// the real agy 1.5.14 prints it. FAKE_AGY_NO_MODEL answers nothing when --model is passed (a model agy no longer offers).
+if (args.includes('-p')) {
+  const prompt = args[args.indexOf('-p') + 1] ?? '';
+  log({ print: true, args });
+  const conversation = randomUUID();
+  const quotas = process.env.FAKE_AGY_QUOTA;
+  const modelRefused = process.env.FAKE_AGY_NO_MODEL === '1' && args.includes('--model');
+  if (prompt.startsWith('/swarm') && quotas && !modelRefused) {
+    const output = `Created At: 2026-11-21T20:26:10-03:00\nCompleted At: 2026-11-21T20:26:10-03:00\n${JSON.stringify({ models: Object.keys(JSON.parse(quotas)), quotas: JSON.parse(quotas) })}`;
+    const tool = { name: 'swarm', parameters: { action: 'models' }, output };
+    console.log(JSON.stringify({ event: 'step_update', step_update: { conversation_id: conversation, step_index: 2, state: 'DONE', step_type: 'tool', tool_name: 'swarm', tool_info: tool } }));
+  }
+  console.log(JSON.stringify({ event: 'result', result: { conversation_id: conversation, status: 'SUCCESS', response: 'ok\n', num_turns: 1 } }));
+  process.exit(0);
+}
+
 const send = (msg) => process.stdout.write(JSON.stringify({ jsonrpc: '2.0', ...msg }) + '\n');
 let nextId = 1;
 const waiting = new Map();
@@ -104,7 +122,7 @@ const say = (sessionId, text) => {
 };
 
 async function board(sessionId, client, name, input) {
-  const full = `mcp_claude-board_${name}`;
+  const full = `mcp_dexm_${name}`;
   return tool(sessionId, { name: full, kind: 'other', title: `Run ${full}`, input }, async () => {
     const r = await client.callTool({ name, arguments: input });
     return (r.content ?? []).map((c) => c.text ?? '').join('\n');

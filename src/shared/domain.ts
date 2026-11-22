@@ -135,11 +135,28 @@ export const CONCURRENCY_PRESETS: string[] = [AUTO_CONCURRENCY, '0', '1', '2', '
 
 /**
  * Runs of Antigravity CLI at the same time (D99): its own number, apart from `maxConcurrency`, which
- * governs Claude Code. No automatic mode: the Board reads no usage of the Google quota.
+ * governs Claude Code. Since D100 it also has an automatic mode, paced by the Google quota the Board
+ * reads through agy's own `swarm` tool.
  */
-export type AgentConcurrencySetting = number | typeof UNLIMITED_CONCURRENCY;
-export const ANTIGRAVITY_CONCURRENCY_PRESETS: string[] = ['0', '1', '2', '4', '8', UNLIMITED_CONCURRENCY];
+export type AgentConcurrencySetting = number | typeof AUTO_CONCURRENCY | typeof UNLIMITED_CONCURRENCY;
+export const ANTIGRAVITY_CONCURRENCY_PRESETS: string[] = [AUTO_CONCURRENCY, '0', '1', '2', '4', '8', UNLIMITED_CONCURRENCY];
 export const DEFAULT_ANTIGRAVITY_CONCURRENCY = 2;
+
+/** Quota left of one Antigravity model, as agy's `swarm{action:"models"}` reports it (D100). */
+export interface AgyModelQuota {
+  /** 0..1, in 1% steps. */
+  remaining: number;
+  /** Unix seconds. */
+  resetsAt: number;
+}
+
+/** A reading of the Google quota of Antigravity CLI (D100). */
+export interface AgyQuotaReading {
+  observedAt: string;
+  models: Record<string, AgyModelQuota>;
+  /** agy's own note when AI credits pay for a model whose quota ran out. */
+  note: string | null;
+}
 
 /** Text of each choice: the numbers as they are, auto and the infinity sign. */
 export function concurrencyOptionLabel(value: string): string {
@@ -284,7 +301,7 @@ export interface CardLink {
   title?: string;
 }
 
-/** A product or project the task is about (e.g. "Conciliação bancária", "NFS-e", "Claude Board"). */
+/** A product or project the task is about (e.g. "Conciliação bancária", "NFS-e", "Deus Ex Machina"). */
 export interface App {
   id: number;
   name: string;
@@ -458,13 +475,17 @@ export interface CardDetail {
 }
 
 /**
- * The Antigravity CLI side of the header counter (D99): its runs, its own limit, and the last
- * quota error an Antigravity run reported (the Board has no other reading of that quota).
+ * The Antigravity CLI side of the header counter (D99): its runs, its own limit, the last quota error
+ * an Antigravity run reported and, in automatic mode, the last reading of the quota (D100).
  */
 export interface AntigravityLane {
   running: number;
   /** null = no ceiling. */
   limit: number | null;
+  /** Mode and, in automatic mode, the reason of the limit (D100). Absent when the runner is not active in this process. */
+  concurrency?: ConcurrencyInfo;
+  /** Last reading of the Google quota (D100), null before the first. */
+  usage?: AgyQuotaReading | null;
   /** Whether the header shows the split by agent: Antigravity is the default, has a card in the queue, a run going or a quota note. */
   shown: boolean;
   quota: AgentQuotaNote | null;

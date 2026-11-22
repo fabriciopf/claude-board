@@ -1,17 +1,17 @@
 {
-  "name": "claude-board",
+  "name": "deusexmachina",
   "version": "0.1.0",
   "private": true,
-  "description": "Local Trello-style task board that Claude Code works through on its own",
+  "description": "Deus Ex Machina: a local Trello-style task board that coding agents (Claude Code, Antigravity CLI) work through on their own",
   "license": "MIT",
   "author": "Fabrício Figueiredo",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/fabriciopf/claude-board.git"
+    "url": "git+https://github.com/fabriciopf/deus-ex-machina.git"
   },
-  "homepage": "https://github.com/fabriciopf/claude-board#readme",
+  "homepage": "https://github.com/fabriciopf/deus-ex-machina#readme",
   "bugs": {
-    "url": "https://github.com/fabriciopf/claude-board/issues"
+    "url": "https://github.com/fabriciopf/deus-ex-machina/issues"
   },
   "keywords": [
     "claude",
@@ -22,6 +22,7 @@
   ],
   "type": "module",
   "bin": {
+    "dexm": "bin/dexm.mjs",
     "claude-board": "bin/claude-board.mjs"
   },
   "engines": {
@@ -32,7 +33,7 @@
     "build:server": "tsc -p tsconfig.json",
     "build:ui": "vite build",
     "dev:ui": "vite",
-    "start": "node bin/claude-board.mjs start",
+    "start": "node bin/dexm.mjs start",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.ui.json --noEmit"
   },

@@ -47,7 +47,7 @@ const scenario = /\[fake:([a-z_]+)\]/.exec(prompt)?.[1] ?? (resume ? 'success' :
 if (process.env.FAKE_CLAUDE_LOG) {
   fs.appendFileSync(
     process.env.FAKE_CLAUDE_LOG,
-    JSON.stringify({ args, prompt, sessionId, scenario, cwd: process.cwd(), cardEnv: process.env.CLAUDE_BOARD_CARD_ID, entrypoint: process.env.CLAUDE_CODE_ENTRYPOINT }) + '\n',
+    JSON.stringify({ args, prompt, sessionId, scenario, cwd: process.cwd(), cardEnv: process.env.DEXM_CARD_ID, legacyCardEnv: process.env.CLAUDE_BOARD_CARD_ID, entrypoint: process.env.CLAUDE_CODE_ENTRYPOINT }) + '\n',
   );
 }
 
@@ -71,14 +71,14 @@ out({
 });
 
 async function board() {
-  const cfg = JSON.parse(fs.readFileSync(get('--mcp-config'), 'utf8')).mcpServers['claude-board'];
+  const cfg = JSON.parse(fs.readFileSync(get('--mcp-config'), 'utf8')).mcpServers['dexm'];
   const client = new Client({ name: 'fake-claude', version: '0' });
   await client.connect(new StreamableHTTPClientTransport(new URL(cfg.url), { requestInit: { headers: cfg.headers } }));
   return client;
 }
 
 async function call(client, name, input) {
-  assistant([{ type: 'tool_use', id: randomUUID(), name: `mcp__claude-board__${name}`, input }]);
+  assistant([{ type: 'tool_use', id: randomUUID(), name: `mcp__dexm__${name}`, input }]);
   const r = await client.callTool({ name, arguments: input });
   out({ type: 'user', message: { content: [{ type: 'tool_result', content: r.content, is_error: !!r.isError }] } });
   return r;

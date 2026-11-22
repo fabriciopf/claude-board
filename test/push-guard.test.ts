@@ -108,7 +108,7 @@ for (const agent of ['claude', 'antigravity'] as const) {
       ]) {
         const r = run(wt, ...args);
         expect(r.ok, `git ${args.join(' ')}`).toBe(false);
-        expect(r.out).toMatch(/Claude Board: push recusado[\s\S]*branch protegida/);
+        expect(r.out).toMatch(/Deus Ex Machina: push recusado[\s\S]*branch protegida/);
       }
       expect(remoteHead(remote, 'main')).toBe(mainBefore);
       expect(remoteHead(remote, 'preproductionv2')).toBe('');

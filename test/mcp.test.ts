@@ -115,6 +115,15 @@ describe('MCP over HTTP', () => {
     await c.close();
   });
 
+  it('reads the card from the new header too (D101: x-dexm-card; x-claude-board-card stays for older runs)', async () => {
+    const card = ctx.service.createCard({ title: 'Nome novo', owner: 'claude' }, 'user', 'manual');
+    const c = await client({ 'x-dexm-card': String(card.id) });
+    const r = await c.callTool({ name: 'card_comment', arguments: { text: 'pelo cabeçalho novo' } });
+    expect(r.isError).toBeFalsy();
+    expect(ctx.service.getCardDetail(card.id).comments.map((x) => x.bodyMd)).toContain('pelo cabeçalho novo');
+    await c.close();
+  });
+
   it('inside a runner execution, ask_user records the outcome instead of moving the card', async () => {
     const card = ctx.service.createCard({ title: 'Em execução', owner: 'claude' }, 'user', 'manual');
     ctx.service.moveCard(card.id, { status: 'running' }, 'system');
@@ -217,7 +226,7 @@ describe('MCP over HTTP', () => {
   });
 });
 
-const builtCli = path.resolve('bin/claude-board.mjs');
+const builtCli = path.resolve('bin/dexm.mjs');
 const hasBuild = fs.existsSync(path.resolve('dist/server/cli.js'));
 
 describe.skipIf(!hasBuild)('MCP over stdio (proxy to HTTP)', () => {

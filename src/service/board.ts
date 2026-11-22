@@ -323,7 +323,7 @@ export class BoardService {
     }));
   }
 
-  /** By name (case-insensitive) or by folder name, so "claude-board" finds "Claude Board". */
+  /** By name (case-insensitive) or by folder name, so "dexm" finds "DEXM". */
   findAppByName(name: string): App | undefined {
     const wanted = name.trim().toLowerCase();
     const apps = this.listApps(true);

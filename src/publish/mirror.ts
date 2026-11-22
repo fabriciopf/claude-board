@@ -6,6 +6,7 @@ import type { AppContext } from '../context.js';
 import { nowIso } from '../db/index.js';
 import { slugify } from '../runner/worktree.js';
 import { git, runCommand, type CmdResult } from './git.js';
+import { isBoardEnvKey } from '../shared/brand.js';
 
 /**
  * Public mirror of the Board (D66). The Board's own repository has no remote: the public copy lives
@@ -136,7 +137,7 @@ export class Mirror {
   /** Environment that authenticates git and gh as `mirrorGhUser`, without switching the active gh account. */
   private async authEnv(mirror: string): Promise<NodeJS.ProcessEnv> {
     const env: NodeJS.ProcessEnv = { ...process.env, GIT_TERMINAL_PROMPT: '0' };
-    for (const k of Object.keys(env)) if (k.startsWith('CLAUDE_BOARD_')) delete env[k];
+    for (const k of Object.keys(env)) if (isBoardEnvKey(k)) delete env[k];
     const user = String(this.ctx.config.mirrorGhUser ?? '').trim();
     if (!user) return env;
     const tok = await this.run('gh', ['auth', 'token', '--user', user], mirror, env);

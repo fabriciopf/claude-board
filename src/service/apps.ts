@@ -87,7 +87,7 @@ export function appForFiles(apps: App[], files: string[]): App | null {
   return best;
 }
 
-/** Lowercase, no accents, words split by single spaces: "Claude Board: tela" → "claude board tela". */
+/** Lowercase, no accents, words split by single spaces: "Deus Ex Machina: tela" → "deus ex machina tela". */
 function words(text: string): string {
   return text
     .normalize('NFD')
@@ -119,7 +119,7 @@ function appsNamedIn(apps: App[], text: string): App[] {
 
 /**
  * Suggests the app of a card from its text (D53): an app counts when its name or folder appears
- * as whole words ("claude board", "claude-board" and "Claude Board" all name `claude-board`).
+ * as whole words ("deus ex machina", "deus-ex-machina" and "Deus Ex Machina" all name `deus-ex-machina`).
  * The title decides first; the description only when the title names none. More than one app
  * named in the deciding text is ambiguous, and then nothing is suggested.
  */

@@ -74,7 +74,7 @@ describe('relaunch (restart of a publication)', () => {
     const f = fake({ up: () => false });
     await relaunch(ARGS, f.deps);
     expect(f.background).toHaveLength(1);
-    expect(f.logs.at(-1)).toMatch(/não respondeu em 30 s\. Suba à mão: claude-board start --host 0\.0\.0\.0 --allow-remote/);
+    expect(f.logs.at(-1)).toMatch(/não respondeu em 30 s\. Suba à mão: dexm start --host 0\.0\.0\.0 --allow-remote/);
   });
 
   it('background mode opens no window', async () => {

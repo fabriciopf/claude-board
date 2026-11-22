@@ -2,6 +2,7 @@ import path from 'node:path';
 import type { AppContext } from '../context.js';
 import { nowIso } from '../db/index.js';
 import { STATUS_LABELS, type Card } from '../shared/domain.js';
+import { LEGACY_MCP_NAME, MCP_NAME, PRODUCT_NAME } from '../shared/brand.js';
 
 export interface HookInput {
   session_id?: string;
@@ -39,12 +40,12 @@ function contextFor(ctx: AppContext, card: Card): string {
   const desc = card.descriptionMd.trim().replace(/\s+/g, ' ');
   const lastClaude = [...d.comments].reverse().find((c) => c.author === 'claude');
   return [
-    `Esta pasta pertence ao card #${card.id} do Claude Board: "${card.title}" (lista: ${STATUS_LABELS[card.status]}).`,
+    `Esta pasta pertence ao card #${card.id} do ${PRODUCT_NAME}: "${card.title}" (lista: ${STATUS_LABELS[card.status]}).`,
     desc ? `Descrição: ${desc.slice(0, 600)}${desc.length > 600 ? '…' : ''}` : '',
     d.checklist.length ? `Checklist: ${done}/${d.checklist.length} feitos.` : '',
     lastClaude ? `Último registro do Claude: ${lastClaude.bodyMd.replace(/\s+/g, ' ').slice(0, 400)}` : '',
     card.branch ? `Branch do card: ${card.branch}.` : '',
-    'Se o MCP "claude-board" estiver registrado, use card_comment e card_submit_for_review para manter o card em dia.',
+    `Se o MCP "${MCP_NAME}" (ou o antigo "${LEGACY_MCP_NAME}") estiver registrado, use card_comment e card_submit_for_review para manter o card em dia.`,
   ]
     .filter(Boolean)
     .join('\n');

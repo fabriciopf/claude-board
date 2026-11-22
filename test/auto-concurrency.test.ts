@@ -494,7 +494,7 @@ describe('two agents: the automatic pace is Claude Code only, Antigravity CLI ha
     }
   });
 
-  it('the Antigravity limit is 2 by default, a whole number or ∞, never automatic', () => {
+  it('the Antigravity limit is 2 by default, a whole number, ∞ or automatic (D100)', () => {
     expect(DEFAULT_CONFIG.antigravityConcurrency).toBe(2);
     const home = tempDir();
     const before = process.env.CLAUDE_BOARD_HOME;
@@ -505,7 +505,8 @@ describe('two agents: the automatic pace is Claude Code only, Antigravity CLI ha
       expect(saveConfig(base, { antigravityConcurrency: '4' as never }).antigravityConcurrency).toBe(4);
       expect(saveConfig(base, { antigravityConcurrency: 0 }).antigravityConcurrency).toBe(0);
       expect(saveConfig(base, { antigravityConcurrency: '∞' as never }).antigravityConcurrency).toBe('unlimited');
-      expect(() => saveConfig(base, { antigravityConcurrency: 'auto' as never })).toThrow(/não há modo automático/);
+      // D99 refused it; since D100 the Board reads the Google quota through agy's swarm tool.
+      expect(saveConfig(base, { antigravityConcurrency: 'auto' as never }).antigravityConcurrency).toBe('auto');
       for (const bad of ['', -1, 21, 2.5, 'dois']) {
         expect(() => saveConfig(base, { antigravityConcurrency: bad as never }), String(bad)).toThrow(/0 a 20/);
       }

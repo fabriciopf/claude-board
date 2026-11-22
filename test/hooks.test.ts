@@ -23,7 +23,7 @@ function runHook(script: string, event: string, input: object, env: Record<strin
     const cleanEnv = { ...process.env, ...env };
     // Run from inside a Board execution, these point at the real Board: the hook would post the
     // test sessions there (it did on 2026-11-17, leaving s-off, s-wt and s-loose pending).
-    for (const key of ['CLAUDE_BOARD_EXECUTION_ID', 'CLAUDE_BOARD_CARD_ID', 'CLAUDE_BOARD_URL', 'CLAUDE_BOARD_INTERNAL']) {
+    for (const key of ['EXECUTION_ID', 'CARD_ID', 'URL', 'INTERNAL'].flatMap((k) => [`DEXM_${k}`, `CLAUDE_BOARD_${k}`])) {
       if (!env[key]) delete cleanEnv[key];
     }
     const child = spawn(process.execPath, [script, event], { env: cleanEnv });
@@ -55,7 +55,7 @@ describe('hooks install / uninstall', () => {
     expect(s.model).toBe('opus');
     expect(s.hooks.Stop[0].hooks[0].command).toBe('echo meu-hook');
     for (const ev of ['SessionStart', 'Stop', 'SessionEnd']) {
-      const ours = s.hooks[ev].flatMap((g: any) => g.hooks).filter((h: any) => h.command.includes('claude-board-hook'));
+      const ours = s.hooks[ev].flatMap((g: any) => g.hooks).filter((h: any) => h.command.includes('dexm-hook'));
       expect(ours).toHaveLength(1);
     }
     expect(hooksStatus(ctx.config).installed).toBe(true);

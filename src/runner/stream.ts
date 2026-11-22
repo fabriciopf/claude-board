@@ -55,7 +55,7 @@ const short = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1) + '…
 
 /** One-line description of a tool call for the live view. */
 export function describeToolUse(name: string, input: Json | undefined): string {
-  const tool = name.replace(/^mcp__claude-board__/, 'board:');
+  const tool = name.replace(/^mcp__(dexm|claude-board)__/, 'board:');
   if (!input) return tool;
   const hint = input.command ?? input.file_path ?? input.path ?? input.pattern ?? input.url ?? input.question ?? input.summary ?? input.text ?? input.title;
   return hint ? `${tool}: ${short(String(hint).replace(/\s+/g, ' '), 140)}` : tool;
@@ -139,9 +139,10 @@ export function transcriptItems(raw: string): TranscriptItem[] {
   for (const line of raw.split(/\r?\n/)) {
     const ev = parseLine(line);
     if (!ev) continue;
-    if (ev.type === 'claude_board_prompt') {
+    // claude_board_*: transcripts written before the rename (D101).
+    if (ev.type === 'board_prompt' || ev.type === 'claude_board_prompt') {
       items.push({ kind: 'user', text: String(ev.prompt ?? '') });
-    } else if (ev.type === 'claude_board_stderr') {
+    } else if (ev.type === 'board_stderr' || ev.type === 'claude_board_stderr') {
       items.push({ kind: 'error', title: 'Saída de erro do processo', text: clip(String(ev.text ?? '')) });
     } else if (ev.type === 'system' && ev.subtype === 'init') {
       items.push({ kind: 'system', title: `Sessão ${ev.session_id ?? ''} · ${ev.model ?? ''} · ${ev.cwd ?? ''}` });

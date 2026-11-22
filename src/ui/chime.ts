@@ -47,7 +47,7 @@ export function electRingerTab(): void {
     ringer = true;
     return;
   }
-  void locks.request('claude-board-chime', () => {
+  void locks.request('dexm-chime', () => {
     ringer = true;
     return new Promise<void>(() => {
       /* held for the life of the tab */

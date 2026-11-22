@@ -8,6 +8,7 @@ import { appForFiles } from '../service/apps.js';
 import { RuleError } from '../service/rules.js';
 import type { Status } from '../shared/domain.js';
 import { readHistory, summarizeTranscript, type SessionSummary, type Signal } from './parse.js';
+import { boardEnvVars } from '../shared/brand.js';
 
 type Row = Record<string, any>;
 
@@ -544,7 +545,7 @@ ${JSON.stringify(batch.map(classifyPayload), null, 1)}`;
         '--no-session-persistence',
       ];
       const child = spawn(config.claudeBin, args, {
-        env: { ...process.env, CLAUDE_BOARD_INTERNAL: '1' },
+        env: { ...process.env, ...boardEnvVars({ INTERNAL: '1' }) },
         stdio: ['pipe', 'pipe', 'pipe'],
         windowsHide: true,
       });

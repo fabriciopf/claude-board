@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Claude Board's client for Antigravity CLI (D93). One run of a card: starts `agy acp`, speaks the
+// Deus Ex Machina's client for Antigravity CLI (D93). One run of a card: starts `agy acp`, speaks the
 // Agent Client Protocol to it (JSON-RPC 2.0, one message per line on stdin/stdout), opens or loads
 // the session with the Board's MCP server, sends the prompt, answers the permission requests and
 // writes the run on stdout in Claude Code's stream-json, the format the Board already reads.
@@ -105,13 +105,13 @@ function flush() {
  * A tool call as Claude Code would name it. Measured on agy 1.5.14 (card #193): the tool is in
  * `name` (`run_command`, `mcp_<server>_<tool>`), its arguments loose in `rawInput` next to agy's own
  * `toolSummary`, and the shell command in `rawInput.CommandLine`. The Board's own tools keep Claude
- * Code's name (mcp__claude-board__x), so the card shows them the same way.
+ * Code's name (mcp__<server>__x), so the card shows them the same way.
  */
 function toolOf(update) {
   const { toolSummary, ...input } = update.rawInput ?? {};
   const name = typeof update.name === 'string' ? update.name : '';
   const boardPrefix = `mcp_${cfg.mcp.name}_`;
-  if (name.startsWith(boardPrefix)) return { name: `mcp__claude-board__${name.slice(boardPrefix.length)}`, input };
+  if (name.startsWith(boardPrefix)) return { name: `mcp__${cfg.mcp.name}__${name.slice(boardPrefix.length)}`, input };
   // Another MCP server: the split between server and tool is a guess when the server name has "_".
   if (name.startsWith('mcp_')) return { name: `mcp__${name.slice(4).replace('_', '__')}`, input };
   const command = commandsOf(update)[0];
@@ -254,7 +254,7 @@ async function main() {
   const init = await request('initialize', {
     protocolVersion: 1,
     clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
-    clientInfo: { name: 'claude-board', version: '1' },
+    clientInfo: { name: 'dexm', version: '1' },
   });
   const caps = init.agentCapabilities ?? {};
   // agy 1.5.14 announces no mcpCapabilities, yet takes HTTP servers (measured, card #193): HTTP
@@ -299,7 +299,7 @@ const MAX_REFUSAL_NUDGES = 2;
 
 function refusalNudge(command) {
   return [
-    `O Claude Board recusou o comando \`${command}\` pela regra de push do card (prPolicy); não foi você que errou.`,
+    `O Deus Ex Machina recusou o comando \`${command}\` pela regra de push do card (prPolicy); não foi você que errou.`,
     'Não tente esse comando de novo nem outro caminho para o mesmo efeito.',
     'Continue a tarefa sem ele e termine como as regras do Board pedem: card_submit_for_review dizendo o que ficou sem fazer, ou card_ask_user se precisar de uma decisão.',
   ].join(' ');

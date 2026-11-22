@@ -5,6 +5,7 @@ import { CARD_HEADER, EXECUTION_HEADER } from '../mcp/http.js';
 import { packageRoot } from './package-root.js';
 import { protectedBranchPattern } from './push-guard.js';
 import { agentLabel, isAgentId, modelFitsAgent, type AgentId, type Card } from '../shared/domain.js';
+import { boardEnvVars, CLI_NAME, MCP_NAME } from '../shared/brand.js';
 
 /**
  * How a run starts in each command-line agent (D92, D93). The runner decides what the run is (card,
@@ -17,7 +18,7 @@ export interface LaunchInput {
   config: Config;
   card: Card;
   executionId: number;
-  /** Folder of the run's own files (`~/.claude-board/runs/<id>`). */
+  /** Folder of the run's own files (`~/.dexm/runs/<id>`). */
   runDir: string;
   boardUrl: string;
   /** Folder the run starts in. */
@@ -66,8 +67,9 @@ export function resolveModel(card: Pick<Card, 'model'>, config: Config, agent: A
 
 /**
  * Whether a failed run's text reads as a quota or rate-limit error (D99). ACP has no quota field (its
- * `usage` is tokens and context window), so the error is the only sign the Board gets of the Google
- * quota. The words come from the Google APIs (RESOURCE_EXHAUSTED, 429) and from what agy users report.
+ * `usage` is tokens and context window); outside automatic mode, which reads the quota through agy's
+ * swarm tool (D100), the error is the only sign the Board gets of it. The words come from the Google
+ * APIs (RESOURCE_EXHAUSTED, 429) and from what agy users report.
  */
 export function isQuotaError(text: string | null | undefined): boolean {
   if (!text) return false;
@@ -142,7 +144,7 @@ function claudeLaunch(input: LaunchInput): Launch {
     JSON.stringify(
       {
         mcpServers: {
-          'claude-board': {
+          [MCP_NAME]: {
             type: 'http',
             url: `${boardUrl}/mcp`,
             headers: { [CARD_HEADER]: String(card.id), [EXECUTION_HEADER]: String(executionId) },
@@ -165,7 +167,7 @@ function claudeLaunch(input: LaunchInput): Launch {
     '--mcp-config',
     mcpFile,
     '--allowedTools',
-    'mcp__claude-board',
+    `mcp__${MCP_NAME}`,
     '--permission-prompts',
     'none',
   ];
@@ -200,7 +202,7 @@ function claudeLaunch(input: LaunchInput): Launch {
  * the prompt, on every run, as Claude Code gets them on every run.
  */
 export function withBoardRules(systemPrompt: string, userPrompt: string): string {
-  return `<claude-board-rules>\n${systemPrompt}\n</claude-board-rules>\n\n${userPrompt}`;
+  return `<board-rules>\n${systemPrompt}\n</board-rules>\n\n${userPrompt}`;
 }
 
 /** What the ACP client (`bin/agy-acp.mjs`) reads: how to start agy, the session, the prompt and the Board's rules. */
@@ -221,7 +223,7 @@ export interface AcpRunConfig {
     name: string;
     url: string;
     headers: Record<string, string>;
-    /** The same server over stdio (`claude-board mcp`), for an agent without HTTP MCP. */
+    /** The same server over stdio (`dexm mcp`), for an agent without HTTP MCP. */
     stdio: { command: string; args: string[]; env: Record<string, string> };
   };
 }
@@ -244,7 +246,7 @@ function antigravityLaunch(input: LaunchInput): Launch {
   const agyArgs = [...config.antigravityArgsPrefix, 'acp'];
   for (const dir of input.addDirs) agyArgs.push('--add-dir', dir);
   const root = packageRoot();
-  const ids = { CLAUDE_BOARD_CARD_ID: String(card.id), CLAUDE_BOARD_EXECUTION_ID: String(executionId), CLAUDE_BOARD_URL: boardUrl };
+  const ids = boardEnvVars({ CARD_ID: String(card.id), EXECUTION_ID: String(executionId), URL: boardUrl });
   const run: AcpRunConfig = {
     bin: config.antigravityBin,
     args: agyArgs,
@@ -256,10 +258,10 @@ function antigravityLaunch(input: LaunchInput): Launch {
     maxTurns: card.maxTurns ?? config.defaultMaxTurns ?? 0,
     denyPatterns: pushDenyPatterns(config.prPolicy, protectedBranchList(config.protectedBranches)),
     mcp: {
-      name: 'claude-board',
+      name: MCP_NAME,
       url: `${boardUrl}/mcp`,
       headers: { [CARD_HEADER]: String(card.id), [EXECUTION_HEADER]: String(executionId) },
-      stdio: { command: process.execPath, args: [path.join(root, 'bin', 'claude-board.mjs'), 'mcp'], env: ids },
+      stdio: { command: process.execPath, args: [path.join(root, 'bin', `${CLI_NAME}.mjs`), 'mcp'], env: ids },
     },
   };
   const runFile = path.join(runDir, 'agy-run.json');

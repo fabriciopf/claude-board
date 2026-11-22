@@ -1,5 +1,5 @@
 import type { Db } from '../db/index.js';
-import { UNLIMITED_CONCURRENCY, isAgentId, runLane, type AgentConcurrencySetting, type AgentId, type AgentQuotaNote, type ConcurrencyInfo, type RunnerState } from '../shared/domain.js';
+import { AUTO_CONCURRENCY, UNLIMITED_CONCURRENCY, isAgentId, runLane, type AgentConcurrencySetting, type AgentId, type AgentQuotaNote, type AgyQuotaReading, type ConcurrencyInfo, type RunnerState } from '../shared/domain.js';
 
 /** What the runner state needs from the settings to split the counter by agent (D99). */
 export interface AgentLaneConfig {
@@ -7,8 +7,14 @@ export interface AgentLaneConfig {
   antigravityConcurrency: AgentConcurrencySetting;
 }
 
+/** What the runner decided for the Antigravity CLI side (D100): its limit, mode and reason, and the last quota reading. */
+export interface AgentLaneRuntime {
+  concurrency?: ConcurrencyInfo;
+  usage?: AgyQuotaReading | null;
+}
+
 /** What the header shows about the runner. There is no daily limit. */
-export function runnerState(db: Db, paused: boolean, concurrency?: ConcurrencyInfo, config?: AgentLaneConfig): RunnerState {
+export function runnerState(db: Db, paused: boolean, concurrency?: ConcurrencyInfo, config?: AgentLaneConfig, agy?: AgentLaneRuntime): RunnerState {
   const rows = db.prepare("SELECT agent, COUNT(*) AS n FROM executions WHERE status = 'running' GROUP BY agent").all() as { agent: string | null; n: number }[];
   const byLane: Record<AgentId, number> = { claude: 0, antigravity: 0 };
   for (const r of rows) byLane[runLane(r.agent)] += r.n;
@@ -20,19 +26,29 @@ export function runnerState(db: Db, paused: boolean, concurrency?: ConcurrencyIn
   if (!config) return state;
   const quota = setting<AgentQuotaNote | null>(db, 'antigravityQuota') ?? null;
   const limitSetting = config.antigravityConcurrency;
-  const limit = limitSetting === UNLIMITED_CONCURRENCY ? null : Math.max(0, Math.floor(Number(limitSetting)) || 0);
+  // The runner's own decision when it is active here; without it, the setting as written (auto shows no number).
+  const limit = agy?.concurrency
+    ? agy.concurrency.limit
+    : limitSetting === UNLIMITED_CONCURRENCY || limitSetting === AUTO_CONCURRENCY ? null : Math.max(0, Math.floor(Number(limitSetting)) || 0);
   state.antigravity = {
     running: byLane.antigravity,
     limit,
     shown: byLane.antigravity > 0 || quota !== null || config.defaultAgent === 'antigravity' || antigravityQueued(db, config.defaultAgent),
     quota,
   };
+  if (agy?.concurrency) state.antigravity.concurrency = agy.concurrency;
+  if (agy && agy.usage !== undefined) state.antigravity.usage = agy.usage;
   return state;
 }
 
 function setting<T>(db: Db, key: string): T | undefined {
   const row = db.prepare('SELECT value_json FROM settings WHERE key = ?').get(key) as { value_json: string } | undefined;
   return row ? (JSON.parse(row.value_json) as T) : undefined;
+}
+
+/** Whether Antigravity CLI is in use: it is the default agent or a card in the queue runs on it (D100 reads the quota only then). */
+export function antigravityInUse(db: Db, defaultAgent: AgentId): boolean {
+  return defaultAgent === 'antigravity' || antigravityQueued(db, defaultAgent);
 }
 
 /** Whether a card in the queue ("Pronta para o Claude") runs on Antigravity CLI. */

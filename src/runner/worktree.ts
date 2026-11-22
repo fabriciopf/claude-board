@@ -65,7 +65,7 @@ export function slugify(text: string, max = 40): string {
 
 /**
  * Where the card's work happens. With a repo: a dedicated git worktree on branch cb/<id>-<slug>,
- * never the main checkout. Without a repo: the workspace, or ~/.claude-board/work/<id> without one.
+ * never the main checkout. Without a repo: the workspace, or ~/.dexm/work/<id> without one.
  */
 function prepareArea(card: Card, config: Config, workspace: string | null): { dir: string; branch: string | null; worktreePath: string | null; baseNote: string | null } {
   if (!card.repoPath) {

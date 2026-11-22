@@ -9,6 +9,7 @@ import type { SelfUpdateCommit, SelfUpdatePhase, SelfUpdateState } from '../shar
 import { expandHome } from '../config.js';
 import { canonicalDir, git, linkDir, repoRoot, runCommand, samePath, syncDir, type CmdResult } from './git.js';
 import { DEFAULT_COMMANDS, isScreenOnly, type Publisher, type PublishCommands } from './publisher.js';
+import { isBoardEnvKey } from '../shared/brand.js';
 
 /**
  * Update of the Board from the git remote it was cloned from (card #183, D89).
@@ -451,7 +452,7 @@ export class SelfUpdater implements SelfUpdateControl {
       }
 
       const env = { ...process.env };
-      for (const k of Object.keys(env)) if (k.startsWith('CLAUDE_BOARD_') || k.startsWith('FAKE_CLAUDE')) delete env[k];
+      for (const k of Object.keys(env)) if (isBoardEnvKey(k) || k.startsWith('FAKE_CLAUDE')) delete env[k];
       if (needsInstall) await this.step(tmp, 'Instalando dependências', this.commands.install, env);
       // The remote's code was tested where it was made; a merge with local commits is new code.
       if (merging) await this.testStep(tmp, env);

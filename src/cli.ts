@@ -17,10 +17,11 @@ import { SelfUpdater } from './publish/self-update.js';
 import { relaunch } from './publish/relaunch.js';
 import { claudeHomeDir } from './config.js';
 import readline from 'node:readline';
+import { CLI_NAME, LEGACY_CLI_NAME, PRODUCT_NAME, boardEnv } from './shared/brand.js';
 
-const HELP = `Claude Board — quadro de tarefas que o Claude Code executa sozinho
+const HELP = `${PRODUCT_NAME} — quadro de tarefas que um agente de código executa sozinho
 
-Uso: claude-board <comando> [opções]
+Uso: ${CLI_NAME} <comando> [opções]   (o antigo "${LEGACY_CLI_NAME}" continua funcionando)
 
   start [--port N] [--host H] [--allow-remote]   sobe API, interface, runner e MCP
   doctor                                         verifica o que falta na máquina
@@ -74,7 +75,7 @@ async function importCommand(args: string[]): Promise<void> {
     const ids = flag(args, '--ids')?.split(',').filter(Boolean);
     const est = importer.estimate(ids);
     if (!est.sessions) {
-      console.log('Nada a classificar: rode "claude-board import scan" antes, ou passe --ids.');
+      console.log(`Nada a classificar: rode "${CLI_NAME} import scan" antes, ou passe --ids.`);
       return;
     }
     console.log(`Vou classificar ${est.sessions} sessões em ${est.batches} lote(s) com o modelo ${est.model}, ≈ ${est.tokens.toLocaleString('pt-BR')} tokens.`);
@@ -87,7 +88,7 @@ async function importCommand(args: string[]): Promise<void> {
     console.log(`${r.classified} classificadas (${r.ignored} ignoradas), ${r.failedBatches} lote(s) com falha.`);
     for (const e of r.errors) console.log(`  erro: ${e}`);
   } else {
-    throw new Error('Use: claude-board import scan [--no-triage] | classify [--ids a,b] [--yes]');
+    throw new Error(`Use: ${CLI_NAME} import scan [--no-triage] | classify [--ids a,b] [--yes]`);
   }
   ctx.db.close();
 }
@@ -119,12 +120,12 @@ async function start(args: string[]): Promise<void> {
   const automationEngine = new AutomationEngine(ctx, automationsOf(ctx));
   ctx.automationEngine = automationEngine;
   automationEngine.start();
-  console.log(`Claude Board em http://${host === '0.0.0.0' ? '127.0.0.1' : host}:${port}`);
+  console.log(`${PRODUCT_NAME} em http://${host === '0.0.0.0' ? '127.0.0.1' : host}:${port}`);
   let stopping = false;
   const stop = async () => {
     if (stopping) return;
     stopping = true;
-    console.log('Encerrando. As execuções em andamento continuam; o próximo "claude-board start" volta a acompanhá-las.');
+    console.log(`Encerrando. As execuções em andamento continuam; o próximo "${CLI_NAME} start" volta a acompanhá-las.`);
     agenda.close();
     automationEngine.close();
     selfUpdater.close();
@@ -148,7 +149,7 @@ export async function main(argv: string[]): Promise<void> {
       case 'mcp': {
         // stdout belongs to the MCP protocol here: nothing else may print to it.
         const config = loadConfig();
-        const url = flag(args, '--url') ?? process.env.CLAUDE_BOARD_URL ?? `http://127.0.0.1:${config.port}`;
+        const url = flag(args, '--url') ?? boardEnv('URL', process.env) ?? `http://127.0.0.1:${config.port}`;
         await runStdioProxy(url);
         break;
       }
@@ -167,13 +168,13 @@ export async function main(argv: string[]): Promise<void> {
           console.log(r.backup ? `Backup do settings.json anterior: ${r.backup}` : 'Não havia settings.json; criei um.');
         } else if (sub === 'uninstall') {
           const r = uninstallHooks(config);
-          console.log(`Hooks do Claude Board removidos de ${r.status.settingsPath}.`);
+          console.log(`Hooks do ${PRODUCT_NAME} removidos de ${r.status.settingsPath}.`);
           if (r.backup) console.log(`Backup: ${r.backup}`);
         } else if (sub === 'status' || sub === undefined) {
           const s = hooksStatus(config);
           console.log(`${s.installed ? 'Instalados' : 'Não instalados'} em ${s.settingsPath}${s.events.length ? ` (${s.events.join(', ')})` : ''}.`);
         } else {
-          throw new Error('Use: claude-board hooks install | uninstall | status');
+          throw new Error(`Use: ${CLI_NAME} hooks install | uninstall | status`);
         }
         break;
       }

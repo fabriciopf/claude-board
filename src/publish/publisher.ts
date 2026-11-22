@@ -8,6 +8,7 @@ import type { Card, PublishEntry, PublishKind, PublishPhase, PublishState, Publi
 import { mergeDecisions } from './decisions.js';
 import { Mirror, type MirrorOptions } from './mirror.js';
 import { canonicalDir, git, gitShow, linkDir, runCommand, samePath, spawnDetached, syncDir, unlinkJunction, type CmdResult } from './git.js';
+import { CLI_NAME, isBoardEnvKey } from '../shared/brand.js';
 
 /**
  * Publication of the Board's own improvements (D42). A delivered card of the Board's repo enters the
@@ -109,7 +110,7 @@ export function conflictPrompt(branch: string, c: MergeConflict): string {
 
 const fence = (text: string) => `\n\n\`\`\`\n${text.trim().split('\n').slice(-40).join('\n').replace(/```/g, "'''")}\n\`\`\``;
 
-/** Directory of the running code (bin/claude-board.mjs → dist/server/...): the repo the Board comes from. */
+/** Directory of the running code (bin/dexm.mjs → dist/server/...): the repo the Board comes from. */
 function codeRoot(): string {
   let dir = path.dirname(fileURLToPath(import.meta.url));
   for (let i = 0; i < 6; i++) {
@@ -196,7 +197,7 @@ export class Publisher {
     return null;
   }
 
-  /** A card of the Board's project or repo (app = claude-board), with or without a branch. */
+  /** A card of the Board's project or repo, with or without a branch. */
   private isBoardCard(card: Card): boolean {
     if (this.isSelfCard(card) || this.inSelfRepo(card.repoPath)) return true;
     const projectPath = card.appId ? this.ctx.service.listApps(true).find((a) => a.id === card.appId)?.path : null;
@@ -554,7 +555,7 @@ export class Publisher {
       }
 
       const env = { ...process.env };
-      for (const k of Object.keys(env)) if (k.startsWith('CLAUDE_BOARD_') || k.startsWith('FAKE_CLAUDE')) delete env[k];
+      for (const k of Object.keys(env)) if (isBoardEnvKey(k) || k.startsWith('FAKE_CLAUDE')) delete env[k];
       if (needsInstall) await this.step(tmp, 'Instalando dependências', this.commands.install, env);
       await this.testStep(tmp, env);
       await this.step(tmp, kind === 'ui' ? 'Compilando a tela' : 'Compilando', kind === 'ui' ? this.commands.buildUi : this.commands.build, env);
@@ -836,7 +837,7 @@ export class Publisher {
   }
 
   async restartDetached(repo: string): Promise<void> {
-    const bin = path.join(repo, 'bin', 'claude-board.mjs');
+    const bin = path.join(repo, 'bin', `${CLI_NAME}.mjs`);
     const startArgs = this.ctx.startArgs ?? ['start'];
     const mode = this.restartMode();
     spawnDetached(process.execPath, [bin, 'relaunch', '--wait-pid', String(process.pid), '--mode', mode, '--', ...startArgs], {
