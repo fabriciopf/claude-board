@@ -8,6 +8,7 @@ import { mergeDecisions } from '../src/publish/decisions.js';
 import { conflictPrompt, DEFAULT_COMMANDS, isScreenOnly, Publisher } from '../src/publish/publisher.js';
 import { ensureWorkdir } from '../src/runner/worktree.js';
 import { runnerState } from '../src/service/runner-state.js';
+import { copyFixture } from './git-fixture.js';
 import { makeContext, tempDir } from './helpers.js';
 
 const fakeBuild = path.resolve('test/fake-build.mjs');
@@ -27,8 +28,12 @@ function git(cwd: string, ...args: string[]): string {
 
 const DECISIONS = '# Decisões\n\nIntro.\n\n## D01. Primeira (2026-11-16)\n\n- a\n\n## D02. Segunda (2026-11-16)\n\n- b\n';
 
+/** The Board's repo on master; built once per file and copied for each test (card #228). */
 function makeRepo(): string {
-  const root = tempDir('cb-publish-');
+  return path.join(copyFixture('publish', 'cb-publish-', buildRepo), 'claude-board');
+}
+
+function buildRepo(root: string): void {
   const repo = path.join(root, 'claude-board');
   fs.mkdirSync(path.join(repo, 'src', 'ui'), { recursive: true });
   git(repo, 'init', '-q', '-b', 'master');
@@ -41,7 +46,6 @@ function makeRepo(): string {
   fs.writeFileSync(path.join(repo, 'src', 'ui', 'App.tsx'), 'export const title = "old";\n');
   git(repo, 'add', '-A');
   git(repo, 'commit', '-q', '-m', 'init');
-  return repo;
 }
 
 let repo: string;

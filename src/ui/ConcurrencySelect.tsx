@@ -1,8 +1,8 @@
 import { useState } from 'react';
-import type { AntigravityLane, ConcurrencyInfo } from '../shared/domain';
+import type { AntigravityLane, CodexLane, ConcurrencyInfo } from '../shared/domain';
 import { api } from './api';
 import { t } from './i18n';
-import { antigravityConcurrencyOptions, antigravityConcurrencyValue, concurrencyOptions, concurrencyValue } from './runner-label';
+import { antigravityConcurrencyOptions, antigravityConcurrencyValue, codexConcurrencyOptions, codexConcurrencyValue, concurrencyOptions, concurrencyValue } from './runner-label';
 
 type Notify = (msg: string, error?: boolean) => void;
 
@@ -38,8 +38,22 @@ export function AntigravityConcurrencySelect(props: { lane: AntigravityLane; onC
   );
 }
 
+/** The same selector for the Codex CLI runs (D125): 0, 1, 2, 4, 8 or ∞, saved in `codexConcurrency`. */
+export function CodexConcurrencySelect(props: { lane: CodexLane; onChanged: () => void; notify: Notify }) {
+  return (
+    <SettingSelect
+      field="codexConcurrency"
+      value={codexConcurrencyValue(props.lane)}
+      options={codexConcurrencyOptions(props.lane)}
+      ariaLabel={t('settings.f.codexConcurrency')}
+      onChanged={props.onChanged}
+      notify={props.notify}
+    />
+  );
+}
+
 function SettingSelect(props: {
-  field: 'maxConcurrency' | 'antigravityConcurrency';
+  field: 'maxConcurrency' | 'antigravityConcurrency' | 'codexConcurrency';
   value: string;
   options: { value: string; label: string }[];
   ariaLabel: string;

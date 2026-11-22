@@ -1,4 +1,4 @@
-import { loadConfig, paths } from './config.js';
+import { loadConfig, paths, tokenWeightsOf } from './config.js';
 import { openDb } from './db/index.js';
 import { formatDoctor, runDoctor } from './doctor.js';
 import { buildApp } from './server/app.js';
@@ -43,6 +43,7 @@ export function createContext(): AppContext {
   const db = openDb(paths.db());
   const bus = new EventBus();
   const service = new BoardService(db, bus);
+  service.tokenWeights = tokenWeightsOf(config);
   service.seed();
   const ctx: AppContext = { db, config, bus, service };
   ctx.importer = new Importer(ctx);

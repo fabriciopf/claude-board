@@ -1,19 +1,23 @@
 import { useEffect, useState } from 'react';
 import type { App, AppCandidate } from '../shared/domain';
 import { ActionButton } from './ActionButton';
+import { ConnectorPicker } from './ConnectorPicker';
 import { api } from './api';
 import { t } from './i18n';
+import { parseConnectorList } from '../shared/connectors';
 
 const DEFAULT_COLOR = '#64748b';
 
 /** One registered app: name and folder are edited in place and saved on blur. */
-function AppRow({ app, notify }: { app: App; notify: (msg: string, error?: boolean) => void }) {
+function AppRow({ app, notify, defaultConnectors }: { app: App; notify: (msg: string, error?: boolean) => void; defaultConnectors: string }) {
   const [name, setName] = useState(app.name);
   const [folder, setFolder] = useState(app.path ?? '');
+  const [plugins, setPlugins] = useState(app.plugins ?? '');
   useEffect(() => setName(app.name), [app.name]);
   useEffect(() => setFolder(app.path ?? ''), [app.path]);
+  useEffect(() => setPlugins(app.plugins ?? ''), [app.plugins]);
 
-  const save = (patch: Partial<Pick<App, 'name' | 'path' | 'color' | 'archived'>>, undo?: () => void) =>
+  const save = (patch: Partial<Pick<App, 'name' | 'path' | 'color' | 'archived' | 'plugins' | 'connectors'>>, undo?: () => void) =>
     api.patch(`/api/apps/${app.id}`, patch).catch((err) => {
       undo?.();
       notify(err.message, true);
@@ -39,9 +43,28 @@ function AppRow({ app, notify }: { app: App; notify: (msg: string, error?: boole
         onChange={(e) => setFolder(e.target.value)}
         onBlur={() => folder.trim() !== (app.path ?? '') && void save({ path: folder.trim() || null }, () => setFolder(app.path ?? ''))}
       />
+      {/* Plugin rules of this project's runs (D128), over the settings' runPlugins. */}
+      <input
+        className="input app-plugins"
+        value={plugins}
+        placeholder={t('settings.apps.plugins')}
+        aria-label={t('settings.apps.pluginsOf', { name: app.name })}
+        title={t('settings.h.runPlugins')}
+        onChange={(e) => setPlugins(e.target.value)}
+        onBlur={() => plugins.trim() !== (app.plugins ?? '') && void save({ plugins: plugins.trim() }, () => setPlugins(app.plugins ?? ''))}
+      />
       <ActionButton className="btn small" busyLabel={app.archived ? t('settings.apps.reactivating') : t('settings.apps.archiving')} onAction={() => save({ archived: !app.archived })}>
         {app.archived ? t('settings.apps.reactivate') : t('settings.apps.archive')}
       </ActionButton>
+      {/* MCP connectors of this project's runs (D124); empty = the settings' default. */}
+      <div className="app-connectors">
+        <ConnectorPicker
+          label={t('settings.apps.connectorsOf', { name: app.name })}
+          value={app.connectors ?? null}
+          inherited={{ from: t('card.connectorsFromSettings'), list: parseConnectorList(defaultConnectors) }}
+          onChange={(next) => void save({ connectors: next })}
+        />
+      </div>
     </div>
   );
 }
@@ -53,6 +76,14 @@ function AppRow({ app, notify }: { app: App; notify: (msg: string, error?: boole
 export function AppsPanel({ apps, notify }: { apps: App[]; notify: (msg: string, error?: boolean) => void }) {
   const [draft, setDraft] = useState({ name: '', path: '', color: DEFAULT_COLOR });
   const [candidates, setCandidates] = useState<AppCandidate[] | null>(null);
+  // The settings' default, shown as what a project without its own list inherits (D124).
+  const [defaultConnectors, setDefaultConnectors] = useState('');
+  useEffect(() => {
+    void api
+      .get<{ defaultConnectors?: string }>('/api/config')
+      .then((c) => setDefaultConnectors(c.defaultConnectors ?? ''))
+      .catch(() => undefined);
+  }, []);
   // Suggestions already added leave the list at once, not when the reload comes back (card #165).
   const [added, setAdded] = useState<ReadonlySet<string>>(new Set());
 
@@ -82,7 +113,7 @@ export function AppsPanel({ apps, notify }: { apps: App[]; notify: (msg: string,
       {apps.length > 0 ? (
         <div className="list">
           {apps.map((a) => (
-            <AppRow key={a.id} app={a} notify={notify} />
+            <AppRow key={a.id} app={a} notify={notify} defaultConnectors={defaultConnectors} />
           ))}
         </div>
       ) : (

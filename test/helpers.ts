@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { DEFAULT_CONFIG, type Config } from '../src/config.js';
+import { DEFAULT_CONFIG, tokenWeightsOf, type Config } from '../src/config.js';
 import type { AppContext } from '../src/context.js';
 import { openDb } from '../src/db/index.js';
 import { EventBus } from '../src/server/bus.js';
@@ -22,6 +22,7 @@ export function makeContext(overrides: Partial<Config> = {}): AppContext & { hom
   const service = new BoardService(db, bus);
   service.seed();
   const config: Config = { ...DEFAULT_CONFIG, ...overrides };
+  service.tokenWeights = tokenWeightsOf(config);
   // apiToken null: these tests drive the REST API directly; test/session.test.ts covers the key.
   return { db, bus, service, config, home, usage: new UsageTracker(service, bus), apiToken: null };
 }

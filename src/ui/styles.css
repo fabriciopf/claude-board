@@ -625,6 +625,18 @@ pre {
   color: #ffffff;
 }
 
+/* Codex CLI (D125): the terminal prompt in the text colour on the neutral disc of the agents. */
+.agent-mark.codex {
+  border-radius: 50%;
+  background: var(--column);
+  box-shadow: inset 0 0 0 1px var(--border);
+  color: var(--text);
+}
+
+.avatar.agent-codex {
+  color: var(--text);
+}
+
 .agent-mark img {
   display: block;
   pointer-events: none;
@@ -2355,6 +2367,12 @@ html[data-busy] body::before {
   white-space: nowrap;
 }
 
+/* Plugin rules of the project's runs (D128): short, like "+ignite". */
+.app-row .app-plugins {
+  flex: 0 1 160px;
+  min-width: 0;
+}
+
 /* Suggestions: 4 children (kind, name, folder, button) in fixed tracks, so the columns line up. */
 .app-suggest {
   display: grid;
@@ -3080,5 +3098,22 @@ html[data-busy] body::before {
 .self-update-status .actions {
   display: flex;
   gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* Connectors of a card or project (D124). */
+.linklike {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--accent);
+  cursor: pointer;
+  font: inherit;
+  text-decoration: underline;
+}
+.app-connectors {
+  flex-basis: 100%;
+}
+.app-row {
   flex-wrap: wrap;
 }

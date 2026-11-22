@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import spawn from 'cross-spawn';
 import type { FastifyInstance, FastifyReply } from 'fastify';
-import { saveConfig } from '../config.js';
+import { saveConfig, tokenWeightsOf } from '../config.js';
 import type { AppContext } from '../context.js';
 import { runDoctor } from '../doctor.js';
 import { transcriptItems } from '../runner/stream.js';
@@ -9,6 +9,8 @@ import { handleHook, type HookInput } from '../hooks/handler.js';
 import type { Importer } from '../importer/importer.js';
 import { hooksStatus, installHooks, setCleanupPeriodDays, uninstallHooks } from '../hooks/install.js';
 import { discoverApps } from '../service/apps.js';
+import { connectableUserServers, readUserMcpServers } from '../runner/user-mcp.js';
+import { CLAUDE_AI_CONNECTORS } from '../shared/connectors.js';
 import { interpretRequest } from '../service/automation-nl.js';
 import { automationsOf } from '../service/automations.js';
 import { registerImages } from './images.js';
@@ -230,6 +232,11 @@ export async function registerApi(app: FastifyInstance, ctx: AppContext): Promis
   // ---------- apps & labels ----------
 
   app.get('/api/apps', async () => s.listApps(true));
+  // Connectors a card or project can turn on (D124): the claude.ai catalog and the user's own servers.
+  app.get('/api/connectors', async () => ({
+    catalog: CLAUDE_AI_CONNECTORS.map((c) => ({ id: c.id, label: c.label })),
+    userServers: connectableUserServers(readUserMcpServers(), `http://127.0.0.1:${ctx.config.port}`),
+  }));
   app.get('/api/apps/discover', async () => discoverApps(ctx.config.workspaceDir, s.listApps(true)));
   app.post('/api/apps', async (req) => s.createApp((req.body ?? {}) as any));
   app.patch<{ Params: Params }>('/api/apps/:id', async (req) => s.updateApp(num(req.params.id), (req.body ?? {}) as Body));
@@ -308,6 +315,7 @@ export async function registerApi(app: FastifyInstance, ctx: AppContext): Promis
     try {
       // The port the server listens on is fixed at start; keep the live value.
       ctx.config = { ...saveConfig(ctx.config, (req.body ?? {}) as Body), port: ctx.config.port, host: ctx.config.host };
+      s.tokenWeights = tokenWeightsOf(ctx.config);
     } catch (err) {
       throw new RuleError('invalid_config', (err as Error).message, 400);
     }

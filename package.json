@@ -35,6 +35,8 @@
     "dev:ui": "vite",
     "start": "node bin/dexm.mjs start",
     "test": "vitest run",
+    "test:unit": "vitest run --project unit",
+    "test:integration": "vitest run --project integration",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.ui.json --noEmit"
   },
   "dependencies": {

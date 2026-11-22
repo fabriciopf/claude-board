@@ -1,5 +1,27 @@
 import { defineConfig } from 'vitest/config';
 
+// Card #228: the files that build real git repositories, push, or start and kill process trees. On
+// Windows each child process costs ~100 ms, and these 15 files took ~16 of the ~17 minutes of the
+// whole suite (the other 66 run in ~40 s). `npm run test:unit` leaves them out for the loop while
+// working on a card; `npm test` (and the publication) runs everything.
+const INTEGRATION = [
+  'agenda',
+  'antigravity',
+  'base-branch',
+  'entrypoint',
+  'hidden-console',
+  'hooks',
+  'mirror',
+  'publish',
+  'push-guard',
+  'relaunch',
+  'restart',
+  'runner',
+  'self-update',
+  'usage',
+  'workspace',
+].map((name) => `test/${name}.test.ts`);
+
 export default defineConfig({
   test: {
     include: ['test/**/*.test.ts'],
@@ -17,5 +39,10 @@ export default defineConfig({
     retry: 1,
     // node:sqlite prints an ExperimentalWarning per worker; it is noise here.
     env: { NODE_NO_WARNINGS: '1' },
+    // Both projects inherit everything above; `--project unit` or `--project integration` picks one.
+    projects: [
+      { extends: true, test: { name: 'unit', exclude: INTEGRATION } },
+      { extends: true, test: { name: 'integration', include: INTEGRATION } },
+    ],
   },
 });

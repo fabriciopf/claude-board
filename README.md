@@ -1,6 +1,6 @@
 # Deus Ex Machina
 
-A local, Trello-style task board that coding agents work through on their own: Claude Code, and also Antigravity CLI. You create a card, drag it to the agent queue, and the Board runs the CLI installed on your machine (`claude` by default), in a git worktree of its own for that card. Progress shows up live, and the card comes back to you when the agent asks something or finishes.
+A local, Trello-style task board that coding agents work through on their own: Claude Code, and also Antigravity CLI and Codex CLI. You create a card, drag it to the agent queue, and the Board runs the CLI installed on your machine (`claude` by default), in a git worktree of its own for that card. Progress shows up live, and the card comes back to you when the agent asks something or finishes.
 
 The command is `dexm`. The project had another name until November 2026; the old command (`claude-board`), MCP server name, `CLAUDE_BOARD_*` variables and `~/.claude-board` folder keep working (see "Renamed from the previous name").
 
@@ -64,7 +64,7 @@ claude mcp add --scope user --transport http dexm http://127.0.0.1:4317/mcp
 
 - **Send to the agent:** drag the card to "Ready for the agent" or use the button on the card. A card you own does not enter the queue; the Board asks whether to hand it to the agent.
 - **Answer:** when the agent asks, the card goes to "Waiting for you" with the question highlighted and the options as buttons. Answering puts the card back in the queue, and the runner resumes the same session (`claude --resume`).
-- **Review:** in "In review", **Approve** moves the card to "Done", and **Request changes** sends it back to the agent with your comment, in the same session.
+- **Review:** in "In review", **Approve** moves the card to "Done", and **Request changes** sends it back to the agent with your comment. By default it starts a new session with a handoff package (last summary, the branch's git, new and older comments) instead of rereading the previous session; the card's "Resuming" field or the `resumeMode` setting can keep `claude --resume` (D129).
 - **Stop:** kills the agent's process and everything it started. The card goes to "Waiting for you", and **Try again** resumes where it stopped.
 - **Continue in the terminal:** copies `cd "<folder>"; claude --resume <session>`.
 - **Project:** the product or project the task is about. A card has at most one project, shown on its cover and filterable on the board. Projects are registered under Settings › Projects and labels, with a name, a color and an optional folder; the panel suggests the repositories of the workspace and their `apps/*` folders (monorepos), skipping worktrees. The run gets the project's name and folder in its prompt. On import, a session gets the project whose folder holds most of the files it edited. In the code, the API and the MCP the field is still called `app`.
@@ -123,6 +123,20 @@ node bin/agy-acp.mjs runs/<id>/agy-run.json
 - **Turn limit:** the card's maximum turns cancels the session when it is reached.
 - **What only Claude Code has:** your `CLAUDE.md`, skills, plugins, claude.ai connectors and the Artifact tool. Antigravity CLI reads `GEMINI.md`, `AGENTS.md` and its own plugins.
 - **Automatic concurrency for Antigravity:** set its limit to `auto` and the Board paces Antigravity runs by the Google quota, the same way it paces Claude Code by the 5-hour window. Neither ACP nor `agy -p` report that quota, so the Board reads it from agy's own `swarm` tool (`swarm{action:"models"}`, opened by a `/swarm` prompt in `agy -p --output-format stream-json`), never from agy's credentials. Each reading is one turn of the cheapest model, paid from that quota, so it happens at most every 20 minutes: after each Antigravity run, and every 20 minutes while Antigravity is in use. It is the default since the review of card #198. With the quota at zero no Antigravity run starts until it renews, unless AI credits pay for it.
+
+### Codex CLI as the agent
+
+A card can also run in [Codex CLI](https://github.com/openai/codex) (`codex`, OpenAI): pick "Codex CLI" in the card's "Agent" field, or make it the default on the Runs tab. Install it with `npm i -g @openai/codex` and run `codex login` once in a terminal. The Board drives `codex exec --json` through a small client of its own (D125):
+
+```text
+node bin/codex-exec.mjs runs/<id>/codex-run.json
+  └─ codex exec --json --skip-git-repo-check -c model=… -c sandbox_mode=… -c mcp_servers.dexm.url=… [resume <id>] -
+```
+
+- **Same card flow:** every option goes as a `-c` override of your `config.toml`, including the Board's MCP server over HTTP with the card's headers. The Board's rules go at the top of the prompt, which codex reads on stdin. The client writes the run in Claude Code's stream format.
+- **Sandbox:** `workspace-write` by default, `read-only` for a card in plan mode, `danger-full-access` when the card allows everything. `codexNetworkAccess` decides whether its commands reach the network.
+- **Push rules:** codex takes no list of forbidden commands, so the client stops the run when a shell command the `prPolicy` forbids starts, and resumes the session telling codex why. The worktree's pre-push hook is the lock that does not race.
+- **Sessions, effort and limits:** codex picks the session id (`thread_id`); a reply resumes it. The card effort goes as `model_reasoning_effort` (xhigh and max become `xhigh`). Codex runs have their own fixed limit, `codexConcurrency`; there is no automatic mode, since codex reports no quota.
 
 ### Cards with several items
 
@@ -207,6 +221,41 @@ Settings › Workspace e Git has the mode, the branch to follow and a **Verifica
 
 When a check cannot reach the remote (no network, DNS, proxy, credentials), the panel says why and the Board checks again in 15 minutes.
 
+### Automatic updates need signed commits
+
+**Automatic** runs code from the remote with nobody watching, so it only applies a version when every new commit can be trusted. A commit is trusted when it has one of these:
+
+- a good signature from a key this machine trusts (`git log --format=%G?` prints `G`);
+- an author e-mail listed in **Autores aceitos na atualização automática** (`selfUpdateAuthors`). This is weaker, because an author e-mail can be forged;
+- two parents and exactly the tree git produces by merging them, as GitHub's "Create a merge commit" does. A merge like that brings no code of its own, and its parents are checked like any other commit.
+
+If one commit fails, that version behaves as in **Notify**: the strip says the automatic update is waiting, the panel names the commit, and **Atualizar** applies it once you have looked.
+
+**On each machine that runs the Board in Automatic**, trust the maintainer's SSH signing key once (PowerShell):
+
+```powershell
+$signers = "$HOME\.ssh\allowed_signers"
+$key = gh api users/fabriciopf/ssh_signing_keys --jq '.[0].key'
+Add-Content -Encoding ascii $signers "maintainer namespaces=`"git`" $key"
+git -C <Board folder> config gpg.ssh.allowedSignersFile $signers
+git -C <Board folder> fetch origin
+git -C <Board folder> log --no-merges -1 --format=%G? origin/main   # G = trusted
+```
+
+Then pick **Automática** in Settings › Workspace e Git.
+
+**On the maintainer's machine** (the Board that generates the public copy), sign the commits it pushes:
+
+```powershell
+ssh-keygen -t ed25519 -C "dexm signing" -N '""' -f "$HOME\.ssh\dexm_signing"
+git -C <mirrorRepoPath> config gpg.format ssh
+git -C <mirrorRepoPath> config user.signingkey "$HOME\.ssh\dexm_signing"
+git -C <mirrorRepoPath> config commit.gpgsign true
+gh ssh-key add "$HOME\.ssh\dexm_signing.pub" --type signing --title "dexm signing"
+```
+
+The Board signs each public commit when that checkout has `commit.gpgsign`. The key has no passphrase because the Board pushes on its own; keep it on that machine only. Publishing it as a signing key on GitHub gives the commits the Verified badge and lets other machines fetch it with the command above. Only the commits an install does not have yet are checked. An install that is behind on commits pushed before the key existed waits for one **Atualizar**; after that, Automatic runs on its own. GitHub must merge the PRs with a merge commit: a squash or rebase merge makes a new commit that only GitHub signs, and Automatic waits for it.
+
 ## Configuration
 
 Stored in `~/.dexm/config.json` and editable in Settings.
@@ -216,11 +265,16 @@ Stored in `~/.dexm/config.json` and editable in Settings.
 | `port` | 4317 | Board port |
 | `claudeBin` | `claude` | Claude Code executable |
 | `claudeHome` | `~/.claude` | Claude Code folder |
-| `defaultAgent` | `claude` | Agent of runs when the card does not choose: `claude` (Claude Code) or `antigravity` (Antigravity CLI) |
+| `defaultAgent` | `claude` | Agent of runs when the card does not choose: `claude` (Claude Code), `antigravity` (Antigravity CLI) or `codex` (Codex CLI) |
 | `antigravityBin` | `agy` | Antigravity CLI executable |
 | `antigravityModel` | empty | Model of Antigravity runs when the card does not choose; empty = Antigravity CLI's default (`agy models` lists them) |
+| `codexBin` | `codex` | Codex CLI executable |
+| `codexModel` | empty | Model of Codex runs when the card does not choose; empty = Codex CLI's default |
+| `codexNetworkAccess` | `true` | Whether Codex commands reach the network inside its `workspace-write` sandbox |
+| `codexConcurrency` | 2 | Concurrent Codex CLI runs, apart from the other agents: 0 to 20 or `"unlimited"` |
 | `heartbeatSeconds` | 30 | Runner interval |
 | `maxConcurrency` | `"auto"` | Concurrent runs: `"auto"` (paces runs so the 5-hour usage tracks the window, and only opens a run when what is left until the reset pays for the runs in progress plus one more with slack) or 1 to 20 |
+| `resumeMode` | `"handoff"` | How an adjustment, comment or requeue takes a delivered card back: `"handoff"` = new session with a handoff package, `"resume"` = the previous session (`--resume`). A reply and a retry always resume. A card can choose its own |
 | `autoSplit` | `true` | On a card's first run, the agent decides whether a list description becomes separate tasks |
 | `runTimeoutMinutes` | 0 | Maximum run time; 0 = no limit |
 | `defaultMaxTurns` | 0 | Turns per run; 0 = no limit |
@@ -269,7 +323,10 @@ To finish the switch on a machine: run `npm link` again (for the `dexm` command)
 ## Development
 
 ```bash
-npm test          # Vitest: rules, MCP, runner with a fake claude, hooks, import
+npm test          # Vitest: the whole suite (what the publication runs)
+npm run test:unit # the suite without the 15 files that build git repositories or process trees (~40 s against ~17 min on Windows)
+npm run test:integration
+npx vitest run test/runner.test.ts   # one file
 npm run typecheck
 npm run dev:ui    # Vite on http://127.0.0.1:5317, proxying the API on 4317 (open 4317 once first: the API needs its session cookie, D112)
 ```

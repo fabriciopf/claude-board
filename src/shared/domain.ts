@@ -45,7 +45,7 @@ export const STATUS_DESCRIPTIONS: Record<Status, string> = {
   waiting_user: 'O agente fez uma pergunta ou a execução parou. Responda ou use "Tentar de novo" dentro do card; o card volta para a fila.',
   waiting_third_party:
     'Depende de outra pessoa, de deploy ou de acesso; o motivo fica registrado no card. Um card que o agente dividiu em tarefas espera aqui até você aprovar todas.',
-  review: 'O agente terminou e entregou um resumo. Confira e aprove, ou peça ajustes, que voltam para o agente na mesma sessão. Um comentário seu também devolve o card para a fila do agente.',
+  review: 'O agente terminou e entregou um resumo. Confira e aprove, ou peça ajustes, que voltam para o agente numa sessão nova com o resumo do que foi feito (ou na mesma sessão, se o card ou a configuração pedirem). Um comentário seu também devolve o card para a fila do agente.',
   done: 'Trabalho aprovado por você. Só você move um card para cá. Um comentário seu devolve o card para a fila do agente.',
 };
 
@@ -140,6 +140,8 @@ export const CONCURRENCY_PRESETS: string[] = [AUTO_CONCURRENCY, '0', '1', '2', '
  */
 export type AgentConcurrencySetting = number | typeof AUTO_CONCURRENCY | typeof UNLIMITED_CONCURRENCY;
 export const ANTIGRAVITY_CONCURRENCY_PRESETS: string[] = [AUTO_CONCURRENCY, '0', '1', '2', '4', '8', UNLIMITED_CONCURRENCY];
+/** Codex CLI's choices (D125): no automatic mode, Codex reports no quota the Board can read. */
+export const CODEX_CONCURRENCY_PRESETS: string[] = ['0', '1', '2', '4', '8', UNLIMITED_CONCURRENCY];
 /** Automatic by default since the review of card #198 (it used to be 2). */
 export const DEFAULT_ANTIGRAVITY_CONCURRENCY: AgentConcurrencySetting = AUTO_CONCURRENCY;
 
@@ -230,11 +232,12 @@ export function isEffortLevel(v: unknown): v is EffortLevel {
  * Antigravity CLI replaced Gemini CLI, the second agent of D92: a card still saying 'gemini' reads as
  * Antigravity (migration 16).
  */
-export type AgentId = 'claude' | 'antigravity';
-export const AGENTS: AgentId[] = ['claude', 'antigravity'];
+export type AgentId = 'claude' | 'antigravity' | 'codex';
+export const AGENTS: AgentId[] = ['claude', 'antigravity', 'codex'];
 export const AGENT_LABELS: Record<AgentId, string> = {
   claude: 'Claude Code',
   antigravity: 'Antigravity CLI',
+  codex: 'Codex CLI',
 };
 
 export function isAgentId(v: unknown): v is AgentId {
@@ -252,6 +255,7 @@ export function agentLabel(id: string | null | undefined): string {
  * Claude Code; the old 'gemini' runs were Google's, like Antigravity.
  */
 export function runLane(agent: string | null | undefined): AgentId {
+  if (agent === 'codex') return 'codex';
   return agent === 'antigravity' || agent === 'gemini' ? 'antigravity' : 'claude';
 }
 
@@ -268,6 +272,7 @@ export function coverAgent(card: Pick<CardSummary, 'agent' | 'runningAgent'>, de
 /** Command a person types to continue a card's session in a terminal, in the agent that holds it. */
 export function resumeCommand(agent: string | null | undefined, sessionId: string): string {
   if (agent === 'antigravity') return `agy --conversation ${sessionId}`;
+  if (agent === 'codex') return `codex resume ${sessionId}`;
   if (agent === 'gemini') return `gemini --resume ${sessionId}`;
   return `claude --resume ${sessionId}`;
 }
@@ -285,9 +290,29 @@ export const ANTIGRAVITY_MODEL_OPTIONS: { id: string; label: string }[] = [
   { id: 'gpt-oss-120b-medium', label: 'GPT-OSS 120B (medium)' },
 ];
 
+/**
+ * Codex CLI models offered on the card and in the settings (D125): the first of the bundled
+ * models.json of codex 0.171 (card #235). Any other id is also accepted; codex refuses an unknown one
+ * with its message, which ends the run.
+ */
+export const CODEX_MODEL_OPTIONS: { id: string; label: string }[] = [
+  { id: 'gpt-6.2-sol', label: 'GPT-6.2 Sol' },
+  { id: 'gpt-6.2-astra', label: 'GPT-6.2 Astra' },
+  { id: 'gpt-6.1-terra', label: 'GPT-6.1 Terra' },
+  { id: 'gpt-6-luna', label: 'GPT-6 Luna' },
+];
+
 /** Model options of an agent. */
 export function modelOptionsFor(agent: AgentId): { id: string; label: string }[] {
+  if (agent === 'codex') return CODEX_MODEL_OPTIONS;
   return agent === 'antigravity' ? ANTIGRAVITY_MODEL_OPTIONS : MODEL_OPTIONS;
+}
+
+/** Codex CLI's `model_reasoning_effort`: the Board's levels above high map to its top one (D125). */
+export function codexEffort(level: string | null | undefined): string | null {
+  if (!level) return null;
+  if (level === 'xhigh' || level === 'max') return 'xhigh';
+  return isEffortLevel(level) ? level : null;
 }
 
 /**
@@ -299,6 +324,10 @@ export function modelFitsAgent(model: string, agent: AgentId): boolean {
   const geminiLike = /^gemini/i.test(model);
   // agy also serves Claude models under its own ids (claude-sonnet-4-6…): those fit Antigravity.
   if (agent === 'antigravity') return !claudeLike || ANTIGRAVITY_MODEL_OPTIONS.some((o) => o.id === model);
+  // Codex CLI serves OpenAI's models (gpt-*, o3, o4-mini…): neither Claude nor Gemini ids.
+  if (agent === 'codex') return !claudeLike && !geminiLike;
+  const openAiLike = /^(gpt-|od)/i.test(model);
+  if (agent === 'claude' && openAiLike) return false;
   return !geminiLike;
 }
 
@@ -323,6 +352,10 @@ export interface App {
   color: string;
   description: string;
   archived: boolean;
+  /** Plugin rules of the runs of this project's cards (D128), e.g. `+ignite`; '' = the settings decide. */
+  plugins: string;
+  /** MCP connectors of this project's runs (D124); null = the settings' default. */
+  connectors: string[] | null;
 }
 
 /** A folder of the workspace that looks like an app and is not registered yet. */
@@ -376,6 +409,12 @@ export interface Card {
   effort: EffortLevel | null;
   /** Agent for this card's runs; null = the default in the settings (D92). */
   agent: AgentId | null;
+  /** Plugin rules of this card's runs (D128), e.g. `+vercel`; null = the project and the settings decide. */
+  plugins: string | null;
+  /** MCP connectors of this card's runs (D124); null = the project's, else the settings'. [] = none. */
+  connectors: string[] | null;
+  /** How the card goes back to the agent after a delivery; null = the default in the settings (D129). */
+  resumeMode: ResumeMode | null;
   dangerousAllowed: boolean;
   /** Session of the card's last run, in the agent that ran it (Claude Code or Antigravity CLI). */
   claudeSessionId: string | null;
@@ -441,6 +480,39 @@ export interface CardTokens {
   runs: number;
   /** Split by agent, largest first; one entry when every run used the same agent. */
   byAgent: { agent: string; input: number; output: number; runs: number }[];
+  /**
+   * The four parts of the runs that recorded them (migration 18, D126), summed, and their price-weighted
+   * total. Null when no run of the card recorded the parts.
+   */
+  detail: (TokenParts & { equivalent: number; runs: number; weights: TokenWeights }) | null;
+  /** Runs from before migration 18, with only the sum: shown as "não detalhado", never split (D126). */
+  undetailed: { input: number; output: number; runs: number } | null;
+}
+
+/** The four token counts Claude Code reports per message (D126). */
+export interface TokenParts {
+  input: number;
+  cacheWrite: number;
+  cacheRead: number;
+  output: number;
+}
+
+/** Weight of each part in the "tokens equivalentes" (D126): the price of each relative to plain input. */
+export type TokenWeights = TokenParts;
+
+export const DEFAULT_TOKEN_WEIGHTS: TokenWeights = { input: 1, cacheWrite: 1.25, cacheRead: 0.1, output: 5 };
+
+/** Price-weighted tokens, rounded to a whole token. */
+export function equivalentTokens(p: TokenParts, w: TokenWeights = DEFAULT_TOKEN_WEIGHTS): number {
+  return Math.round(p.input * w.input + p.cacheWrite * w.cacheWrite + p.cacheRead * w.cacheRead + p.output * w.output);
+}
+
+/** How much a run moved one plan window (D126), in percentage points; null when it cannot be measured. */
+export interface UsageDelta {
+  /** Points of the window, utilization × 100, end minus start. */
+  points: number;
+  /** Other runs went at the same time, so part of the move is theirs. */
+  shared: boolean;
 }
 
 export interface Comment {
@@ -464,6 +536,12 @@ export interface Execution {
   turns: number;
   tokensIn: number;
   tokensOut: number;
+  /** The four parts (D126); null for a run from before migration 18, which kept only the sum. */
+  tokenParts: TokenParts | null;
+  /** Price-weighted tokens with the current weights; null when the parts are unknown. */
+  tokensEquivalent: number | null;
+  /** How much the run moved the 5-hour and 7-day windows (D126); null when it cannot be measured. */
+  usageDelta: { fiveHour: UsageDelta | null; sevenDay: UsageDelta | null } | null;
   transcriptPath: string | null;
   summaryMd: string | null;
   errorMd: string | null;
@@ -476,6 +554,8 @@ export interface Execution {
   effort: string | null;
   /** Agent the run drove; null = a run from before migration 15, always Claude Code. */
   agent: AgentId | null;
+  /** How the run started (D129); null = a run from before migration 20. */
+  sessionMode: SessionMode | null;
 }
 
 export interface BoardEvent {
@@ -518,6 +598,15 @@ export interface AntigravityLane {
   quota: AgentQuotaNote | null;
 }
 
+/** The Codex CLI side of the header counter (D125): its runs and its own fixed limit. */
+export interface CodexLane {
+  running: number;
+  /** null = no ceiling. */
+  limit: number | null;
+  /** Whether the header shows it: Codex is the default, has a card in the queue or a run going. */
+  shown: boolean;
+}
+
 /** A run of the agent ended on a quota or rate-limit error. */
 export interface AgentQuotaNote {
   at: string;
@@ -531,6 +620,7 @@ export interface RunnerState {
   /** Runs of Claude Code, the ones `concurrency` limits (D99). */
   claudeRunning?: number;
   antigravity?: AntigravityLane;
+  codex?: CodexLane;
   /** Agent of the cards that choose none: the usage ticker shows its usage when no run is going (card #198 review). */
   defaultAgent?: AgentId;
   /** A publication of the Board holds new runs until the running ones end (D42). */
@@ -582,6 +672,19 @@ export interface PublishState {
  */
 export type SelfUpdateMode = 'off' | 'notify' | 'auto';
 export const SELF_UPDATE_MODES: SelfUpdateMode[] = ['off', 'notify', 'auto'];
+
+/**
+ * How a card goes back to the agent after a delivery (D129): 'handoff' opens a new session with a
+ * package of what was done (description, checklist, last summary, new comments, the branch's git);
+ * 'resume' continues the previous session with --resume, rereading all of it on every turn.
+ */
+export type ResumeMode = 'handoff' | 'resume';
+export const RESUME_MODES: ResumeMode[] = ['handoff', 'resume'];
+export function isResumeMode(v: unknown): v is ResumeMode {
+  return v === 'handoff' || v === 'resume';
+}
+/** How a run started: its card's first session, a resumed session, or a new session with the handoff package. */
+export type SessionMode = 'new' | 'resume' | 'handoff';
 export type SelfUpdatePhase = 'idle' | 'checking' | 'preparing' | 'waiting' | 'applying' | 'restarting';
 
 export interface SelfUpdateCommit {

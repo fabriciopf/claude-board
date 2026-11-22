@@ -3,11 +3,16 @@
  * changes between versions, so every field is optional and unknown event types are ignored.
  */
 
+import type { TokenParts } from '../shared/domain.js';
+
 export interface StreamState {
   sessionId: string | null;
   turns: number;
+  /** Input as the Board has always counted it: plain input + cache written + cache read (D14). */
   tokensIn: number;
   tokensOut: number;
+  /** The same tokens split in the four parts Claude Code reports (D126). */
+  tokenParts: TokenParts;
   lastText: string | null;
   result: {
     subtype: string;
@@ -26,6 +31,7 @@ export function emptyState(): StreamState {
     turns: 0,
     tokensIn: 0,
     tokensOut: 0,
+    tokenParts: { input: 0, cacheWrite: 0, cacheRead: 0, output: 0 },
     lastText: null,
     result: null,
     toolUses: [],
@@ -46,9 +52,23 @@ export function parseLine(line: string): Json | null {
   }
 }
 
-function usageIn(u: Json | undefined): number {
-  if (!u) return 0;
-  return (u.input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0);
+const count = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : 0);
+
+/** The four parts of a `usage` object (D126); a missing field counts as zero. */
+export function usageParts(u: Json | undefined): TokenParts {
+  return {
+    input: count(u?.input_tokens),
+    cacheWrite: count(u?.cache_creation_input_tokens),
+    cacheRead: count(u?.cache_read_input_tokens),
+    output: count(u?.output_tokens),
+  };
+}
+
+/** Keeps tokensIn/tokensOut, the sums the Board already stored (D14), in step with the parts. */
+function syncSums(state: StreamState): void {
+  const p = state.tokenParts;
+  state.tokensIn = p.input + p.cacheWrite + p.cacheRead;
+  state.tokensOut = p.output;
 }
 
 const short = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1) + '…' : s);
@@ -76,8 +96,13 @@ export function applyEvent(state: StreamState, ev: Json): string | null {
       if (!id || !state.seenMessages.has(id)) {
         if (id) state.seenMessages.add(id);
         state.turns += 1;
-        state.tokensIn += usageIn(msg.usage);
-        state.tokensOut += msg.usage?.output_tokens ?? 0;
+        const add = usageParts(msg.usage);
+        const p = state.tokenParts;
+        p.input += add.input;
+        p.cacheWrite += add.cacheWrite;
+        p.cacheRead += add.cacheRead;
+        p.output += add.output;
+        syncSums(state);
       }
       const lines: string[] = [];
       for (const block of Array.isArray(msg.content) ? msg.content : []) {
@@ -102,9 +127,14 @@ export function applyEvent(state: StreamState, ev: Json): string | null {
       if (typeof ev.num_turns === 'number') state.turns = ev.num_turns;
       if (ev.usage) {
         // The result carries the session totals; prefer them over the running sum.
-        const totalIn = usageIn(ev.usage);
-        if (totalIn > 0) state.tokensIn = totalIn;
-        if (typeof ev.usage.output_tokens === 'number' && ev.usage.output_tokens > 0) state.tokensOut = ev.usage.output_tokens;
+        const total = usageParts(ev.usage);
+        if (total.input + total.cacheWrite + total.cacheRead > 0) {
+          state.tokenParts.input = total.input;
+          state.tokenParts.cacheWrite = total.cacheWrite;
+          state.tokenParts.cacheRead = total.cacheRead;
+        }
+        if (total.output > 0) state.tokenParts.output = total.output;
+        syncSums(state);
       }
       return `Fim: ${state.result.subtype}`;
     }

@@ -1,20 +1,29 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AGENTS, AGENT_LABELS, EFFORT_LABELS, EFFORT_LEVELS, PERMISSION_MODES, REOPEN_ON_COMMENT, STATUSES, UNSEEN_STATUSES, agentLabel, effortLabel, isAgentId, modelFitsAgent, modelLabel, modelOptionsFor, resumeCommand, type AgentId, type App, type Card, type Label, type LinkKind, type Repository } from '../shared/domain';
+import { AGENTS, AGENT_LABELS, EFFORT_LABELS, EFFORT_LEVELS, PERMISSION_MODES, REOPEN_ON_COMMENT, RESUME_MODES, STATUSES, UNSEEN_STATUSES, agentLabel, effortLabel, isAgentId, modelFitsAgent, modelLabel, modelOptionsFor, resumeCommand, type AgentId, type App, type Card, type Label, type LinkKind, type Repository, type ResumeMode } from '../shared/domain';
+import { resolvePluginRules } from '../shared/plugins';
 import { ActionButton, ActionGroup, useBusy } from './ActionButton';
 import { ApiError, api, fmtDate, useServerEvents, type CardDetailResponse } from './api';
+import { ConnectorPicker } from './ConnectorPicker';
+import { parseConnectorList } from '../shared/connectors';
 import { latestDelivery } from './delivery';
 import { statusLabel, statusShortLabel, t } from './i18n';
 import { renderMarkdown } from './markdown';
 import { useImagePaste } from './paste-image';
 import { Timeline } from './Timeline';
 
+const resumeLabel = (m: ResumeMode) => t(m === 'resume' ? 'card.resumeResume' : 'card.resumeHandoff');
+
 /** Settings the modal names in the "padrão" option of its selects. */
 interface ConfigDefaults {
   defaultModel?: string;
   defaultEffort?: string;
   defaultAgent?: string;
+  resumeMode?: string;
   antigravityModel?: string;
+  codexModel?: string;
   jiraBaseUrl?: string;
+  runPlugins?: string;
+  defaultConnectors?: string;
 }
 
 interface Props {
@@ -237,6 +246,10 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
   const agent: AgentId = card.agent ?? defaultAgent;
   const lastAgent: string = lastExec ? (lastExec.agent ?? 'claude') : agent;
   const modelOptions = modelOptionsFor(agent);
+  // What the settings and the project already say, shown while the card has no rules of its own (D124).
+  const inheritedPlugins = [...resolvePluginRules([defaults.runPlugins, apps.find((a) => a.id === card.appId)?.plugins])]
+    .map(([name, on]) => (on ? '+' : '-') + name)
+    .join(' ');
   const failed = card.status === 'waiting_user' && !openQuestion && lastExec && lastExec.status !== 'success' && lastExec.status !== 'waiting_user';
   const delivery = card.status === 'review' ? latestDelivery(comments) : null;
   // In review the description is closed by default, like "Pedido original" (card #96). Editing opens it.
@@ -861,11 +874,35 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
                 </select>
               </div>
               <div className="field">
+                <label htmlFor="f-resume" title={t('card.resumeModeHint')}>
+                  {t('card.resumeMode')}
+                </label>
+                <select
+                  id="f-resume"
+                  className="input"
+                  title={t('card.resumeModeHint')}
+                  value={card.resumeMode ?? ''}
+                  onChange={(e) => void patch({ resumeMode: (e.target.value || null) as ResumeMode | null })}
+                >
+                  <option value="">{t('card.fromSettingsWith', { value: resumeLabel(defaults.resumeMode === 'resume' ? 'resume' : 'handoff') })}</option>
+                  {RESUME_MODES.map((m) => (
+                    <option key={m} value={m}>
+                      {resumeLabel(m)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="field">
                 <label htmlFor="f-model">{t('card.model')}</label>
                 <select id="f-model" className="input" value={card.model ?? ''} onChange={(e) => void patch({ model: e.target.value || null })}>
                   <option value="">
                     {t('card.fromSettingsWith', {
-                      value: agent === 'antigravity' ? defaults.antigravityModel || AGENT_LABELS.antigravity : modelLabel(defaults.defaultModel),
+                      value:
+                        agent === 'antigravity'
+                          ? defaults.antigravityModel || AGENT_LABELS.antigravity
+                          : agent === 'codex'
+                            ? defaults.codexModel || AGENT_LABELS.codex
+                            : modelLabel(defaults.defaultModel),
                     })}
                   </option>
                   {[...modelOptions, ...(card.model && !modelOptions.some((m) => m.id === card.model) ? [{ id: card.model, label: card.model }] : [])].map((m) => (
@@ -895,6 +932,27 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
                 </select>
               </div>
               <div className="field">
+                <label>{t('card.connectors')}</label>
+                {(() => {
+                  // The card's list, else its project's, else the settings' (D124).
+                  const project = apps.find((a) => a.id === card.appId);
+                  const inherited = project?.connectors
+                    ? { from: t('card.connectorsFromProject'), list: project.connectors }
+                    : { from: t('card.connectorsFromSettings'), list: parseConnectorList(defaults.defaultConnectors) };
+                  return (
+                    <ConnectorPicker
+                      label={t('card.connectors')}
+                      value={card.connectors ?? null}
+                      inherited={inherited}
+                      // Antigravity CLI loads MCP servers its own way (D93): the field would have no effect.
+                      disabled={agent === 'antigravity'}
+                      onChange={(next) => void patch({ connectors: next })}
+                    />
+                  );
+                })()}
+                <span className="muted small">{t('card.connectorsHint')}</span>
+              </div>
+              <div className="field">
                 <label htmlFor="f-turns">{t('card.maxTurns')}</label>
                 <input
                   id="f-turns"
@@ -904,6 +962,21 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
                   defaultValue={card.maxTurns ?? ''}
                   placeholder={t('card.noLimit')}
                   onBlur={(e) => void patch({ maxTurns: e.target.value ? Number(e.target.value) : null })}
+                  onKeyDown={(e) => e.stopPropagation()}
+                />
+              </div>
+              {/* Plugin rules of this card's runs (D128), over the project's and the settings'. Only Claude Code has plugins (not Antigravity nor Codex). */}
+              <div className="field">
+                <label htmlFor="f-plugins">{t('card.plugins')}</label>
+                <input
+                  id="f-plugins"
+                  key={card.plugins ?? ''}
+                  className="input"
+                  defaultValue={card.plugins ?? ''}
+                  disabled={agent !== 'claude'}
+                  title={t('card.pluginsHint')}
+                  placeholder={inheritedPlugins ? t('card.pluginsInherited', { value: inheritedPlugins }) : t('card.pluginsNone')}
+                  onBlur={(e) => e.target.value.trim() !== (card.plugins ?? '') && void patch({ plugins: e.target.value.trim() || null })}
                   onKeyDown={(e) => e.stopPropagation()}
                 />
               </div>

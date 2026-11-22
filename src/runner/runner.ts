@@ -4,8 +4,9 @@ import path from 'node:path';
 import { paths } from '../config.js';
 import type { AppContext, RunnerControl } from '../context.js';
 import { nowIso } from '../db/index.js';
-import { AUTO_CONCURRENCY, STATUS_LABELS, UNLIMITED_CONCURRENCY, runLane, type AgentId, type AgentQuotaNote, type Card, type ConcurrencyInfo, type ExecutionStatus, type Status } from '../shared/domain.js';
+import { AUTO_CONCURRENCY, STATUS_LABELS, UNLIMITED_CONCURRENCY, runLane, type AgentId, type AgentQuotaNote, type Card, type ConcurrencyInfo, type ExecutionStatus, type Status, type UsageSnapshot } from '../shared/domain.js';
 import { agentName, buildLaunch, isQuotaError, resolveAgent, type Launch } from './agents.js';
+import { resolveConnectors } from '../shared/connectors.js';
 import { AGY_RATE_LOOKBACK_MINUTES, AgyQuotaTracker, decideAgyAuto, limitingWindow, quotaFor } from './agy-quota.js';
 import { BurnMeter, decideAuto, typicalRunMinutes, type RunTiming } from './auto-concurrency.js';
 import { antigravityInUse } from '../service/runner-state.js';
@@ -13,6 +14,7 @@ import { isAlive, killTree, processStartTimes, spawnDetached } from './process.j
 import { buildSystemPrompt, buildUserPrompt, formatUserComments, splitCandidate, type PromptKind } from './prompt.js';
 import { applyEvent, emptyState, parseLine, type StreamState } from './stream.js';
 import { FileTail, readTail } from './tail.js';
+import { gitHandoff, useHandoff, type HandoffInfo } from './handoff.js';
 import { ensureWorkdir } from './worktree.js';
 import { boardEnvVars, CLI_NAME } from '../shared/brand.js';
 
@@ -43,6 +45,20 @@ interface RunningRow {
 
 /** How often a followed transcript is read. */
 const POLL_MS = 250;
+
+/**
+ * The plan usage kept on a run at its start and end (D126), to show how much it moved the windows.
+ * Only Claude Code runs: the windows are Claude's plan, which an Antigravity run does not spend.
+ */
+/**
+ * 1 when another run overlapped this one (its start before this run's end, passed as the parameter, and
+ * its end after this run's start, or still going): part of the move of the windows is then theirs (D126).
+ */
+export const USAGE_SHARED_SQL = `(SELECT COUNT(*) > 0 FROM executions o WHERE o.id <> executions.id
+  AND o.started_at < ? AND (o.ended_at IS NULL OR o.ended_at > executions.started_at))`;
+
+const usageJson = (u: UsageSnapshot | null | undefined, agent: string | null | undefined) =>
+  u && runLane(agent) === 'claude' ? JSON.stringify(u) : null;
 /** A live pid is the run's process only if it started this close to the recorded spawn time. */
 export const PID_MATCH_MS = 15000;
 
@@ -214,6 +230,12 @@ export class Runner implements RunnerControl {
     });
   }
 
+  /** Codex CLI runs that may be going at the same time (D125): a fixed number or no ceiling; null = no ceiling. */
+  codexLimit(): number | null {
+    const setting = this.ctx.config.codexConcurrency;
+    return setting === UNLIMITED_CONCURRENCY ? null : Math.max(0, Math.floor(Number(setting)) || 0);
+  }
+
   /** Antigravity CLI runs that may be going at the same time; null = no ceiling. */
   antigravityLimit(now = Date.now()): number | null {
     return this.antigravityConcurrency(now).limit;
@@ -258,7 +280,7 @@ export class Runner implements RunnerControl {
   private runTiming(now: number, lane: AgentId = 'claude'): RunTiming {
     const minutes = (from: string, to: number) => (to - Date.parse(from)) / 60000;
     // A run without an agent is from before D92, so Claude Code; "gemini" is the agent D93 replaced.
-    const filter = lane === 'claude' ? "(agent IS NULL OR agent = 'claude')" : "agent IN ('antigravity', 'gemini')";
+    const filter = lane === 'claude' ? "(agent IS NULL OR agent = 'claude')" : lane === 'codex' ? "agent = 'codex'" : "agent IN ('antigravity', 'gemini')";
     const running = this.ctx.db.prepare(`SELECT started_at FROM executions WHERE status = 'running' AND ${filter}`).all() as { started_at: string }[];
     const finished = this.ctx.db
       .prepare(`SELECT started_at, ended_at FROM executions WHERE ended_at IS NOT NULL AND ${filter} ORDER BY id DESC LIMIT 40`)
@@ -277,10 +299,10 @@ export class Runner implements RunnerControl {
     if (this.closed) return 0;
     const { limit, reason } = this.concurrency();
     const agy = this.antigravityConcurrency();
-    const limits: Record<AgentId, number | null> = { claude: limit, antigravity: agy.limit };
+    const limits: Record<AgentId, number | null> = { claude: limit, antigravity: agy.limit, codex: this.codexLimit() };
     this.maybeReadAgyQuota();
     // The automatic limit moves with time and usage: let the header know when it changes.
-    const key = `${limit}|${reason}|${agy.limit}|${agy.reason}`;
+    const key = `${limit}|${reason}|${agy.limit}|${agy.reason}|${limits.codex}`;
     if (key !== this.lastConcurrency) {
       this.lastConcurrency = key;
       this.ctx.bus.publish({ type: 'runner.changed' });
@@ -308,8 +330,11 @@ export class Runner implements RunnerControl {
     // now, not when the work dir is ready, so the counter by agent (D99) is right from the start.
     const agent = resolveAgent(card, this.ctx.config);
     const r = db
-      .prepare("INSERT INTO executions (card_id, started_at, status, prompt_kind, claude_session_id, agent) VALUES (?, ?, 'running', ?, ?, ?)")
-      .run(card.id, nowIso(), kind, resume ? card.claudeSessionId : null, agent);
+      .prepare(
+        `INSERT INTO executions (card_id, started_at, status, prompt_kind, claude_session_id, agent, tokens_input, tokens_cache_write, tokens_cache_read, usage_start_json)
+          VALUES (?, ?, 'running', ?, ?, ?, 0, 0, 0, ?)`,
+      )
+      .run(card.id, nowIso(), kind, resume ? card.claudeSessionId : null, agent, usageJson(this.ctx.usage?.get(), agent));
     const executionId = Number(r.lastInsertRowid);
     const run: ActiveRun = { executionId, cardId: card.id, lane: runLane(agent), pid: null, cancelled: false, timedOut: false, detached: false, timer: null };
     this.active.set(card.id, run);
@@ -354,7 +379,10 @@ export class Runner implements RunnerControl {
    */
   private async follow(run: ActiveRun, state: StreamState, transcriptPath: string, offset: number, ended: () => boolean): Promise<boolean> {
     const { db, bus } = this.ctx;
-    const updateProgress = db.prepare('UPDATE executions SET turns = ?, tokens_in = ?, tokens_out = ?, claude_session_id = COALESCE(?, claude_session_id) WHERE id = ?');
+    const updateProgress = db.prepare(
+      `UPDATE executions SET turns = ?, tokens_in = ?, tokens_out = ?, tokens_input = ?, tokens_cache_write = ?, tokens_cache_read = ?,
+         claude_session_id = COALESCE(?, claude_session_id) WHERE id = ?`,
+    );
     const saveOffset = db.prepare('UPDATE executions SET stream_offset = ? WHERE id = ?');
     const tail = new FileTail(transcriptPath, offset);
     let saved = offset;
@@ -363,7 +391,8 @@ export class Runner implements RunnerControl {
       if (!ev) return;
       const human = applyEvent(state, ev);
       if (ev.type === 'assistant' || ev.type === 'result' || (ev.type === 'system' && ev.subtype === 'init')) {
-        updateProgress.run(state.turns, state.tokensIn, state.tokensOut, state.sessionId, run.executionId);
+        const p = state.tokenParts;
+        updateProgress.run(state.turns, state.tokensIn, state.tokensOut, p.input, p.cacheWrite, p.cacheRead, state.sessionId, run.executionId);
       }
       if (human) bus.publish({ type: 'execution.progress', cardId: run.cardId, executionId: run.executionId, data: { line: human } });
       if (ev.type === 'rate_limit_event' && this.ctx.usage?.update(ev.rate_limit_info)) this.meter.sample(this.ctx.usage.get());
@@ -407,7 +436,7 @@ export class Runner implements RunnerControl {
     for (const note of [workdir.baseNote, workdir.guardNote]) {
       if (note) service.addComment(card.id, { author: 'system', kind: 'comment', executionId: run.executionId, bodyMd: note });
     }
-    // The card's agent (D92, D93): Claude Code unless the card or the settings choose Antigravity CLI.
+    // The card's agent (D92, D93, D125): Claude Code unless the card or the settings choose Antigravity CLI or Codex CLI.
     const agent = resolveAgent(card, config);
     // A session only exists under the folder it started in, and only in the agent that started it.
     // When the starting folder changed (the workspace was configured after the card first ran), or the
@@ -437,6 +466,19 @@ export class Runner implements RunnerControl {
     db.prepare('UPDATE executions SET cwd = ?, agent = ? WHERE id = ?').run(workdir.cwd, agent, run.executionId);
 
     const detail = service.getCardDetail(card.id);
+    const previousRuns = detail.executions.filter((e) => e.id !== run.executionId);
+    // Taking a delivered card back opens a new session with the handoff package (D129), unless the
+    // card or the settings ask for --resume. The previous session is not reread on every turn.
+    let handoff: HandoffInfo | null = null;
+    if (resumeId && useHandoff(kind, card, config)) {
+      handoff = {
+        lastSummary: [...previousRuns].reverse().find((e) => e.summaryMd?.trim())?.summaryMd ?? null,
+        git: workdir.branch ? gitHandoff(workdir.workArea, card.baseBranch || config.defaultBaseBranch) : null,
+      };
+      resumeId = null;
+    }
+    const sessionMode = handoff ? 'handoff' : resumeId ? 'resume' : 'new';
+    db.prepare('UPDATE executions SET session_mode = ? WHERE id = ?').run(sessionMode, run.executionId);
     // What the prompt carries; comments written from now on reach the run by the MCP tools (D104).
     service.markCommentsDelivered(card.id, run.executionId, detail.comments.reduce((max, c) => Math.max(max, c.id), 0), 'prompt');
     const promptInput = {
@@ -450,8 +492,10 @@ export class Runner implements RunnerControl {
       branch: workdir.branch,
       split: kind === 'first' ? splitCandidate(detail, config) : null,
       siblings: detail.parent ? service.subtasksOf(detail.parent.id).filter((t) => t.id !== card.id) : [],
-      // A resumed session already saw the comments from before its previous run (D94).
-      commentsSince: resumeId ? (detail.executions.filter((e) => e.id !== run.executionId).at(-1)?.startedAt ?? null) : null,
+      // A resumed session already saw the comments from before its previous run (D94); a handoff
+      // session gets them too, but apart from the new ones (D129).
+      commentsSince: resumeId || handoff ? (previousRuns.at(-1)?.startedAt ?? null) : null,
+      handoff,
     };
     const systemPrompt = buildSystemPrompt(promptInput);
     const userPrompt = buildUserPrompt(kind, promptInput, nextPrompt);
@@ -474,6 +518,9 @@ export class Runner implements RunnerControl {
       // Same name on the card and on the Claude Code session (shown in VS Code and in `claude --resume`).
       sessionName: service.getCard(card.id).sessionName,
       addDirs: workdir.addDirs,
+      app: card.appId ? (service.listApps(true).find((a) => a.id === card.appId) ?? null) : null,
+      // The card's connectors, else the project's, else the settings' (D124).
+      connectors: resolveConnectors(service.getCard(card.id), promptInput.apps.find((a) => a.id === card.appId), config.defaultConnectors),
     });
     db.prepare('UPDATE executions SET model = ?, effort = ? WHERE id = ?').run(launch.model, launch.effort, run.executionId);
 
@@ -547,7 +594,7 @@ export class Runner implements RunnerControl {
       | undefined;
     const outcome = row?.outcome ?? null;
     // Messages name the agent that ran: "o Claude" for Claude Code (every run before D92), else that agent.
-    const who = row?.agent === 'antigravity' ? 'o Antigravity' : row?.agent === 'gemini' ? 'o Gemini' : 'o Claude';
+    const who = row?.agent === 'antigravity' ? 'o Antigravity' : row?.agent === 'gemini' ? 'o Gemini' : row?.agent === 'codex' ? 'o Codex' : 'o Claude';
     const Who = who.charAt(0).toUpperCase() + who.slice(1);
     let status: ExecutionStatus;
     let target: Status;
@@ -607,10 +654,28 @@ export class Runner implements RunnerControl {
       errorMd = `${errorMd ?? ''}\n\n${state.result.permissionDenials} chamada(s) de ferramenta foram negadas por permissão.`.trim();
     }
 
+    const endedAt = nowIso();
     db.prepare(
       `UPDATE executions SET status = ?, ended_at = ?, turns = ?, tokens_in = ?, tokens_out = ?,
+         tokens_input = ?, tokens_cache_write = ?, tokens_cache_read = ?, usage_end_json = ?,
+         usage_shared = ${USAGE_SHARED_SQL},
          claude_session_id = COALESCE(?, claude_session_id), summary_md = ?, error_md = ? WHERE id = ?`,
-    ).run(status, nowIso(), state.turns, state.tokensIn, state.tokensOut, state.sessionId, summary, errorMd, run.executionId);
+    ).run(
+      status,
+      endedAt,
+      state.turns,
+      state.tokensIn,
+      state.tokensOut,
+      state.tokenParts.input,
+      state.tokenParts.cacheWrite,
+      state.tokenParts.cacheRead,
+      usageJson(this.ctx.usage?.get(), row?.agent ?? 'claude'),
+      endedAt,
+      state.sessionId,
+      summary,
+      errorMd,
+      run.executionId,
+    );
     if (state.sessionId) service.setRunFields(run.cardId, { claudeSessionId: state.sessionId });
 
     if (unreported && summary) {

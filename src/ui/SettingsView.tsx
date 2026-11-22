@@ -19,6 +19,8 @@ interface DoctorCheck {
 /** Install commands of Antigravity CLI (antigravity.google/docs, getting started). */
 const AGY_INSTALL_WINDOWS = 'irm https://antigravity.google/cli/install.ps1 | iex';
 const AGY_INSTALL_UNIX = 'curl -fsSL https://antigravity.google/cli/install.sh | bash';
+/** Install command of Codex CLI (its npm package, D125). */
+const CODEX_INSTALL = 'npm i -g @openai/codex';
 
 const TAB_STORE_KEY = 'cb:settings-tab';
 
@@ -398,6 +400,39 @@ export function SettingsView({
                 {/* The doctor's line about agy (D93), the same one the Claude Code tab lists with the others. */}
                 {doctor
                   ?.filter((c) => /antigravity/i.test(c.name))
+                  .map((c) => (
+                    <div key={c.name} className="small" style={{ padding: '2px 0' }}>
+                      <span className={'pill ' + (c.ok ? 'ok' : c.required ? 'danger' : 'warn')}>{c.ok ? t('settings.doctor.ok') : c.required ? t('settings.doctor.missing') : t('settings.doctor.warning')}</span> <strong>{c.name}</strong>: {c.detail}
+                    </div>
+                  ))}
+              </div>
+            </>
+          )}
+
+          {tab === 'codex' && (
+            <>
+              <div className="panel">
+                <h3>{t('settings.codex.title')}</h3>
+                {configFields('codex')}
+              </div>
+              <div className="panel">
+                <h3>{t('settings.codex.howTitle')}</h3>
+                <ol className="small">
+                  <li>
+                    {t('settings.codex.install')}
+                    <div className="code-line">
+                      <code>{CODEX_INSTALL}</code>
+                    </div>
+                  </li>
+                  <li>
+                    {t('settings.codex.signIn')} <code>codex login</code>
+                  </li>
+                  <li>{t('settings.codex.pick')}</li>
+                </ol>
+                <p className="small muted">{t('settings.codex.onlyClaude')}</p>
+                {/* The doctor's line about codex (D125). */}
+                {doctor
+                  ?.filter((c) => /codex/i.test(c.name))
                   .map((c) => (
                     <div key={c.name} className="small" style={{ padding: '2px 0' }}>
                       <span className={'pill ' + (c.ok ? 'ok' : c.required ? 'danger' : 'warn')}>{c.ok ? t('settings.doctor.ok') : c.required ? t('settings.doctor.missing') : t('settings.doctor.warning')}</span> <strong>{c.name}</strong>: {c.detail}
