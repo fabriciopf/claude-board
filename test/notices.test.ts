@@ -42,6 +42,7 @@ const entry = (status: PublishEntry['status']): PublishEntry => ({
   finishedAt: null,
   commit: null,
   errorMd: null,
+  withAgent: false,
 });
 
 const state = (over: Partial<PublishState>): PublishState => ({ enabled: true, phase: 'idle', pending: 0, entries: [], detail: null, ...over });
@@ -94,5 +95,16 @@ describe('publication summary', () => {
     expect(publishSummary(state({ pending: 2, entries: [card(4, 'pending'), card(5, 'pending'), card(6, 'failed')] }), false).label).toBe('Na fila de publicação: #4 e #5');
     const failed = publishSummary(state({ entries: [card(6, 'failed', 'Filtros')] }), false);
     expect(failed).toEqual({ label: 'Publicação falhou: #6', title: 'Filtros', step: 'clique para ver o erro e tentar de novo' });
+  });
+
+  it('a failure whose card is back with the agent is info, not an error to retry (card #212)', () => {
+    const back = { ...card(202, 'failed', 'Comentário'), withAgent: true };
+    const s = state({ entries: [back] });
+    expect(publishLevel(s, false)).toBe('info');
+    expect(publishSummary(s, false)).toEqual({ label: 'Publicação refeita na próxima entrega: #202', title: 'Comentário', step: 'o card voltou ao agente' });
+    // A failure to act on still wins the strip and keeps it red.
+    const mixed = state({ entries: [back, card(6, 'failed', 'Filtros')] });
+    expect(publishLevel(mixed, false)).toBe('error');
+    expect(publishSummary(mixed, false).label).toBe('Publicação falhou: #6');
   });
 });

@@ -14,10 +14,13 @@ export function publishVisible(publish: PublishState | null, held: boolean): boo
   return held || (!!publish && (publish.entries.length > 0 || publish.phase !== 'idle'));
 }
 
+/** A failure the viewer has to act on: not one whose card is back with the agent (card #212). */
+const needsAction = (e: PublishEntry) => e.status === 'failed' && !e.withAgent;
+
 /** Error when the only thing left is failed entries (nothing pending, nothing under way); info otherwise. */
 export function publishLevel(publish: PublishState | null, held: boolean): NoticeLevel {
   const busy = held || (!!publish && publish.phase !== 'idle');
-  const failed = (publish?.entries ?? []).some((e) => e.status === 'failed');
+  const failed = (publish?.entries ?? []).some(needsAction);
   return failed && !publish?.pending && !busy ? 'error' : 'info';
 }
 
@@ -63,8 +66,10 @@ export function publishSummary(publish: PublishState | null, held: boolean): Pub
   }
   const pending = of('pending');
   if (pending.length) return { label: t('app.publish.pending', { cards: cardList(pending.map((e) => e.cardId)) }), title: titleOf(pending), step: null };
-  const failed = of('failed');
-  return { label: t('app.publish.failed', { cards: cardList(failed.map((e) => e.cardId)) }), title: titleOf(failed), step: t('app.publish.failedExplain') };
+  const failed = entries.filter(needsAction);
+  if (failed.length) return { label: t('app.publish.failed', { cards: cardList(failed.map((e) => e.cardId)) }), title: titleOf(failed), step: t('app.publish.failedExplain') };
+  const withAgent = entries.filter((e) => e.status === 'failed' && e.withAgent);
+  return { label: t('app.publish.withAgent', { cards: cardList(withAgent.map((e) => e.cardId)) }), title: titleOf(withAgent), step: t('app.publish.withAgentExplain') };
 }
 
 /**
@@ -166,9 +171,13 @@ export function PublishBanner({
                   {e.status === 'failed' && (
                     <>
                       {e.errorMd && <pre className="publish-error">{e.errorMd}</pre>}
+                      {e.withAgent ? (
+                        <span className="muted small">{t('app.publish.withAgentEntry')}</span>
+                      ) : (
                       <ActionButton className="btn small" busyLabel={t('app.publish.requeueing')} onAction={() => act(() => api.post(`/api/publish/${e.id}/retry`), t('app.publish.requeued'))}>
                         {t('app.publish.retry')}
                       </ActionButton>
+                      )}
                     </>
                   )}
                 </li>
