@@ -86,6 +86,7 @@ export const FIELDS: Field[] = [
   field({ key: 'mirrorExclude', tab: 'git', type: 'text', hasHint: true }),
   field({ key: 'mirrorGhUser', tab: 'git', type: 'text', hasHint: true }),
   field({ key: 'mirrorBlockTerms', tab: 'git', type: 'text', hasHint: true }),
+  field({ key: 'mirrorAutoMerge', tab: 'git', type: 'boolean', hasHint: true }),
   field({
     key: 'selfUpdate',
     tab: 'git',

@@ -21,6 +21,7 @@ describe('settings tabs', () => {
         'heartbeatSeconds',
         'jiraBaseUrl',
         'maxConcurrency',
+        'mirrorAutoMerge',
         'mirrorBaseBranch',
         'mirrorBlockTerms',
         'mirrorExclude',

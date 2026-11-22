@@ -69,6 +69,8 @@ export interface Config {
   mirrorGhUser: string;
   /** Terms (comma-separated, case-insensitive) that stop the push when they appear in what would go public. */
   mirrorBlockTerms: string;
+  /** After the push, mark the PR ready and merge it when the gh account can write to the public repository (card #211). */
+  mirrorAutoMerge: boolean;
   /** Update of the Board from the remote it was cloned from (D89): off, notify (strip with a button) or auto. */
   selfUpdate: SelfUpdateMode;
   /** Remote branch to follow, as remote/branch; '' = the upstream of the publish branch, else origin's default branch. */
@@ -116,6 +118,7 @@ export const DEFAULT_CONFIG: Config = {
   mirrorExclude: 'DECISIONS.md',
   mirrorGhUser: '',
   mirrorBlockTerms: '',
+  mirrorAutoMerge: true,
   selfUpdate: 'notify',
   selfUpdateSource: '',
 };
