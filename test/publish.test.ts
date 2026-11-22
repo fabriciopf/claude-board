@@ -141,6 +141,60 @@ describe('publish queue (D42)', () => {
   });
 });
 
+describe('main checkout off the publish branch (card #215)', () => {
+  /** A card that ran without a worktree and left the main checkout on its own branch. */
+  function leftOnBranch(): { cardId: number; branch: string } {
+    const c = ctx.service.createCard({ title: 'Sem worktree', descriptionMd: 'x', owner: 'claude' }, 'user', 'manual');
+    const branch = `cb/${c.id}-sem-worktree`;
+    git(repo, 'checkout', '-q', '-b', branch);
+    fs.writeFileSync(path.join(repo, 'src', 'ui', 'App.tsx'), 'export const title = "sem worktree";\n');
+    git(repo, 'commit', '-q', '-am', 'feat: sem worktree');
+    return { cardId: c.id, branch };
+  }
+
+  it('a clean cb/* checkout of a card not running goes back to master and the publication proceeds', async () => {
+    const left = leftOnBranch();
+    const { card } = cardWithBranch('Depois', { 'src/server.ts': 'export const port = 4318;\n' });
+    publisher.onDelivered(card.id);
+    await publisher.whenIdle();
+    expect(entry(card.id).status).toBe('published');
+    expect(git(repo, 'rev-parse', '--abbrev-ref', 'HEAD')).toBe('master');
+    // The other card's commits stay on its branch, untouched.
+    expect(git(repo, 'log', '-1', '--format=%s', left.branch)).toBe('feat: sem worktree');
+  });
+
+  it('does not switch under a running card, with uncommitted work, or on a branch the Board did not create', async () => {
+    const left = leftOnBranch();
+    const run = runningExecution(left.cardId, 4242);
+    const { card } = cardWithBranch('Bloqueado', { 'src/ui/App.tsx': 'export const title = "b";\n' });
+    publisher.onDelivered(card.id);
+    await publisher.whenIdle();
+    expect(entry(card.id).status).toBe('failed');
+    expect(entry(card.id).error_md).toMatch(new RegExp(`card #${left.cardId} está rodando nela`));
+    expect(git(repo, 'rev-parse', '--abbrev-ref', 'HEAD')).toBe(left.branch);
+
+    ctx.db.prepare("UPDATE executions SET status = 'done' WHERE id = ?").run(run);
+    fs.writeFileSync(path.join(repo, 'src', 'server.ts'), 'export const port = 1;\n');
+    publisher.retry(entry(card.id).id);
+    await publisher.whenIdle();
+    expect(entry(card.id).error_md).toMatch(/alterações não commitadas[\s\S]*src\/server\.ts/);
+    expect(git(repo, 'rev-parse', '--abbrev-ref', 'HEAD')).toBe(left.branch);
+
+    git(repo, 'checkout', '-q', '--', 'src/server.ts');
+    git(repo, 'checkout', '-q', '-b', 'feature/manual');
+    publisher.retry(entry(card.id).id);
+    await publisher.whenIdle();
+    expect(entry(card.id).error_md).toMatch(/está em `feature\/manual`[\s\S]*git checkout master/);
+    expect(git(repo, 'rev-parse', '--abbrev-ref', 'HEAD')).toBe('feature/manual');
+
+    // Back on a clean cb/* branch, "Tentar de novo" now publishes.
+    git(repo, 'checkout', '-q', left.branch);
+    publisher.retry(entry(card.id).id);
+    await publisher.whenIdle();
+    expect(entry(card.id).status).toBe('published');
+  });
+});
+
 describe('publication (D42)', () => {
   it('screen only: merges and builds the screen, keeps the worktree until approval, no hold and no restart', async () => {
     const { card, branch, wt } = cardWithBranch('Tela nova', {

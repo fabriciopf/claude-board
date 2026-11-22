@@ -507,8 +507,7 @@ export class Publisher {
     let applied = false;
     try {
       if (!repo) throw new PublishError('Não achei o repositório do Board (configure `selfRepoPath`).');
-      const head = git(repo, ['rev-parse', '--abbrev-ref', 'HEAD']);
-      if (!head.ok || head.out !== target) throw new PublishError(`O checkout principal \`${repo}\` está em \`${head.out}\`, não em \`${target}\`.`);
+      this.ensureOnTarget(repo, target);
       const origHead = git(repo, ['rev-parse', target]).out;
 
       // Classify each branch by what it changes relative to the publish branch.
@@ -678,6 +677,31 @@ export class Publisher {
     return list
       ? `O único conflito era a numeração do DECISIONS.md: renumerei ${list}. Referências a esse número no texto da entrada não mudaram.`
       : 'O único conflito era o fim do DECISIONS.md: as entradas novas entraram depois das da master.';
+  }
+
+  /**
+   * The main checkout must be on the publish branch. A card that runs without a worktree can leave
+   * it on its own `cb/<id>-*` branch (card #214), and then every publication failed the same way,
+   * "Tentar de novo" included (card #215). When the tree is clean and that card is not running, the
+   * switch loses nothing (the commits stay on the branch), so it is done here; otherwise the error
+   * says what to do.
+   */
+  private ensureOnTarget(repo: string, target: string): void {
+    const head = git(repo, ['rev-parse', '--abbrev-ref', 'HEAD']);
+    if (!head.ok) throw new PublishError(`Não consegui ler a branch do checkout principal \`${repo}\`: ${head.out}`);
+    const current = head.out;
+    if (current === target) return;
+    const where = `O checkout principal \`${repo}\` está em \`${current}\`, não em \`${target}\`.`;
+    const owner = /^cb\/(\d+)-/.exec(current);
+    if (!owner) throw new PublishError(`${where} Volte-o para a \`${target}\` (\`git checkout ${target}\`) e use "Tentar de novo".`);
+    const cardId = Number(owner[1]);
+    const running = this.ctx.db.prepare("SELECT 1 FROM executions WHERE card_id = ? AND status = 'running'").get(cardId);
+    if (running) throw new PublishError(`${where} O card #${cardId} está rodando nela; use "Tentar de novo" quando ele terminar.`);
+    const dirty = git(repo, ['status', '--porcelain', '--untracked-files=no']);
+    if (!dirty.ok || dirty.out) throw new PublishError(`${where} Ela tem alterações não commitadas:${fence(dirty.out)}\n\nFaça commit (ou descarte) e volte para a \`${target}\` antes de tentar de novo.`);
+    const sw = git(repo, ['checkout', target]);
+    if (!sw.ok) throw new PublishError(`${where} Não consegui voltar para a \`${target}\`:${fence(sw.out)}`);
+    this.log(`checkout principal voltou de ${current} para ${target}`);
   }
 
   /**
