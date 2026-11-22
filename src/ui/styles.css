@@ -1365,6 +1365,12 @@ textarea.input {
   font-weight: 600;
 }
 
+/* Tokens of the card's runs (card #204, D105): digits keep their width while a run makes the number grow. */
+.badge.tokens-badge {
+  font-variant-numeric: tabular-nums;
+  cursor: help;
+}
+
 /* Repository the card is about (D70): outlined monospace tag, so it does not read as a label or an app. */
 .repo-chip {
   display: inline-flex;
