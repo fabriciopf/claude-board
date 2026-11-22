@@ -609,6 +609,11 @@ export interface SelfUpdateState {
   checkedAt: string | null;
   /** The last check failed (network, authentication): why. */
   checkError: string | null;
+  /**
+   * A new commit that is neither signed by a trusted key (%G? = G) nor by an author of selfUpdateAuthors: why.
+   * In 'auto' the update then waits for the user, as in 'notify' (card #225). null when all are trusted.
+   */
+  untrusted: string | null;
   phase: SelfUpdatePhase;
   /** What the update is doing now, in words. */
   detail: string | null;

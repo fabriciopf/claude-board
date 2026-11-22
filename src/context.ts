@@ -51,6 +51,11 @@ export interface AppContext {
   selfUpdate?: SelfUpdateControl;
   /** Arguments of the running `dexm start`, reused by the restart after a publication. */
   startArgs?: string[];
+  /**
+   * Secret the REST API requires (card #218). Absent: buildApp draws one; null: no key, only for
+   * tests that drive the API directly. Kept in memory only, never in the runs' environment.
+   */
+  apiToken?: string | null;
   /** Graceful stop of the running server (same as Ctrl+C). */
   shutdown?: () => Promise<void>;
 }

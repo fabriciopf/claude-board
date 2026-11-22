@@ -14,6 +14,23 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * The REST API asks for the session cookie of this `dexm start` (card #218); a restart draws a new
+ * one, so the open tab answers 401 until it navigates again. Reloading gets the new cookie; at most
+ * once every 15 s, so a server that keeps refusing does not turn into a reload loop.
+ */
+export function renewSession(): void {
+  const key = 'dexm.sessionReload';
+  let last = 0;
+  try {
+    last = Number(sessionStorage.getItem(key) ?? 0);
+    sessionStorage.setItem(key, String(Date.now()));
+  } catch {
+    /* storage blocked: still reload once */
+  }
+  if (Date.now() - last > 15000) location.reload();
+}
+
 async function request<T>(method: string, url: string, body?: unknown): Promise<T> {
   const res = await fetch(url, {
     method,
@@ -22,6 +39,7 @@ async function request<T>(method: string, url: string, body?: unknown): Promise<
   });
   const text = await res.text();
   const data = text ? JSON.parse(text) : null;
+  if (res.status === 401 && data?.error === 'unauthorized') renewSession();
   if (!res.ok) throw new ApiError(data?.error ?? 'http_error', data?.message ?? `Erro ${res.status}`, res.status);
   return data as T;
 }
@@ -67,24 +85,49 @@ export function useServerEvents(onMessage: (msg: BusMessage) => void): void {
   const ref = useRef(onMessage);
   ref.current = onMessage;
   useEffect(() => {
-    const es = new EventSource('/api/events');
+    let es: EventSource | null = null;
+    let retry: ReturnType<typeof setTimeout> | undefined;
+    let closed = false;
     // Back after the server restarted (a publication, D42): reload what may have changed meanwhile.
     let dropped = false;
-    es.onerror = () => {
-      dropped = true;
+    const open = () => {
+      const source = new EventSource('/api/events');
+      es = source;
+      source.onerror = () => {
+        dropped = true;
+        // EventSource gives up for good on a non-200 answer, the 401 of a new start (card #218):
+        // find out why, and either renew the session or try again in a moment.
+        if (source.readyState !== EventSource.CLOSED || closed) return;
+        fetch('/api/ui-build')
+          .then(async (r) => {
+            if (r.status !== 401) return;
+            // `session_unavailable` (card #229) is the 401 a reload does not fix: leave the tab alone.
+            const data = await r.json().catch(() => null);
+            if (data?.error === 'unauthorized') renewSession();
+          })
+          .catch(() => undefined)
+          .finally(() => {
+            if (!closed) retry = setTimeout(open, 3000);
+          });
+      };
+      source.onopen = () => {
+        if (dropped) ref.current({ type: 'reconnected' });
+        dropped = false;
+      };
+      source.onmessage = (ev) => {
+        try {
+          ref.current(JSON.parse(ev.data));
+        } catch {
+          /* ignore malformed message */
+        }
+      };
     };
-    es.onopen = () => {
-      if (dropped) ref.current({ type: 'reconnected' });
-      dropped = false;
+    open();
+    return () => {
+      closed = true;
+      clearTimeout(retry);
+      es?.close();
     };
-    es.onmessage = (ev) => {
-      try {
-        ref.current(JSON.parse(ev.data));
-      } catch {
-        /* ignore malformed message */
-      }
-    };
-    return () => es.close();
   }, []);
 }
 

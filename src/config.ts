@@ -75,6 +75,11 @@ export interface Config {
   selfUpdate: SelfUpdateMode;
   /** Remote branch to follow, as remote/branch; '' = the upstream of the publish branch, else origin's default branch. */
   selfUpdateSource: string;
+  /**
+   * Who 'auto' trusts besides a valid signature (card #225): author e-mails, comma-separated. A commit
+   * applies on its own when it has a good signature from a trusted key (%G? = G) or its author is here; otherwise 'auto' acts as 'notify'.
+   */
+  selfUpdateAuthors: string;
 }
 
 export const DEFAULT_CONFIG: Config = {
@@ -121,7 +126,13 @@ export const DEFAULT_CONFIG: Config = {
   mirrorAutoMerge: true,
   selfUpdate: 'notify',
   selfUpdateSource: '',
+  selfUpdateAuthors: '',
 };
+
+/** The author e-mails of selfUpdateAuthors as a lowercase list. */
+export function authorList(value: string | null | undefined): string[] {
+  return [...new Set(String(value ?? '').split(/[,;\s]+/).map((a) => a.trim().toLowerCase()).filter(Boolean))];
+}
 
 /** The protected branches as a list; an empty setting falls back to the default. */
 export function protectedBranchList(value: string | null | undefined): string[] {
@@ -136,6 +147,18 @@ export function expandHome(p: string): string {
   if (p === '~') return os.homedir();
   if (p.startsWith('~/') || p.startsWith('~\\')) return path.join(os.homedir(), p.slice(2));
   return p;
+}
+
+const normPath = (p: string) => {
+  const r = path.resolve(p);
+  return process.platform === 'win32' ? r.toLowerCase() : r;
+};
+
+/** True when `child` is `parent` or a folder under it (resolved, case-insensitive on Windows). */
+export function isInside(child: string, parent: string): boolean {
+  const c = normPath(child);
+  const p = normPath(parent);
+  return c === p || c.startsWith(p.endsWith(path.sep) ? p : p + path.sep);
 }
 
 /**
@@ -237,6 +260,8 @@ export function saveConfig(current: Config, patch: Partial<Config>): Config {
   if (!SELF_UPDATE_MODES.includes(next.selfUpdate)) throw new Error('selfUpdate: use "off", "notify" ou "auto".');
   next.selfUpdateSource = String(next.selfUpdateSource ?? '').trim();
   if (next.selfUpdateSource && !/^[^\s/]+\/\S+$/.test(next.selfUpdateSource)) throw new Error('selfUpdateSource: use remoto/branch, como origin/main.');
+  next.selfUpdateAuthors = authorList(next.selfUpdateAuthors).join(', ');
+  if (authorList(next.selfUpdateAuthors).some((a) => !/^[^\s@,]+@[^\s@,]+$/.test(a))) throw new Error('selfUpdateAuthors: use e-mails separados por vírgula.');
   next.protectedBranches = protectedBranchList(next.protectedBranches).join(', ');
   next.jiraBaseUrl = String(next.jiraBaseUrl ?? '').trim().replace(/\/+$/, '');
   if (next.jiraBaseUrl && !/^https?:\/\//.test(next.jiraBaseUrl)) throw new Error('jiraBaseUrl: use uma URL http(s), como https://empresa.atlassian.net.');

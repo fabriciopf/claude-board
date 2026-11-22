@@ -1,4 +1,6 @@
+import path from 'node:path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { expandHome, isInside } from '../config.js';
 import { z } from 'zod';
 import type { AppContext } from '../context.js';
 import { nowIso } from '../db/index.js';
@@ -53,6 +55,40 @@ export function createMcpServer(ctx: AppContext, session: McpSession): McpServer
     const resolved = id ?? session.cardId;
     if (!resolved) throw new RuleError('card_required', 'Informe o id do card (esta sessão não está ligada a um card).', 400);
     return resolved;
+  };
+
+  /**
+   * Card a write tool may touch (card #221): a session started for a card (header x-dexm-card) only
+   * writes to that card and to its split tasks. Reads and card_create stay free; an interactive
+   * session (no header) writes anywhere, as before.
+   */
+  const writableCardId = (id?: number): number => {
+    const cardId = resolveCardId(id);
+    if (!session.cardId || cardId === session.cardId) return cardId;
+    if (s.getCard(cardId).parentId === session.cardId) return cardId;
+    throw new RuleError(
+      'not_own_card',
+      `Esta sessão é do card #${session.cardId}: ela só altera o próprio card e as tarefas dele (card_split), não o card #${cardId}. Para outro assunto, crie um card com card_create ou comente no seu card.`,
+      403,
+    );
+  };
+
+  /**
+   * repoPath sent by a card session (card #221): it says where the card's next run happens, so it
+   * must be a folder of the workspace or of a registered project. Interactive sessions are not limited.
+   */
+  const checkRepoPath = (repoPath: string | null | undefined): string | null | undefined => {
+    if (!session.cardId || repoPath == null || repoPath.trim() === '') return repoPath;
+    const abs = expandHome(repoPath.trim());
+    const roots = [ctx.config.workspaceDir, ...s.listApps(true).map((a) => a.path)]
+      .filter((r): r is string => Boolean(r))
+      .map((r) => path.resolve(expandHome(r)));
+    if (path.isAbsolute(abs) && roots.some((root) => isInside(abs, root))) return repoPath;
+    throw new RuleError(
+      'repo_path_outside',
+      `repoPath "${repoPath}" recusado: de uma execução, só vale um caminho absoluto dentro do workspace ou de um projeto cadastrado${roots.length ? ` (${roots.join(', ')})` : ' (nenhum configurado)'}.`,
+      403,
+    );
   };
 
   const resolveApp = (app?: string | number | null): number | null | undefined => {
@@ -262,7 +298,7 @@ export function createMcpServer(ctx: AppContext, session: McpSession): McpServer
             repositoryIds: args.repositories ? s.resolveRepositories(args.repositories) : [],
             owner,
             status: args.status === 'ready' ? 'backlog' : args.status,
-            repoPath: args.repoPath,
+            repoPath: checkRepoPath(args.repoPath),
             dueDate: args.dueDate,
             priority: args.priority,
             model: args.model,
@@ -302,7 +338,7 @@ export function createMcpServer(ctx: AppContext, session: McpSession): McpServer
     },
     (args) =>
       guard(() => {
-        const cardId = resolveCardId(args.id);
+        const cardId = writableCardId(args.id);
         // Resolved before any write, so an unknown name leaves the card untouched.
         const repositoryIds = args.repositories ? s.resolveRepositories(args.repositories) : undefined;
         let card = s.updateCard(
@@ -313,7 +349,7 @@ export function createMcpServer(ctx: AppContext, session: McpSession): McpServer
             priority: args.priority,
             dueDate: args.dueDate,
             appId: resolveApp(args.app),
-            repoPath: args.repoPath,
+            repoPath: checkRepoPath(args.repoPath),
             model: args.model,
             effort: args.effort,
             agent: args.agent,
@@ -334,7 +370,7 @@ export function createMcpServer(ctx: AppContext, session: McpSession): McpServer
     },
     (args) =>
       guard(() => {
-        const card = s.renameForSession(resolveCardId(args.id), args.name, 'claude');
+        const card = s.renameForSession(writableCardId(args.id), args.name, 'claude');
         return ok({ renamed: compact(card), originalTitle: card.originalTitle });
       }),
   );
@@ -348,7 +384,7 @@ export function createMcpServer(ctx: AppContext, session: McpSession): McpServer
     },
     (args) =>
       guard(() => {
-        const id = resolveCardId(args.id);
+        const id = writableCardId(args.id);
         const card = s.moveCard(id, { status: args.status, reason: args.reason }, 'claude');
         if (card.status === 'ready') ctx.runner?.nudge();
         return ok({ moved: compact(card) });
@@ -363,7 +399,7 @@ export function createMcpServer(ctx: AppContext, session: McpSession): McpServer
     },
     (args) =>
       guard(() => {
-        const id = resolveCardId(args.id);
+        const id = writableCardId(args.id);
         s.addComment(id, { author: 'claude', bodyMd: args.text, kind: 'comment', executionId: ownExecution(id)?.id ?? null });
         return ok('Comentário registrado.');
       }),
@@ -377,7 +413,7 @@ export function createMcpServer(ctx: AppContext, session: McpSession): McpServer
     },
     (args) =>
       guard(() => {
-        const id = resolveCardId(args.id);
+        const id = writableCardId(args.id);
         const added = args.items.map((text) => s.addChecklistItem(id, text, 'claude'));
         return ok({ added: added.map((i) => ({ id: i.id, text: i.text })) });
       }),
@@ -395,7 +431,7 @@ export function createMcpServer(ctx: AppContext, session: McpSession): McpServer
     },
     (args) =>
       guard(() => {
-        const id = resolveCardId(args.id);
+        const id = writableCardId(args.id);
         const item = s.findChecklistItem(id, args.item);
         const updated = s.updateChecklistItem(item.id, { done: args.done ?? true }, 'claude');
         return ok({ item: { id: updated.id, text: updated.text, done: updated.done } });
@@ -415,7 +451,7 @@ export function createMcpServer(ctx: AppContext, session: McpSession): McpServer
     },
     (args) =>
       guard(() => {
-        const card = s.addLink(resolveCardId(args.id), { kind: args.kind, value: args.value, title: args.title }, 'claude');
+        const card = s.addLink(writableCardId(args.id), { kind: args.kind, value: args.value, title: args.title }, 'claude');
         return ok({ links: card.links });
       }),
   );
@@ -433,7 +469,7 @@ export function createMcpServer(ctx: AppContext, session: McpSession): McpServer
     },
     (args) =>
       guard(() => {
-        const id = resolveCardId(args.id);
+        const id = writableCardId(args.id);
         const unread = inboxBeforeEnding(id, 'card_ask_user');
         if (unread) return unread;
         const exec = ownExecution(id);
@@ -450,7 +486,7 @@ export function createMcpServer(ctx: AppContext, session: McpSession): McpServer
     },
     (args) =>
       guard(() => {
-        const id = resolveCardId(args.id);
+        const id = writableCardId(args.id);
         const unread = inboxBeforeEnding(id, 'card_wait_third_party');
         if (unread) return unread;
         s.addComment(id, { author: 'claude', bodyMd: `Aguardando terceiro: ${args.reason}`, kind: 'comment', executionId: ownExecution(id)?.id ?? null });
@@ -484,7 +520,7 @@ export function createMcpServer(ctx: AppContext, session: McpSession): McpServer
     },
     (args) =>
       guard(() => {
-        const id = resolveCardId(args.id);
+        const id = writableCardId(args.id);
         // An execution may only split the card it was started for (D34).
         if (session.executionId && id !== session.cardId) {
           throw new RuleError('not_own_card', 'Uma execução só divide o próprio card.', 403);
@@ -609,7 +645,7 @@ export function createMcpServer(ctx: AppContext, session: McpSession): McpServer
     },
     (args) =>
       guard(() => {
-        const id = resolveCardId(args.id);
+        const id = writableCardId(args.id);
         const unread = inboxBeforeEnding(id, 'card_submit_for_review');
         if (unread) return unread;
         const exec = ownExecution(id);

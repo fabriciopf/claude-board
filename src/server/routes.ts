@@ -313,7 +313,7 @@ export async function registerApi(app: FastifyInstance, ctx: AppContext): Promis
     }
     // Turning the update on, or pointing it at another branch, checks right away instead of in hours (D89).
     const c = ctx.config;
-    const updateChanged = c.selfUpdate !== before.selfUpdate || c.selfUpdateSource !== before.selfUpdateSource || c.mirrorRepoPath !== before.mirrorRepoPath;
+    const updateChanged = c.selfUpdate !== before.selfUpdate || c.selfUpdateSource !== before.selfUpdateSource || c.selfUpdateAuthors !== before.selfUpdateAuthors || c.mirrorRepoPath !== before.mirrorRepoPath;
     if (updateChanged && c.selfUpdate !== 'off') void ctx.selfUpdate?.check().catch(() => undefined);
     else if (updateChanged) ctx.bus.publish({ type: 'self-update.changed' });
     ctx.runner?.reschedule?.();

@@ -16,7 +16,7 @@ it('sending a card to Claude starts it right away, without waiting for the heart
   ctx.config.port = (app.server.address() as { port: number }).port;
   runner.start();
   const card = ctx.service.createCard({ title: 'x', descriptionMd: '[fake:success]' }, 'user', 'manual');
-  const res = await app.inject({ method: 'POST', url: `/api/cards/${card.id}/send-to-claude` });
+  const res = await app.inject({ method: 'POST', url: `/api/cards/${card.id}/send-to-claude`, payload: {} });
   expect(res.statusCode).toBe(200);
   await new Promise((r) => setTimeout(r, 1000));
   expect(['running', 'review']).toContain(ctx.service.getCard(card.id).status);

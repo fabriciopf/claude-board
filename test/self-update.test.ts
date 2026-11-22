@@ -306,7 +306,7 @@ describe('applying the update (D89)', () => {
 
 describe('automatic mode (D89)', () => {
   it('applies a new version on its own, and does not retry one that failed', async () => {
-    ctx.config = { ...ctx.config, selfUpdate: 'auto' };
+    ctx.config = { ...ctx.config, selfUpdate: 'auto', selfUpdateAuthors: 'test@example.com' };
     const sha = push({ 'src/ui/App.tsx': 'export const title = "v2";\n' });
     updater.close();
     updater = newUpdater({ firstCheckMs: 1, checkEveryMs: 40 });
@@ -327,7 +327,7 @@ describe('automatic mode (D89)', () => {
   });
 
   it('starts right away from "Verificar agora" in automatic mode', async () => {
-    ctx.config = { ...ctx.config, selfUpdate: 'auto' };
+    ctx.config = { ...ctx.config, selfUpdate: 'auto', selfUpdateAuthors: 'test@example.com' };
     const sha = push({ 'src/ui/App.tsx': 'export const title = "v3";\n' });
     await updater.check();
     expect(updater.isBusy()).toBe(true);
@@ -343,5 +343,109 @@ describe('automatic mode (D89)', () => {
     updater.schedule();
     await new Promise((r) => setTimeout(r, 200));
     expect(updater.state().checkedAt).toBeNull();
+  });
+});
+
+describe('automatic mode only applies commits it can trust (card #225)', () => {
+  const hasSshKeygen = spawnSync('ssh-keygen', ['-?'], { windowsHide: true }).error === undefined;
+
+  /** An SSH key that signs commits in `dir`; `trusted` puts it in the install's allowed signers. */
+  function signWith(dir: string, name: string, trusted: boolean): void {
+    const key = path.join(root, name);
+    const r = spawnSync('ssh-keygen', ['-q', '-t', 'ed25519', '-N', '', '-C', name, '-f', key], { windowsHide: true });
+    if (r.status !== 0) throw new Error(`ssh-keygen: ${r.stderr}`);
+    git(dir, 'config', 'gpg.format', 'ssh');
+    git(dir, 'config', 'user.signingkey', key);
+    git(dir, 'config', 'commit.gpgsign', 'true');
+    const allowed = path.join(root, 'allowed_signers');
+    if (trusted) fs.appendFileSync(allowed, `test@example.com namespaces="git" ${fs.readFileSync(`${key}.pub`, 'utf8').trim()}\n`);
+    else if (!fs.existsSync(allowed)) fs.writeFileSync(allowed, '');
+    git(board, 'config', 'gpg.ssh.allowedSignersFile', allowed);
+  }
+
+  const auto = (authors = '') => {
+    ctx.config = { ...ctx.config, selfUpdate: 'auto', selfUpdateAuthors: authors };
+  };
+
+  it.skipIf(!hasSshKeygen)('applies a version whose commits are signed with a key the install trusts', async () => {
+    signWith(dev, 'maintainer', true);
+    auto();
+    const sha = push({ 'src/ui/App.tsx': 'export const title = "assinado";\n' });
+    const s = await updater.check();
+    expect(s.untrusted).toBeNull();
+    expect(updater.isBusy()).toBe(true);
+    await updater.whenIdle();
+    expect(head()).toBe(sha);
+  });
+
+  it('applies an unsigned commit whose author is in the list', async () => {
+    auto('Outro@Example.com, TEST@example.com');
+    const sha = push({ 'src/ui/App.tsx': 'export const title = "autor aceito";\n' });
+    expect((await updater.check()).untrusted).toBeNull();
+    await updater.whenIdle();
+    expect(head()).toBe(sha);
+  });
+
+  it('falls back to notify for an unsigned commit by an author outside the list', async () => {
+    auto('outro@example.com');
+    const before = head();
+    const sha = push({ 'src/ui/App.tsx': 'export const title = "sem assinatura";\n' }, 'feat: sem assinatura');
+    const s = await updater.check();
+    expect(s.untrusted).toMatch(/não tem assinatura válida/);
+    expect(s.untrusted).toContain(sha.slice(0, 7));
+    expect(s.untrusted).toContain('test@example.com');
+    expect(updater.isBusy()).toBe(false);
+    await new Promise((r) => setTimeout(r, 100));
+    expect(head()).toBe(before);
+    expect(s.failure).toBeNull();
+    // As in notify, "Atualizar" is the user's decision and still applies it.
+    await applyNow();
+    expect(head()).toBe(sha);
+  });
+
+  it('refuses an unsigned commit when the list is empty, and the scheduled checks do not start it either', async () => {
+    auto();
+    const before = head();
+    push({ 'src/ui/App.tsx': 'export const title = "v2";\n' });
+    updater.close();
+    updater = newUpdater({ firstCheckMs: 1, checkEveryMs: 30 });
+    ctx.selfUpdate = updater;
+    updater.schedule();
+    await vi.waitFor(() => expect(updater.state().untrusted).toBeTruthy(), { timeout: 5000, interval: 20 });
+    await new Promise((r) => setTimeout(r, 200));
+    expect(updater.isBusy()).toBe(false);
+    expect(head()).toBe(before);
+  });
+
+  it.skipIf(!hasSshKeygen)('refuses a commit signed with a key the install does not trust', async () => {
+    signWith(dev, 'stranger', false);
+    auto();
+    const before = head();
+    push({ 'src/ui/App.tsx': 'export const title = "chave estranha";\n' });
+    expect((await updater.check()).untrusted).toMatch(/não tem assinatura válida/);
+    expect(updater.isBusy()).toBe(false);
+    expect(head()).toBe(before);
+  });
+
+  it.skipIf(!hasSshKeygen)('checks every new commit, not only the newest', async () => {
+    const before = head();
+    const unsigned = push({ 'README.md': 'sem assinatura\n' }, 'docs: sem assinatura');
+    signWith(dev, 'maintainer', true);
+    push({ 'src/ui/App.tsx': 'export const title = "assinado por cima";\n' });
+    auto();
+    const s = await updater.check();
+    expect(s.untrusted).toContain(unsigned.slice(0, 7));
+    expect(updater.isBusy()).toBe(false);
+    expect(head()).toBe(before);
+  });
+
+  it('does not check signatures in notify mode', async () => {
+    push({ 'src/ui/App.tsx': 'export const title = "v2";\n' });
+    expect((await updater.check()).untrusted).toBeNull();
+  });
+
+  it('validates and normalizes the author list', () => {
+    expect(saveConfig(ctx.config, { selfUpdateAuthors: ' A@x.com ;b@y.org  a@x.com ' }).selfUpdateAuthors).toBe('a@x.com, b@y.org');
+    expect(() => saveConfig(ctx.config, { selfUpdateAuthors: 'fulano' })).toThrow(/e-mails/);
   });
 });

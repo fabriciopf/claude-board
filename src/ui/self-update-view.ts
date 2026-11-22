@@ -42,7 +42,7 @@ export function selfUpdateView(s: SelfUpdateState | null, dismissedSha: string |
     kind: 'available',
     level: 'info',
     label: t('app.selfUpdate.availableLabel'),
-    text: `${changes(s.behind)}${where}.${s.mode === 'auto' ? ` ${t('app.selfUpdate.autoSoon')}` : ''}`,
+    text: `${changes(s.behind)}${where}.${s.mode !== 'auto' ? '' : s.untrusted ? ` ${t('app.selfUpdate.autoBlocked')}` : ` ${t('app.selfUpdate.autoSoon')}`}`,
   };
 }
 

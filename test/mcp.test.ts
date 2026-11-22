@@ -153,30 +153,28 @@ describe('MCP over HTTP', () => {
     expect(queued.status).toBe('ready');
     expect(ctx.service.getCard(queued.id).owner).toBe('claude');
 
-    const other = ctx.service.createCard({ title: 'Outro', owner: 'claude' }, 'user', 'manual');
-    const moved = await c.callTool({ name: 'card_move', arguments: { id: other.id, status: 'ready' } });
-    expect(moved.isError).toBeFalsy();
-    expect(ctx.service.getCard(other.id).status).toBe('ready');
-
     const own = await c.callTool({ name: 'card_move', arguments: { status: 'ready' } });
     expect(own.isError).toBe(true);
     expect(text(own)).toMatch(/card_running/);
-
-    // A card of the user enters the queue and stays with the user (D86).
-    const users = ctx.service.createCard({ title: 'Do usuário', owner: 'user' }, 'user', 'manual');
-    const queuedUsers = await c.callTool({ name: 'card_move', arguments: { id: users.id, status: 'ready' } });
-    expect(queuedUsers.isError).toBeFalsy();
-    expect(ctx.service.getCard(users.id)).toMatchObject({ status: 'ready', owner: 'user' });
 
     // Claude creates cards as their owner, unless it says the task is the user's; it never changes the owner later.
     const plain = JSON.parse(text(await c.callTool({ name: 'card_create', arguments: { title: 'Criado pelo Claude' } }))).created;
     expect(ctx.service.getCard(plain.id).owner).toBe('claude');
     const forUser = JSON.parse(text(await c.callTool({ name: 'card_create', arguments: { title: 'Tarefa sua', owner: 'user' } }))).created;
     expect(ctx.service.getCard(forUser.id).owner).toBe('user');
-    const update = await c.callTool({ name: 'card_update', arguments: { id: users.id, owner: 'claude', title: 'Renomeado' } });
+    await c.close();
+
+    // Moving another card is for interactive sessions now: a run only writes to its own card (card #221).
+    // A card of the user enters the queue and stays with the user (D86).
+    const interactive = await client();
+    const users = ctx.service.createCard({ title: 'Do usuário', owner: 'user' }, 'user', 'manual');
+    const queuedUsers = await interactive.callTool({ name: 'card_move', arguments: { id: users.id, status: 'ready' } });
+    expect(queuedUsers.isError).toBeFalsy();
+    expect(ctx.service.getCard(users.id)).toMatchObject({ status: 'ready', owner: 'user' });
+    const update = await interactive.callTool({ name: 'card_update', arguments: { id: users.id, owner: 'claude', title: 'Renomeado' } });
     expect(update.isError).toBeFalsy();
     expect(ctx.service.getCard(users.id)).toMatchObject({ title: 'Renomeado', owner: 'user' });
-    await c.close();
+    await interactive.close();
   });
 
   it('card_split queues one card per task; inside an execution it only splits its own card', async () => {
@@ -215,6 +213,118 @@ describe('MCP over HTTP', () => {
     expect(text(refused)).toMatch(/not_own_card/);
     expect(ctx.service.getCardDetail(victim.id).subtasks).toEqual([]);
     await inRun.close();
+  });
+
+  describe('a run writes only to its own card (card #221)', () => {
+    const runFor = (cardId: number) => {
+      const exec = ctx.db.prepare("INSERT INTO executions (card_id, started_at, status) VALUES (?, ?, 'running')").run(cardId, new Date().toISOString());
+      return client({ 'x-dexm-card': String(cardId), 'x-dexm-execution': String(exec.lastInsertRowid) });
+    };
+
+    it('card_update on card B from the run of card A is refused; on A it passes', async () => {
+      const a = ctx.service.createCard({ title: 'Card A', owner: 'claude' }, 'user', 'manual');
+      const b = ctx.service.createCard({ title: 'Card B', owner: 'claude' }, 'user', 'manual');
+      const c = await runFor(a.id);
+      const refused = await c.callTool({ name: 'card_update', arguments: { id: b.id, title: 'Invadido' } });
+      expect(refused.isError).toBe(true);
+      expect(text(refused)).toMatch(/not_own_card/);
+      expect(ctx.service.getCard(b.id).title).toBe('Card B');
+      const passed = await c.callTool({ name: 'card_update', arguments: { id: a.id, title: 'A editado' } });
+      expect(passed.isError).toBeFalsy();
+      expect(ctx.service.getCard(a.id).title).toBe('A editado');
+      await c.close();
+    });
+
+    it('refuses every write tool on another card, and keeps reads and card_create free', async () => {
+      const a = ctx.service.createCard({ title: 'Dono', owner: 'claude' }, 'user', 'manual');
+      const b = ctx.service.createCard({ title: 'Alheio 221', owner: 'claude' }, 'user', 'manual');
+      ctx.service.addChecklistItem(b.id, 'item de B', 'user');
+      const c = await runFor(a.id);
+      const calls: [string, Record<string, unknown>][] = [
+        ['card_update', { title: 'x' }],
+        ['card_rename', { name: 'x' }],
+        ['card_move', { status: 'ready' }],
+        ['card_comment', { text: 'x' }],
+        ['card_checklist_add', { items: ['x'] }],
+        ['card_checklist_check', { item: 'item de B' }],
+        ['card_link', { kind: 'url', value: 'https://example.com' }],
+        ['card_ask_user', { question: 'x' }],
+        ['card_wait_third_party', { reason: 'x' }],
+        ['card_submit_for_review', { summary: 'x' }],
+        ['card_split', { tasks: [{ title: 'a', description: 'a' }, { title: 'b', description: 'b' }] }],
+      ];
+      for (const [name, args] of calls) {
+        const r = await c.callTool({ name, arguments: { id: b.id, ...args } });
+        expect(r.isError, name).toBe(true);
+        expect(text(r), name).toMatch(/not_own_card/);
+      }
+      const d = ctx.service.getCardDetail(b.id);
+      expect(d.card).toMatchObject({ title: 'Alheio 221', status: 'backlog', links: [] });
+      expect(d.comments).toEqual([]);
+      expect(d.checklist.map((i) => [i.text, i.done])).toEqual([['item de B', false]]);
+      expect(d.subtasks).toEqual([]);
+
+      expect((await c.callTool({ name: 'card_get', arguments: { id: b.id } })).isError).toBeFalsy();
+      expect((await c.callTool({ name: 'board_list_cards', arguments: { text: 'Alheio 221' } })).isError).toBeFalsy();
+      expect((await c.callTool({ name: 'card_create', arguments: { title: 'Novo pela execução' } })).isError).toBeFalsy();
+      await c.close();
+    });
+
+    it('lets the run write to the tasks of its own split, not the other way round', async () => {
+      const a = ctx.service.createCard({ title: 'Mãe', owner: 'claude' }, 'user', 'manual');
+      const { children } = ctx.service.splitCard(a.id, { tasks: [{ title: 'T1', description: 'd' }, { title: 'T2', description: 'd' }] }, 'claude');
+      const c = await runFor(a.id);
+      const r = await c.callTool({ name: 'card_comment', arguments: { id: children[0].id, text: 'da mãe para a tarefa' } });
+      expect(r.isError).toBeFalsy();
+      expect(ctx.service.getCardDetail(children[0].id).comments.map((x) => x.bodyMd)).toContain('da mãe para a tarefa');
+      await c.close();
+      const t = await runFor(children[1].id);
+      const up = await t.callTool({ name: 'card_comment', arguments: { id: a.id, text: 'da tarefa para a mãe' } });
+      expect(text(up)).toMatch(/not_own_card/);
+      await t.close();
+    });
+
+    it('an interactive session (no header) still writes to any card, repoPath included', async () => {
+      const b = ctx.service.createCard({ title: 'Livre', owner: 'claude' }, 'user', 'manual');
+      const c = await client();
+      const outside = path.join(ctx.home, 'fora');
+      const r = await c.callTool({ name: 'card_update', arguments: { id: b.id, title: 'Livre editado', repoPath: outside } });
+      expect(r.isError).toBeFalsy();
+      expect(ctx.service.getCard(b.id)).toMatchObject({ title: 'Livre editado', repoPath: outside });
+      await c.close();
+    });
+
+    it('repoPath from a run must be inside the workspace or a registered project', async () => {
+      const workspace = path.join(ctx.home, 'ws');
+      const project = path.join(ctx.home, 'projeto-solto');
+      fs.mkdirSync(workspace, { recursive: true });
+      fs.mkdirSync(project, { recursive: true });
+      const previous = ctx.config.workspaceDir;
+      ctx.config.workspaceDir = workspace;
+      ctx.service.createApp({ name: 'Projeto solto 221', path: project });
+      try {
+        const a = ctx.service.createCard({ title: 'Com repo', owner: 'claude' }, 'user', 'manual');
+        const c = await runFor(a.id);
+        for (const bad of [path.join(ctx.home, 'outro'), path.join(workspace, '..', 'fuga'), workspace + '-irmao', 'relativo/pasta']) {
+          const r = await c.callTool({ name: 'card_update', arguments: { repoPath: bad } });
+          expect(text(r), bad).toMatch(/repo_path_outside/);
+        }
+        const created = await c.callTool({ name: 'card_create', arguments: { title: 'Fora 221', repoPath: path.join(ctx.home, 'outro') } });
+        expect(text(created)).toMatch(/repo_path_outside/);
+        expect(ctx.service.listCards({ text: 'Fora 221' })).toEqual([]);
+        expect(ctx.service.getCard(a.id).repoPath).toBeNull();
+
+        for (const good of [path.join(workspace, 'hdb'), workspace, path.join(project, 'sub')]) {
+          const r = await c.callTool({ name: 'card_update', arguments: { repoPath: good } });
+          expect(r.isError, good).toBeFalsy();
+          expect(ctx.service.getCard(a.id).repoPath).toBe(good);
+        }
+        expect((await c.callTool({ name: 'card_update', arguments: { repoPath: null } })).isError).toBeFalsy();
+        await c.close();
+      } finally {
+        ctx.config.workspaceDir = previous;
+      }
+    });
   });
 
   it('refuses requests whose Host is not loopback (DNS rebinding)', async () => {

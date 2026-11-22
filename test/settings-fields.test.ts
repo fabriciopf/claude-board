@@ -30,6 +30,7 @@ describe('settings tabs', () => {
         'prPolicy',
         'protectedBranches',
         'selfUpdate',
+        'selfUpdateAuthors',
         'selfUpdateSource',
         'transcriptRetentionDays',
         'userProfile',

@@ -64,7 +64,7 @@ describe('"not seen yet" mark on cards in review', () => {
     const messages: { type: string; cardId?: number }[] = [];
     ctx.bus.subscribe((m) => messages.push(m));
     const app = await buildApp(ctx, { serveUi: false });
-    const res = await app.inject({ method: 'POST', url: `/api/cards/${id}/seen` });
+    const res = await app.inject({ method: 'POST', url: `/api/cards/${id}/seen`, payload: {} });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({ cleared: true });
     expect(messages.some((m) => m.type === 'card.changed' && m.cardId === id)).toBe(true);

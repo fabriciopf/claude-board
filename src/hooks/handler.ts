@@ -1,4 +1,4 @@
-import path from 'node:path';
+import { isInside } from '../config.js';
 import type { AppContext } from '../context.js';
 import { nowIso } from '../db/index.js';
 import { STATUS_LABELS, type Card } from '../shared/domain.js';
@@ -10,17 +10,6 @@ export interface HookInput {
   cwd?: string;
   hook_event_name?: string;
   source?: string;
-}
-
-const norm = (p: string) => {
-  const r = path.resolve(p);
-  return process.platform === 'win32' ? r.toLowerCase() : r;
-};
-
-function isInside(child: string, parent: string): boolean {
-  const c = norm(child);
-  const p = norm(parent);
-  return c === p || c.startsWith(p + path.sep);
 }
 
 /** The card an interactive session belongs to: same Claude session, or a cwd inside the card's worktree. */

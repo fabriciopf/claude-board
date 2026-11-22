@@ -6,7 +6,7 @@ import type { AppContext, SelfUpdateControl } from '../context.js';
 import { nowIso } from '../db/index.js';
 import { RuleError } from '../service/rules.js';
 import type { SelfUpdateCommit, SelfUpdatePhase, SelfUpdateState } from '../shared/domain.js';
-import { expandHome } from '../config.js';
+import { authorList, expandHome } from '../config.js';
 import { canonicalDir, git, linkDir, repoRoot, runCommand, samePath, syncDir, type CmdResult } from './git.js';
 import { DEFAULT_COMMANDS, isScreenOnly, type Publisher, type PublishCommands } from './publisher.js';
 import { isBoardEnvKey } from '../shared/brand.js';
@@ -25,6 +25,11 @@ import { countTestFiles, progressDetail, testProgress } from './test-progress.js
  * Commits made here (the Board improving itself, D42) are kept: when the install has commits the
  * remote does not, the remote branch is merged into the local one and the tests run before applying.
  * A conflict aborts with the list of files.
+ *
+ * 'auto' runs code from the remote with nobody looking, so it only does that for commits it can trust
+ * (card #225): every new commit, merges included, needs a good signature from a trusted key (%G? = G:
+ * a key in gpg.ssh.allowedSignersFile, or a gpg key with full trust) or an author in selfUpdateAuthors. One
+ * commit that fails turns that version into a 'notify' one: the strip waits for "Atualizar".
  */
 
 const PACKAGE_FILES = ['package.json', 'package-lock.json'];
@@ -55,6 +60,30 @@ interface Source {
   branch: string;
   /** remote/branch */
   ref: string;
+}
+
+/**
+ * Only a good signature from a trusted key counts. 'U' is not enough: with SSH it is what git reports
+ * for a key outside gpg.ssh.allowedSignersFile ("No principal matched"), so any key would pass (measured).
+ */
+const GOOD_SIGNATURE = ['G'];
+
+/**
+ * Why the commits in `range` cannot be applied without the user, or null when each one is signed with
+ * a key git verifies or was authored by one of `authors` (card #225).
+ */
+export function untrustedReason(repo: string, range: string, authors: string[]): string | null {
+  const log = git(repo, ['log', '--format=%H%x1f%G?%x1f%ae%x1f%s', range]);
+  if (!log.ok) return `não consegui conferir as assinaturas de ${range}: ${log.out}`;
+  const bad = log.out
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => line.split('\x1f'))
+    .filter(([, sig, email]) => !GOOD_SIGNATURE.includes(sig) && !authors.includes((email ?? '').toLowerCase()));
+  if (!bad.length) return null;
+  const [sha, , email, subject] = bad[0];
+  const more = bad.length > 1 ? ` e mais ${bad.length - 1} commit(s)` : '';
+  return `o commit ${sha.slice(0, 7)} ("${subject}", de ${email})${more} não tem assinatura válida e o autor não está em "Autores aceitos na atualização automática". Confira as novidades e use Atualizar.`;
 }
 
 /** Web page of the commits of a GitHub remote, or null for any other host. */
@@ -125,8 +154,10 @@ export class SelfUpdater implements SelfUpdateControl {
   private checking: Promise<SelfUpdateState> | null = null;
   private timers: NodeJS.Timeout[] = [];
   private retryTimer: NodeJS.Timeout | null = null;
+  /** Last version 'auto' left for the user, so the log says it once. */
+  private blockedSha: string | null = null;
   private recheckTimer: NodeJS.Timeout | null = null;
-  private last: Pick<SelfUpdateState, 'source' | 'sourceUrl' | 'behind' | 'ahead' | 'commits' | 'remoteSha' | 'checkedAt' | 'checkError' | 'unavailable'> = {
+  private last: Pick<SelfUpdateState, 'source' | 'sourceUrl' | 'behind' | 'ahead' | 'commits' | 'remoteSha' | 'checkedAt' | 'checkError' | 'unavailable' | 'untrusted'> = {
     source: null,
     sourceUrl: null,
     behind: 0,
@@ -136,6 +167,7 @@ export class SelfUpdater implements SelfUpdateControl {
     checkedAt: null,
     checkError: null,
     unavailable: null,
+    untrusted: null,
   };
   private commands: PublishCommands;
   private run: NonNullable<SelfUpdaterOptions['run']>;
@@ -199,6 +231,12 @@ export class SelfUpdater implements SelfUpdateControl {
     const s = this.state();
     if (s.unavailable || !s.behind || !s.remoteSha) return;
     if (s.failure?.sha === s.remoteSha) return;
+    if (s.untrusted) {
+      // Falls back to 'notify': the strip offers "Atualizar" and the user decides.
+      if (this.blockedSha !== s.remoteSha) this.log(`atualização automática esperando o usuário: ${s.untrusted}`);
+      this.blockedSha = s.remoteSha;
+      return;
+    }
     if (this.publisher.isBusy()) {
       // A publication is applying; try again in a few minutes instead of waiting for the next check.
       if (!this.retryTimer) {
@@ -211,7 +249,7 @@ export class SelfUpdater implements SelfUpdateControl {
       return;
     }
     this.log(`atualização automática para ${s.remoteSha.slice(0, 7)}`);
-    this.launch();
+    this.launch(true);
   }
 
   // ---------- state ----------
@@ -313,7 +351,7 @@ export class SelfUpdater implements SelfUpdateControl {
     const repo = this.publisher.selfRepo();
     // An unavailable install shows only why: no stale fetch error or count from an earlier check.
     const unavailableState = (unavailable: string) => {
-      this.last = { unavailable, source: null, sourceUrl: null, behind: 0, ahead: 0, commits: [], remoteSha: null, checkedAt: nowIso(), checkError: null };
+      this.last = { unavailable, source: null, sourceUrl: null, behind: 0, ahead: 0, commits: [], remoteSha: null, checkedAt: nowIso(), checkError: null, untrusted: null };
       this.changed();
       return this.state();
     };
@@ -354,10 +392,10 @@ export class SelfUpdater implements SelfUpdateControl {
   }
 
   /** Commits on each side of the local branch and the remote ref (no network). */
-  private compare(repo: string, ref: string): Pick<SelfUpdateState, 'behind' | 'ahead' | 'commits' | 'remoteSha'> {
+  private compare(repo: string, ref: string): Pick<SelfUpdateState, 'behind' | 'ahead' | 'commits' | 'remoteSha' | 'untrusted'> {
     const local = this.ctx.config.publishBranch;
     const remoteSha = git(repo, ['rev-parse', '--verify', '--quiet', ref]);
-    if (!remoteSha.ok) return { behind: 0, ahead: 0, commits: [], remoteSha: null };
+    if (!remoteSha.ok) return { behind: 0, ahead: 0, commits: [], remoteSha: null, untrusted: null };
     const count = (range: string) => Number(git(repo, ['rev-list', '--count', range]).out) || 0;
     const behind = count(`${local}..${ref}`);
     const ahead = count(`${ref}..${local}`);
@@ -371,7 +409,9 @@ export class SelfUpdater implements SelfUpdateControl {
             return { sha, subject, date };
           })
       : [];
-    return { behind, ahead, commits, remoteSha: remoteSha.out };
+    // Only 'auto' needs it, and %G? runs gpg or ssh-keygen once per commit.
+    const untrusted = behind && this.ctx.config.selfUpdate === 'auto' ? untrustedReason(repo, `${local}..${ref}`, authorList(this.ctx.config.selfUpdateAuthors)) : null;
+    return { behind, ahead, commits, remoteSha: remoteSha.out, untrusted };
   }
 
   // ---------- apply ----------
@@ -385,9 +425,9 @@ export class SelfUpdater implements SelfUpdateControl {
     this.launch();
   }
 
-  private launch(): void {
+  private launch(auto = false): void {
     if (this.busy) return;
-    this.busy = this.apply()
+    this.busy = this.apply(auto)
       .catch((err) => this.log(`erro interno: ${(err as Error).stack ?? err}`))
       .finally(() => {
         this.busy = null;
@@ -399,7 +439,7 @@ export class SelfUpdater implements SelfUpdateControl {
       });
   }
 
-  private async apply(): Promise<void> {
+  private async apply(auto: boolean): Promise<void> {
     const repo = this.publisher.selfRepo();
     const local = this.ctx.config.publishBranch;
     let tmp: string | null = null;
@@ -413,6 +453,12 @@ export class SelfUpdater implements SelfUpdateControl {
       if (fresh.checkError) throw new UpdateError(fresh.checkError);
       if (!fresh.behind || !fresh.remoteSha || !fresh.source) {
         this.log('nada novo');
+        return;
+      }
+      // The remote may have moved since the check that started this: an automatic update re-checks trust on what it will merge.
+      if (auto && fresh.untrusted) {
+        this.log(`atualização automática esperando o usuário: ${fresh.untrusted}`);
+        this.blockedSha = fresh.remoteSha;
         return;
       }
       target = fresh.remoteSha;

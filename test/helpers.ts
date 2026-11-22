@@ -22,5 +22,6 @@ export function makeContext(overrides: Partial<Config> = {}): AppContext & { hom
   const service = new BoardService(db, bus);
   service.seed();
   const config: Config = { ...DEFAULT_CONFIG, ...overrides };
-  return { db, bus, service, config, home, usage: new UsageTracker(service, bus) };
+  // apiToken null: these tests drive the REST API directly; test/session.test.ts covers the key.
+  return { db, bus, service, config, home, usage: new UsageTracker(service, bus), apiToken: null };
 }

@@ -6,6 +6,8 @@ import fastifyStatic from '@fastify/static';
 import type { AppContext } from '../context.js';
 import { registerMcpHttp } from '../mcp/http.js';
 import { registerApi } from './routes.js';
+import { checkCsrf } from './csrf.js';
+import { newSessionToken, registerSession } from './session.js';
 import { uiAssets, type UiBuildInfo } from '../shared/ui-build.js';
 
 import { VERSION } from '../version.js';
@@ -25,6 +27,28 @@ export async function buildApp(ctx: AppContext, opts: { logger?: boolean; serveU
     const host = req.headers.host;
     if (host && !loopback.test(host)) return reply.code(403).send({ error: 'forbidden_host', message: 'Host não permitido.' });
   });
+
+  // Cross-site write guard (D113): the Host check above does not stop a page on another site from
+  // posting to 127.0.0.1 with the browser's own Host.
+  app.addHook('onRequest', async (req, reply) => {
+    const header = (name: string) => {
+      const v = req.headers[name];
+      return Array.isArray(v) ? v[0] : v;
+    };
+    const verdict = checkCsrf({
+      method: req.method,
+      route: req.routeOptions?.url,
+      host: header('host'),
+      origin: header('origin'),
+      secFetchSite: header('sec-fetch-site'),
+      contentType: header('content-type'),
+    });
+    if (!verdict.ok) return reply.code(verdict.error === 'content_type' ? 415 : 403).send({ error: verdict.error, message: verdict.message });
+  });
+
+  // Session key of the REST API (card #218): drawn here unless the caller turned it off (tests).
+  if (ctx.apiToken === undefined) ctx.apiToken = newSessionToken();
+  if (ctx.apiToken) registerSession(app, ctx.apiToken);
 
   app.get('/health', async () => ({ ok: true, name: CLI_NAME, product: PRODUCT_NAME, version: VERSION }));
 
