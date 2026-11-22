@@ -1,5 +1,5 @@
 import type { Db } from '../db/index.js';
-import { AUTO_CONCURRENCY, UNLIMITED_CONCURRENCY, isAgentId, runLane, type AgentConcurrencySetting, type AgentId, type AgentQuotaNote, type AgyQuotaReading, type ConcurrencyInfo, type RunnerState } from '../shared/domain.js';
+import { AUTO_CONCURRENCY, UNLIMITED_CONCURRENCY, isAgentId, runLane, type AgentConcurrencySetting, type AgentId, type AgentQuotaNote, type AgyQuotaReading, type AgyUsageWindow, type ConcurrencyInfo, type RunnerState } from '../shared/domain.js';
 
 /** What the runner state needs from the settings to split the counter by agent (D99). */
 export interface AgentLaneConfig {
@@ -11,6 +11,7 @@ export interface AgentLaneConfig {
 export interface AgentLaneRuntime {
   concurrency?: ConcurrencyInfo;
   usage?: AgyQuotaReading | null;
+  window?: AgyUsageWindow | null;
 }
 
 /** What the header shows about the runner. There is no daily limit. */
@@ -24,6 +25,7 @@ export function runnerState(db: Db, paused: boolean, concurrency?: ConcurrencyIn
   if (!concurrency) return base;
   const state: RunnerState = { ...base, concurrency, claudeRunning: byLane.claude };
   if (!config) return state;
+  state.defaultAgent = config.defaultAgent;
   const quota = setting<AgentQuotaNote | null>(db, 'antigravityQuota') ?? null;
   const limitSetting = config.antigravityConcurrency;
   // The runner's own decision when it is active here; without it, the setting as written (auto shows no number).
@@ -38,6 +40,7 @@ export function runnerState(db: Db, paused: boolean, concurrency?: ConcurrencyIn
   };
   if (agy?.concurrency) state.antigravity.concurrency = agy.concurrency;
   if (agy && agy.usage !== undefined) state.antigravity.usage = agy.usage;
+  if (agy && agy.window !== undefined) state.antigravity.window = agy.window;
   return state;
 }
 

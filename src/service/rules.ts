@@ -46,10 +46,10 @@ export function checkMove({ from, to, actor, hasRunningExecution }: MoveCheckInp
     );
   }
   if (!ALLOWED_TARGETS[actor].includes(to)) {
-    const who = actor === 'claude' ? 'O Claude' : 'Você';
+    const who = actor === 'claude' ? 'O agente' : 'Você';
     throw new RuleError('target_not_allowed', `${who} não pode mover um card para "${STATUS_LABELS[to]}".`, 403);
   }
   if (hasRunningExecution && actor !== 'system') {
-    throw new RuleError('card_running', 'O Claude está executando este card. Use "Parar" antes de movê-lo.');
+    throw new RuleError('card_running', 'O agente está executando este card. Use "Parar" antes de movê-lo.');
   }
 }

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { ALWAYS_SHOWN_STATUSES, STATUSES, isColumnShown } from '../src/shared/domain';
 
 describe('empty lists hide from the board (card #179, D85)', () => {
-  it('"Não iniciada" and "Pronta para o Claude" always show, even empty', () => {
+  it('"Não iniciada" and "Pronta para o agente" always show, even empty', () => {
     expect([...ALWAYS_SHOWN_STATUSES].sort()).toEqual(['backlog', 'ready']);
     expect(isColumnShown('backlog', { count: 0 })).toBe(true);
     expect(isColumnShown('ready', { count: 0 })).toBe(true);

@@ -131,7 +131,7 @@ export class AutomationService {
   }
 
   private check(draft: AutomationDraft): void {
-    if (!draft?.instruction?.trim()) throw new RuleError('invalid_automation', 'A automação precisa dizer o que o Claude deve fazer.', 400);
+    if (!draft?.instruction?.trim()) throw new RuleError('invalid_automation', 'A automação precisa dizer o que o agente deve fazer.', 400);
     const problem = triggerProblem(draft.trigger);
     if (problem) throw new RuleError('invalid_trigger', problem, 400);
     if (draft.priority !== undefined && (draft.priority < 1 || draft.priority > 4)) {

@@ -1,9 +1,14 @@
-import type { UsageSnapshot, UsageWindow } from '../shared/domain';
+import type { AgentId, AgyUsageWindow, RunnerState, UsageSnapshot, UsageWindow } from '../shared/domain';
 import { locale, t } from './i18n';
 
-/** One line of the usage ticker in the runner pill: "5 horas: 38% ▬ reset em 1h12" or "Semana: …" (D83). */
+/**
+ * One line of the usage ticker in the runner pill: "5 horas: 38% ▬ reset em 1h12" or "Semana: …" (D83),
+ * with the mark of the agent whose plan it is (card #198 review).
+ */
 export interface UsageRow {
-  key: 'fiveHour' | 'sevenDay';
+  key: 'fiveHour' | 'sevenDay' | 'antigravity';
+  /** Whose usage: Claude Code's plan windows or the Google quota of Antigravity CLI. */
+  agent: AgentId;
   /** "5 horas" or "Semana", in the UI language. */
   label: string;
   /** Bold value after the label: "38%", "renovada" or "—". */
@@ -32,29 +37,64 @@ const clock = (unixSec: number) => new Date(unixSec * 1000).toLocaleTimeString(l
 const dayClock = (unixSec: number) =>
   new Date(unixSec * 1000).toLocaleString(locale(), { weekday: 'short', hour: '2-digit', minute: '2-digit' });
 
-function row(key: UsageRow['key'], w: UsageWindow, now: number): UsageRow {
-  const label = key === 'fiveHour' ? t('settings.usage.fiveHour') : t('settings.usage.week');
-  const at = key === 'fiveHour' ? clock(w.resetsAt) : dayClock(w.resetsAt);
-  if (w.resetsAt * 1000 <= now) return { key, label, value: t('settings.usage.renewed'), pct: null, note: t('settings.usage.at', { time: at }), tone: '' };
+function windowRow(key: UsageRow['key'], agent: AgentId, weekly: boolean, w: Pick<UsageWindow, 'utilization' | 'resetsAt'>, now: number): UsageRow {
+  const label = weekly ? t('settings.usage.week') : t('settings.usage.fiveHour');
+  const at = weekly ? dayClock(w.resetsAt) : clock(w.resetsAt);
+  if (w.resetsAt * 1000 <= now) return { key, agent, label, value: t('settings.usage.renewed'), pct: null, note: t('settings.usage.at', { time: at }), tone: '' };
   const pct = Math.round(w.utilization * 100);
   const tone = pct >= 95 ? 'danger' : pct >= 80 ? 'attention' : '';
-  return { key, label, value: `${pct}%`, pct: Math.min(100, Math.max(0, pct)), note: t('settings.usage.resetIn', { d: duration(w.resetsAt * 1000 - now) }), tone };
+  return { key, agent, label, value: `${pct}%`, pct: Math.min(100, Math.max(0, pct)), note: t('settings.usage.resetIn', { d: duration(w.resetsAt * 1000 - now) }), tone };
 }
 
-/**
- * The lines the ticker cycles through: the 5-hour window, then the week. Without any reading there is a
- * single "5 horas: — sem leitura ainda" line, and the ticker stands still.
- */
-export function usageRows(usage: UsageSnapshot | null, now: number): UsageRow[] {
+function claudeRows(usage: UsageSnapshot | null, now: number): UsageRow[] {
   const rows: UsageRow[] = [];
-  if (usage?.fiveHour) rows.push(row('fiveHour', usage.fiveHour, now));
-  if (usage?.sevenDay) rows.push(row('sevenDay', usage.sevenDay, now));
-  if (rows.length === 0) rows.push({ key: 'fiveHour', label: t('settings.usage.fiveHour'), value: '—', pct: null, note: t('settings.usage.noReading'), tone: '' });
+  if (usage?.fiveHour) rows.push(windowRow('fiveHour', 'claude', false, usage.fiveHour, now));
+  if (usage?.sevenDay) rows.push(windowRow('sevenDay', 'claude', true, usage.sevenDay, now));
+  if (rows.length === 0) rows.push({ key: 'fiveHour', agent: 'claude', label: t('settings.usage.fiveHour'), value: '—', pct: null, note: t('settings.usage.noReading'), tone: '' });
   return rows;
 }
 
-/** Tooltip of the ticker: both windows at once, so hovering never depends on which line is showing. */
-export function usageTitle(usage: UsageSnapshot | null, now: number): string {
+function antigravityRows(w: AgyUsageWindow | null | undefined, now: number): UsageRow[] {
+  if (!w) return [{ key: 'antigravity', agent: 'antigravity', label: t('settings.usage.quota'), value: '—', pct: null, note: t('settings.usage.noReading'), tone: '' }];
+  return [windowRow('antigravity', 'antigravity', w.weekly, w, now)];
+}
+
+/** What the ticker needs from the runner state: which agents have runs going, the Antigravity window, the default agent. */
+export type UsageAgents = Pick<RunnerState, 'running' | 'claudeRunning' | 'antigravity' | 'defaultAgent'>;
+
+/**
+ * The lines the ticker cycles through (card #198 review): the usage of every agent with at least one run
+ * going, Claude Code first (5-hour window, then the week), then Antigravity CLI (its limiting quota).
+ * With no run going, the default agent's usage, so the pill never goes blank. Without the runner state
+ * (another process), Claude Code as before. A line without a reading reads "— sem leitura ainda".
+ */
+export function usageRows(usage: UsageSnapshot | null, now: number, agents?: UsageAgents | null): UsageRow[] {
+  if (!agents) return claudeRows(usage, now);
+  const claudeOn = (agents.claudeRunning ?? agents.running) > 0;
+  const agyOn = !!agents.antigravity && agents.antigravity.running > 0;
+  if (!claudeOn && !agyOn) {
+    return agents.defaultAgent === 'antigravity' && agents.antigravity ? antigravityRows(agents.antigravity.window, now) : claudeRows(usage, now);
+  }
+  return [...(claudeOn ? claudeRows(usage, now) : []), ...(agyOn ? antigravityRows(agents.antigravity!.window, now) : [])];
+}
+
+/** Tooltip of the ticker: every line at once, so hovering never depends on which line is showing. */
+export function usageTitle(usage: UsageSnapshot | null, now: number, agents?: UsageAgents | null): string {
+  const rows = usageRows(usage, now, agents);
+  const parts: string[] = [];
+  if (rows.some((r) => r.agent === 'claude')) parts.push(claudeTitle(usage, now));
+  const w = agents?.antigravity?.window;
+  if (rows.some((r) => r.agent === 'antigravity')) {
+    parts.push(
+      w
+        ? t('settings.usage.titleAgy', { model: w.model, pct: Math.round(w.utilization * 100), at: w.weekly ? dayClock(w.resetsAt) : t('settings.usage.at', { time: clock(w.resetsAt) }) })
+        : t('settings.usage.titleAgyNone'),
+    );
+  }
+  return parts.join('\n\n');
+}
+
+function claudeTitle(usage: UsageSnapshot | null, now: number): string {
   if (!usage || (!usage.fiveHour && !usage.sevenDay)) return t('settings.usage.titleNone');
   const read = t('settings.usage.titleRead', { d: duration(now - new Date(usage.observedAt).getTime()) });
   const parts = [t('settings.usage.titleHead', { read })];

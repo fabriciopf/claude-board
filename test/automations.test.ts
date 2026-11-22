@@ -183,7 +183,7 @@ describe('automations', () => {
     expect(() => store.create({ draft: { ...schedule, trigger: { kind: 'schedule', cron: 'toda segunda' } } })).toThrow(/cron/);
     expect(() => store.create({ draft: { ...schedule, trigger: { kind: 'watch' } } })).toThrow(/onde olhar/);
     expect(() => store.create({ draft: { ...schedule, trigger: { kind: 'watch', source: 'gmail', everyMinutes: 1 } } })).toThrow(/mínimo/);
-    expect(() => store.create({ draft: { ...schedule, instruction: ' ' } })).toThrow(/o que o Claude deve fazer/);
+    expect(() => store.create({ draft: { ...schedule, instruction: ' ' } })).toThrow(/o que o agente deve fazer/);
     expect(triggerProblem({ kind: 'webhook' })).toBeNull();
   });
 });

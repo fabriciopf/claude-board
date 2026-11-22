@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { duration, usageRows, usageTitle } from '../src/ui/usage-rows.js';
+import { duration, usageRows, usageTitle, type UsageAgents } from '../src/ui/usage-rows.js';
 import type { UsageSnapshot } from '../src/shared/domain.js';
 
 const NOW = Date.parse('2026-11-21T15:00:00Z');
@@ -37,7 +37,7 @@ describe('usage ticker of the runner pill (D83)', () => {
   });
 
   it('without a reading there is a single still line', () => {
-    expect(usageRows(null, NOW)).toEqual([{ key: 'fiveHour', label: '5 horas', value: '—', pct: null, note: 'sem leitura ainda', tone: '' }]);
+    expect(usageRows(null, NOW)).toEqual([{ key: 'fiveHour', agent: 'claude', label: '5 horas', value: '—', pct: null, note: 'sem leitura ainda', tone: '' }]);
     expect(usageRows(snap(0.4, null), NOW).map((r) => r.label)).toEqual(['5 horas']);
     expect(usageRows(snap(null, 0.4), NOW).map((r) => r.label)).toEqual(['Semana']);
   });
@@ -48,6 +48,42 @@ describe('usage ticker of the runner pill (D83)', () => {
     expect(t).toMatch(/5 horas: 38%/);
     expect(t).toMatch(/Semana: 12%/);
     expect(usageTitle(null, NOW)).toMatch(/lê o uso do plano/);
+  });
+
+  describe('one agent or both, by the runs going (card #198 review)', () => {
+    const agyWindow = { model: 'gemini-3.8-flash-low', utilization: 0.57, resetsAt: sec(NOW + (6 * 24 + 21) * 3600000), weekly: true };
+    const agents = (claude: number, agy: number, extra: Partial<UsageAgents> = {}): UsageAgents => ({
+      running: claude + agy,
+      claudeRunning: claude,
+      antigravity: { running: agy, limit: 2, shown: true, quota: null, window: agyWindow },
+      defaultAgent: 'claude',
+      ...extra,
+    });
+    const show = (rows: ReturnType<typeof usageRows>) => rows.map((r) => `${r.agent} ${r.label} ${r.value}`);
+
+    it('only the agents with a run going, Claude Code first: the ticker scrolls when there is more than one line', () => {
+      expect(show(usageRows(snap(0.38, 0.12), NOW, agents(1, 0)))).toEqual(['claude 5 horas 38%', 'claude Semana 12%']);
+      expect(show(usageRows(snap(0.38, 0.12), NOW, agents(0, 2)))).toEqual(['antigravity Semana 57%']);
+      expect(show(usageRows(snap(0.38, 0.12), NOW, agents(1, 1)))).toEqual(['claude 5 horas 38%', 'claude Semana 12%', 'antigravity Semana 57%']);
+    });
+
+    it('with no run going, the default agent, so the pill never goes blank', () => {
+      expect(show(usageRows(snap(0.38, 0.12), NOW, agents(0, 0)))).toEqual(['claude 5 horas 38%', 'claude Semana 12%']);
+      expect(show(usageRows(snap(0.38, 0.12), NOW, agents(0, 0, { defaultAgent: 'antigravity' })))).toEqual(['antigravity Semana 57%']);
+    });
+
+    it('a five-hour Antigravity window, one without a reading, and the tooltip of both agents', () => {
+      const five = agents(0, 1);
+      five.antigravity!.window = { ...agyWindow, weekly: false, resetsAt: sec(NOW + 90 * 60000) };
+      expect(usageRows(null, NOW, five)[0]).toMatchObject({ agent: 'antigravity', label: '5 horas', value: '57%', note: 'reset em 1h30' });
+      const none = agents(0, 1);
+      none.antigravity!.window = null;
+      expect(usageRows(null, NOW, none)).toEqual([{ key: 'antigravity', agent: 'antigravity', label: 'Cota', value: '—', pct: null, note: 'sem leitura ainda', tone: '' }]);
+      const both = usageTitle(snap(0.38, 0.12), NOW, agents(1, 1));
+      expect(both).toMatch(/5 horas: 38%/);
+      expect(both).toMatch(/Antigravity CLI: 57% da cota do Google usada \(gemini-3\.8-flash-low\)/);
+      expect(usageTitle(snap(0.38, 0.12), NOW, agents(0, 1))).not.toMatch(/5 horas/);
+    });
   });
 
   it('durations read in minutes, hours and days', () => {
