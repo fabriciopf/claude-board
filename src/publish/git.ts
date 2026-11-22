@@ -40,12 +40,23 @@ export function samePath(a: string, b: string): boolean {
   return n(a) === n(b);
 }
 
-/** Runs a command asynchronously (npm test can take minutes); output tail kept for the card comment. */
-export function runCommand(cmd: string, args: string[], cwd: string, env: NodeJS.ProcessEnv = process.env): Promise<CmdResult> {
+/**
+ * Runs a command asynchronously (npm test can take minutes); output tail kept for the card comment.
+ * `onOutput` sees each chunk as it arrives (test progress, card #213).
+ */
+export function runCommand(cmd: string, args: string[], cwd: string, env: NodeJS.ProcessEnv = process.env, onOutput?: (chunk: string) => void): Promise<CmdResult> {
   return new Promise((resolve) => {
     let out = '';
     const keep = (d: Buffer) => {
-      out = (out + d.toString()).slice(-20000);
+      const text = d.toString();
+      out = (out + text).slice(-20000);
+      if (onOutput) {
+        try {
+          onOutput(text);
+        } catch {
+          /* progress must never break the command */
+        }
+      }
     };
     let child;
     try {
