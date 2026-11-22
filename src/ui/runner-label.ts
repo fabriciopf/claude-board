@@ -1,7 +1,7 @@
 import { ANTIGRAVITY_CONCURRENCY_PRESETS, AUTO_CONCURRENCY, CONCURRENCY_PRESETS, UNLIMITED_CONCURRENCY, concurrencyOptionLabel, type AntigravityLane, type ConcurrencyInfo } from '../shared/domain';
 import { t } from './i18n';
 
-/** Tooltip of the header counter, "rodando N de <seletor>" (D83). The automatic limit is never below one (MIN_RUNS). */
+/** Tooltip of the header counter, "N de <seletor>" (D83; no "rodando" since card #208). The automatic limit is never below one (MIN_RUNS). */
 export function concurrencyTitle(c: ConcurrencyInfo | undefined): string {
   if (!c) return t('settings.conc.titleNone');
   if (c?.mode === 'auto') return t('settings.conc.titleAuto', { limit: String(c.limit), reason: c.reason });
@@ -20,7 +20,7 @@ export function concurrencyValue(c: ConcurrencyInfo): string {
 /**
  * The choices of the header selector: the presets, plus the current number when config.json holds one
  * outside them (3, 12), so the selector never shows a value it does not list. Auto carries its current
- * limit before the mode, so the header reads "rodando 1 de 3 (auto)" (asked on card #53, 2026-11-21).
+ * limit before the mode, so the header reads "1 de 3 (auto)" (asked on card #53, 2026-11-21).
  */
 export function concurrencyOptions(c: ConcurrencyInfo): { value: string; label: string }[] {
   const current = concurrencyValue(c);

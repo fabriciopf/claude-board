@@ -6,7 +6,7 @@ import type { AppContext, RunnerControl } from '../context.js';
 import { nowIso } from '../db/index.js';
 import { AUTO_CONCURRENCY, UNLIMITED_CONCURRENCY, runLane, type AgentId, type AgentQuotaNote, type Card, type ConcurrencyInfo, type ExecutionStatus, type Status } from '../shared/domain.js';
 import { agentName, buildLaunch, isQuotaError, resolveAgent, type Launch } from './agents.js';
-import { AGY_RATE_LOOKBACK_MINUTES, AgyQuotaTracker, decideAgyAuto, quotaFor } from './agy-quota.js';
+import { AGY_RATE_LOOKBACK_MINUTES, AgyQuotaTracker, decideAgyAuto, limitingWindow, quotaFor } from './agy-quota.js';
 import { BurnMeter, decideAuto, typicalRunMinutes, type RunTiming } from './auto-concurrency.js';
 import { antigravityInUse } from '../service/runner-state.js';
 import { isAlive, killTree, processStartTimes, spawnDetached } from './process.js';
@@ -222,6 +222,11 @@ export class Runner implements RunnerControl {
   /** Last reading of the Google quota (D100). */
   antigravityUsage() {
     return this.agyQuota.get();
+  }
+
+  /** The quota that limits the Antigravity runs, as one window for the header (card #198 review). */
+  antigravityWindow(now = Date.now()) {
+    return limitingWindow(this.agyQuota.get(), this.ctx.config.antigravityModel || null, now);
   }
 
   /**

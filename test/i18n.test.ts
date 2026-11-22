@@ -61,8 +61,8 @@ describe('t()', () => {
   });
 
   it('follows the shared vocabulary in pt-BR', () => {
-    expect(translate('pt-BR', 'domain.status.ready')).toBe('Pronta para o Claude');
-    expect(translate('en', 'domain.status.ready')).toBe('Ready for Claude');
+    expect(translate('pt-BR', 'domain.status.ready')).toBe('Pronta para o agente');
+    expect(translate('en', 'domain.status.ready')).toBe('Ready for the agent');
     expect(translate('es', 'domain.status.done')).toBe('Terminada');
   });
 

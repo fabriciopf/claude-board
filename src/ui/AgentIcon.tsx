@@ -1,10 +1,11 @@
-// The agent a card runs in, on the card cover (card #197, D98).
+// The agent a card runs in, on the card cover (card #197, D98), and the small mark of each agent in the
+// runner pill of the header (card #198 review).
 // Claude Code: the same Claude avatar the card activity shows (OwnerAvatar). Antigravity CLI: the
 // official full-colour icon from antigravity.google, scaled down to 96 px.
 import { agentLabel } from '../shared/domain';
 import antigravityIcon from './assets/antigravity-icon.png';
 import { t } from './i18n';
-import { OwnerAvatar } from './OwnerAvatar';
+import { ClaudeIcon, OwnerAvatar } from './OwnerAvatar';
 
 /** Source of the Antigravity icon on the page. */
 export const ANTIGRAVITY_ICON_SRC = antigravityIcon;
@@ -20,6 +21,26 @@ export function AgentAvatar({ agent, running }: { agent: string; running: boolea
   return (
     <span className="avatar agent agent-antigravity" role="img" aria-label={text} title={text}>
       <img src={antigravityIcon} width={16} height={16} alt="" draggable={false} />
+    </span>
+  );
+}
+
+/**
+ * The agent's small mark in the runner pill (card #198 review): before the run count and before each
+ * usage line, so the pill says whose runs and whose plan without spelling the name. The name is the label.
+ */
+export function AgentMark({ agent }: { agent: string }) {
+  const name = agentLabel(agent);
+  if (!isGoogleAgent(agent)) {
+    return (
+      <span className="agent-mark claude" role="img" aria-label={name} title={name}>
+        <ClaudeIcon size={10} />
+      </span>
+    );
+  }
+  return (
+    <span className="agent-mark antigravity" role="img" aria-label={name} title={name}>
+      <img src={antigravityIcon} width={14} height={14} alt="" draggable={false} />
     </span>
   );
 }

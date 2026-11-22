@@ -43,7 +43,7 @@ describe('runner counter in the header (D83)', () => {
   it('lists auto, 0, 1, 2, 4, 8 and ∞, and auto carries its current limit as "3 (auto)"', () => {
     const auto = concurrencyOptions({ mode: 'auto', limit: 3, reason: 'cabem 3' });
     expect(auto.map((o) => o.label)).toEqual(['3 (auto)', '0', '1', '2', '4', '8', '∞']);
-    // The old wording stays out: the header reads "rodando 1 de 3 (auto)".
+    // The old wording stays out: the header reads "1 de 3 (auto)".
     expect(auto.map((o) => o.label).join(' ')).not.toMatch(/auto ·/);
     const fixed = concurrencyOptions({ mode: 'fixed', limit: 2, reason: '' });
     expect(fixed.map((o) => o.label)).toEqual(['auto', '0', '1', '2', '4', '8', '∞']);
@@ -68,12 +68,36 @@ describe('runner counter in the header (D83)', () => {
 });
 
 describe('runner and session share one pill in the header (D83)', () => {
-  it('the 5-hour usage renders inside the "rodando" pill, not as a pill of its own', async () => {
+  it('the 5-hour usage renders inside the runs pill, not as a pill of its own', async () => {
     const fs = await import('node:fs');
     const app = fs.readFileSync(new URL('../src/ui/App.tsx', import.meta.url), 'utf8');
     const pill = app.slice(app.indexOf('className="counter runner-usage"'));
-    expect(pill.indexOf('<UsageChip usage={data?.usage ?? null} />')).toBeGreaterThan(0);
+    // The runner state goes along: the ticker shows the usage of the agents with runs going (card #198 review).
+    expect(pill.indexOf('<UsageChip usage={data?.usage ?? null} agents={runner} />')).toBeGreaterThan(0);
     expect(pill.indexOf('<UsageChip')).toBeLessThan(pill.indexOf('<AgendaChip'));
     expect(app.match(/<UsageChip/g)).toHaveLength(1);
+  });
+
+  it('each count starts with its agent mark, and the names are not spelled out (card #198 review)', async () => {
+    const fs = await import('node:fs');
+    const app = fs.readFileSync(new URL('../src/ui/App.tsx', import.meta.url), 'utf8');
+    const pill = app.slice(app.indexOf('className="counter runner-usage"'), app.indexOf('<UsageChip'));
+    // Split counter: each mark right before its count; single counter: Claude mark before the count.
+    expect(pill.match(/<AgentMark agent="claude" \/> <strong>\{runner\.(claudeRunning \?\? 0|running)\}<\/strong>/g)).toHaveLength(2);
+    expect(pill).toMatch(/<AgentMark agent="antigravity" \/> <strong>\{runner\.antigravity\.running\}<\/strong>/);
+    expect(pill).not.toMatch(/runner-agent/);
+    // Each usage line carries the mark of its agent too.
+    const chip = fs.readFileSync(new URL('../src/ui/UsageChip.tsx', import.meta.url), 'utf8');
+    expect(chip).toMatch(/<AgentMark agent=\{row\.agent\} \/>/);
+  });
+
+  it('the counter has no loading spinner and no "rodando" word, only mark, count and selector (card #208)', async () => {
+    const fs = await import('node:fs');
+    const app = fs.readFileSync(new URL('../src/ui/App.tsx', import.meta.url), 'utf8');
+    const pill = app.slice(app.indexOf('className="counter runner-usage"'), app.indexOf('<UsageChip'));
+    expect(pill).not.toMatch(/className="spinner"/);
+    expect(pill).not.toMatch(/app\.runner\.running/);
+    const { app: messages } = await import('../src/ui/i18n/app');
+    for (const lang of Object.values(messages)) expect(Object.keys(lang)).not.toContain('runner.running');
   });
 });

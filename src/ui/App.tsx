@@ -23,6 +23,7 @@ import type { Notice } from './notices';
 import { antigravityConcurrencyValue, antigravityTitle, concurrencyTitle, concurrencyValue } from './runner-label';
 import { AntigravityConcurrencySelect, ConcurrencySelect } from './ConcurrencySelect';
 import { UsageChip } from './UsageChip';
+import { AgentMark } from './AgentIcon';
 import { AgendaBanner, AgendaChip, useNow } from './AgendaChip';
 import { currentEvents } from '../shared/agenda';
 import { AutomationChip } from './AutomationChip';
@@ -388,28 +389,28 @@ export function App() {
               {/* Runs and the 5-hour session in one pill: the automatic mode paces the first by the second (D83). */}
               <span className="counter runner-usage">
                 {runner.antigravity?.shown && runner.concurrency ? (
-                  // Each agent against its own limit (D99): "rodando 1 de 3 (auto) Claude · 2 de 2 Antigravity".
+                  // Each agent against its own limit (D99), its mark before its count (card #198 review):
+                  // "[Claude] 1 de 3 (auto) · [Antigravity] 2 de 2". The mark carries the name; no spinner and no
+                  // "rodando" before the count (card #208).
                   <>
                     <span className="runner-part" title={concurrencyTitle(runner.concurrency)}>
-                      {runner.running > 0 && <span className="spinner" />} {t('app.runner.running')} <strong>{runner.claudeRunning ?? 0}</strong>
+                      <AgentMark agent="claude" /> <strong>{runner.claudeRunning ?? 0}</strong>
                       <ConcurrencySelect concurrency={runner.concurrency} onChanged={() => void load()} notify={notify} />
-                      <span className="runner-agent">Claude</span>
                     </span>
                     <span className="runner-part runner-part-agent" title={antigravityTitle(runner.antigravity)}>
-                      <strong>{runner.antigravity.running}</strong>
+                      <AgentMark agent="antigravity" /> <strong>{runner.antigravity.running}</strong>
                       <AntigravityConcurrencySelect lane={runner.antigravity} onChanged={() => void load()} notify={notify} />
-                      <span className="runner-agent">Antigravity</span>
                       {runner.antigravity.quota && <span className="runner-quota">{t('settings.conc.quotaShort')}</span>}
                     </span>
                   </>
                 ) : (
                   <span className="runner-part" title={concurrencyTitle(runner.concurrency)}>
-                    {runner.running > 0 && <span className="spinner" />} {t('app.runner.running')} <strong>{runner.running}</strong>
+                    <AgentMark agent="claude" /> <strong>{runner.running}</strong>
                     {runner.concurrency && <ConcurrencySelect concurrency={runner.concurrency} onChanged={() => void load()} notify={notify} />}
                   </span>
                 )}
                 <span className="counter-sep" aria-hidden="true" />
-                <UsageChip usage={data?.usage ?? null} />
+                <UsageChip usage={data?.usage ?? null} agents={runner} />
               </span>
               <AgendaChip agenda={data?.agenda ?? null} />
               <AutomationChip tick={automationsTick} onOpen={() => setView('automations')} />

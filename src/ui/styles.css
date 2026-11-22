@@ -501,7 +501,7 @@ pre {
   flex: none;
 }
 
-/* The runner pill shrinks too, down to "rodando x de y | 5 horas: n% ▬": only the "reset em …" note gives way, with an ellipsis. */
+/* The runner pill shrinks too, down to "x de y | 5 horas: n% ▬": only the "reset em …" note gives way, with an ellipsis. */
 .counters > .runner-usage {
   flex: 0 1 auto;
   min-width: var(--usage-min);
@@ -596,7 +596,7 @@ pre {
   cursor: default;
 }
 
-/* "rodando x de y" and the plan usage share one pill (D83); each half keeps its own tooltip. */
+/* "x de y" and the plan usage share one pill (D83); each half keeps its own tooltip. */
 .counter.runner-usage {
   gap: 8px;
 }
@@ -613,9 +613,27 @@ pre {
   cursor: default;
 }
 
-/* Counter split by agent (D99): "rodando 1 de 3 (auto) Claude · 2 de 2 Antigravity". */
-.runner-agent {
-  color: var(--text-muted);
+/* Counter split by agent (D99), each agent's mark before its count and before each usage line
+   (card #198 review): "[Claude] 1 de 3 (auto) · [Antigravity] 2 de 2". */
+.agent-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  flex: none;
+}
+
+/* The Claude spark white on the orange disc, like its avatar (card #180). */
+.agent-mark.claude {
+  border-radius: 50%;
+  background: var(--accent);
+  color: #ffffff;
+}
+
+.agent-mark img {
+  display: block;
+  pointer-events: none;
 }
 
 .runner-part-agent::before {
@@ -2650,6 +2668,15 @@ html[data-busy] body::before {
   display: flex;
   gap: 8px;
   align-items: center;
+  min-width: 0;
+}
+
+/* Cards and step on one line; a long card title gives way first (card #205). */
+.publish-banner-summary {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .publish-banner-toggle {

@@ -186,7 +186,7 @@ export function createMcpServer(ctx: AppContext, session: McpSession): McpServer
     'card_create',
     {
       description:
-        'Cria um card. Uso típico: "transforma isso num card". Por padrão o card nasce em "backlog" (Não iniciada) com dono = Claude, porque foi o Claude que o criou; o dono não muda depois, só o usuário o troca à mão.',
+        'Cria um card. Uso típico: "transforma isso num card". Por padrão o card nasce em "backlog" (Não iniciada) com dono = agente, porque foi o agente que o criou; o dono não muda depois, só o usuário o troca à mão.',
       inputSchema: {
         title: z.string().min(1),
         description: z.string().optional().describe('Markdown: o que deve ser feito, contexto e critério de pronto'),
@@ -199,7 +199,7 @@ export function createMcpServer(ctx: AppContext, session: McpSession): McpServer
         owner: z
           .enum(['user', 'claude'])
           .optional()
-          .describe('Quem criou o card, mostrado na capa (ícone de pessoa ou do Claude). Padrão: claude. Use "user" só para tarefa que o próprio usuário vai fazer'),
+          .describe('Quem criou o card, mostrado na capa (ícone de pessoa ou do agente). Padrão: claude. Use "user" só para tarefa que o próprio usuário vai fazer'),
         status: z.enum(['backlog', 'ready', 'waiting_third_party']).optional(),
         repoPath: z.string().optional().describe('Caminho local do repositório git, quando a tarefa mexe em código'),
         dueDate: z.string().optional().describe('AAAA-MM-DD'),
@@ -417,7 +417,7 @@ export function createMcpServer(ctx: AppContext, session: McpSession): McpServer
     'card_split',
     {
       description:
-        'Divide o card em tarefas independentes: cada tarefa vira um card próprio na fila do Claude, com sessão e ciclo de vida próprios, e as tarefas rodam em paralelo. ' +
+        'Divide o card em tarefas independentes: cada tarefa vira um card próprio na fila do agente, com sessão e ciclo de vida próprios, e as tarefas rodam em paralelo. ' +
         'Use quando a descrição listar entregas que se revisam sozinhas e não dependem uma da outra; não use para passos de uma tarefa só. ' +
         'O card original fica em "Aguardando terceiro" acompanhando as tarefas e é concluído quando o usuário aprovar todas. Não faça o trabalho das tarefas: depois de chamar, encerre a execução.',
       inputSchema: {
@@ -494,7 +494,7 @@ export function createMcpServer(ctx: AppContext, session: McpSession): McpServer
   server.registerTool(
     'automation_list',
     {
-      description: 'Lista as automações do Board: tarefas recorrentes que criam cards para o Claude (por agenda, por verificação de uma fonte ou por URL).',
+      description: 'Lista as automações do Board: tarefas recorrentes que criam cards para o agente (por agenda, por verificação de uma fonte ou por URL).',
       inputSchema: {},
       annotations: { readOnlyHint: true },
     },
@@ -505,11 +505,11 @@ export function createMcpServer(ctx: AppContext, session: McpSession): McpServer
     'automation_create',
     {
       description:
-        'Cria uma automação: a cada disparo o Board cria um card em "Pronta para o Claude" com a instrução. Interprete você mesmo o pedido do usuário em gatilho e instrução. ' +
+        'Cria uma automação: a cada disparo o Board cria um card em "Pronta para o agente" com a instrução. Interprete você mesmo o pedido do usuário em gatilho e instrução. ' +
         'Use quando o usuário pedir algo recorrente ("toda segunda...", "quando chegar e-mail de..."). A instrução precisa ser autossuficiente: é tudo o que a execução vai receber.',
       inputSchema: {
         name: z.string().min(1).max(80).describe('Nome curto, em português'),
-        instruction: z.string().min(1).describe('O que o Claude deve fazer a cada disparo'),
+        instruction: z.string().min(1).describe('O que o agente deve fazer a cada disparo'),
         trigger: triggerArg,
         request: z.string().optional().describe('O pedido do usuário nas palavras dele, guardado para edição'),
         app: z.union([z.string(), z.number()]).nullable().optional().describe('Projeto dos cards criados'),

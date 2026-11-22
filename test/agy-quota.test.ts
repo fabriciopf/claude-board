@@ -8,6 +8,7 @@ import {
   QUOTA_STALE_MINUTES,
   WEEK_MINUTES,
   decideAgyAuto,
+  limitingWindow,
   parseProbeOutput,
   parseSwarmModels,
   probeArgs,
@@ -218,7 +219,7 @@ describe('the runner paces Antigravity by the reading (D100)', () => {
   afterAll(async () => {
     await runner.close();
   });
-  const runtime = () => ({ concurrency: runner.antigravityConcurrency(), usage: runner.antigravityUsage() });
+  const runtime = () => ({ concurrency: runner.antigravityConcurrency(), usage: runner.antigravityUsage(), window: runner.antigravityWindow() });
 
   // First: no run has moved the meters yet, so the steps below are the only ones.
   it('the meter of Antigravity learns from the readings, looking further back than the Claude one', () => {
@@ -255,10 +256,22 @@ describe('the runner paces Antigravity by the reading (D100)', () => {
     expect(runner.antigravityConcurrency()).toMatchObject({ mode: 'auto', limit: 2 });
     const now = Date.now();
     ctx.service.setSetting('antigravityUsage', reading({ 'gemini-3.8-flash-low': [0.5, at(now, 150)] }));
-    const lane = runnerState(ctx.db, false, runner.concurrency(), ctx.config, runtime()).antigravity!;
+    const state = runnerState(ctx.db, false, runner.concurrency(), ctx.config, runtime());
+    const lane = state.antigravity!;
     expect(lane.concurrency).toMatchObject({ mode: 'auto' });
     expect(lane.usage?.models['gemini-3.8-flash-low'].remaining).toBe(0.5);
     expect(lane.limit).toBe(lane.concurrency!.limit);
+    // The usage ticker gets the limiting quota as one window, and the default agent for when nothing runs (card #198 review).
+    expect(lane.window).toMatchObject({ model: 'gemini-3.8-flash-low', utilization: 0.5, weekly: false });
+    expect(state.defaultAgent).toBe('claude');
+  });
+
+  it('the limiting window is weekly when the reset is days away, and null without a reading', () => {
+    const now = Date.now();
+    const w = limitingWindow(reading({ 'gemini-3.8-flash-low': [0.43, at(now, 6 * 24 * 60)] }), null, now);
+    expect(w).toMatchObject({ model: 'gemini-3.8-flash-low', weekly: true });
+    expect(w!.utilization).toBeCloseTo(0.57, 6);
+    expect(limitingWindow(null, null, now)).toBeNull();
   });
 
   it('with the quota at zero, the Antigravity cards wait and the Claude ones still start', () => {

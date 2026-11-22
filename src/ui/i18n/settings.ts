@@ -21,13 +21,13 @@ export const settings = defineMessages(
     // Fields (label "f." and hint "h.")
     'f.maxConcurrency': 'Execuções simultâneas',
     'h.maxConcurrency':
-      'quantos cards da fila "Pronta" o Claude Code executa ao mesmo tempo (o Antigravity CLI tem limite próprio, logo abaixo); também vale para as tarefas de um card dividido. Automático: o Board abre quantas couberem para o uso da sessão de 5h acompanhar o tempo da janela, sem estourar o limite. 0: nada novo sai da fila. ∞: todo card da fila começa na hora. Também dá para trocar no contador "rodando" do cabeçalho',
+      'quantos cards da fila "Pronta" o Claude Code executa ao mesmo tempo (o Antigravity CLI tem limite próprio, logo abaixo); também vale para as tarefas de um card dividido. Automático: o Board abre quantas couberem para o uso da sessão de 5h acompanhar o tempo da janela, sem estourar o limite. 0: nada novo sai da fila. ∞: todo card da fila começa na hora. Também dá para trocar no contador de execuções do cabeçalho',
     'opt.auto': 'Automático',
     'opt.unlimited': '∞ (sem limite)',
     'opt.zero': '0 (fila parada)',
     'f.autoSplit': 'Dividir card com lista em tarefas',
     'h.autoSplit':
-      'na 1ª execução de um card cuja descrição é uma lista, o Claude decide se os itens são tarefas independentes e cria um card para cada uma',
+      'na 1ª execução de um card cuja descrição é uma lista, o agente decide se os itens são tarefas independentes e cria um card para cada uma',
     'f.userProfile': 'Perfil do usuário (vai no prompt de cada execução)',
     'f.workspaceDir': 'Workspace do VS Code',
     'h.workspaceDir': 'as execuções começam aqui, com o mesmo CLAUDE.md, skills e configurações; vazio = pasta própria do Board',
@@ -190,6 +190,9 @@ export const settings = defineMessages(
     'usage.titleHead': 'Uso do seu plano na última execução do Board ({read}).',
     'usage.titleRenewed': '{name}: renovada {at}; o uso atual aparece na próxima execução.',
     'usage.titlePct': '{name}: {pct}%, renova {at}.',
+    'usage.quota': 'Cota',
+    'usage.titleAgy': 'Antigravity CLI: {pct}% da cota do Google usada ({model}), renova {at}.',
+    'usage.titleAgyNone': 'Antigravity CLI: o Board lê a cota do Google no modo automático, depois de cada execução e a cada 20 minutos enquanto ele está em uso.',
   },
   {
     en: {
@@ -208,13 +211,13 @@ export const settings = defineMessages(
 
       'f.maxConcurrency': 'Simultaneous runs',
       'h.maxConcurrency':
-        'how many cards of the "Ready" queue Claude Code runs at the same time (Antigravity CLI has its own limit, right below); also applies to the tasks of a split card. Automatic: the Board opens as many as fit so the 5-hour session usage keeps pace with the window, without going over the limit. 0: nothing new leaves the queue. ∞: every card in the queue starts right away. You can also change it in the "running" counter in the header',
+        'how many cards of the "Ready" queue Claude Code runs at the same time (Antigravity CLI has its own limit, right below); also applies to the tasks of a split card. Automatic: the Board opens as many as fit so the 5-hour session usage keeps pace with the window, without going over the limit. 0: nothing new leaves the queue. ∞: every card in the queue starts right away. You can also change it in the runs counter in the header',
       'opt.auto': 'Automatic',
       'opt.unlimited': '∞ (no limit)',
       'opt.zero': '0 (queue stopped)',
       'f.autoSplit': 'Split a card with a list into tasks',
       'h.autoSplit':
-        "on the 1st run of a card whose description is a list, Claude decides whether the items are independent tasks and creates a card for each one",
+        "on the 1st run of a card whose description is a list, the agent decides whether the items are independent tasks and creates a card for each one",
       'f.userProfile': 'User profile (goes into the prompt of every run)',
       'f.workspaceDir': 'VS Code workspace',
       'h.workspaceDir': "runs start here, with the same CLAUDE.md, skills and settings; empty = the Board's own folder",
@@ -372,6 +375,9 @@ export const settings = defineMessages(
       'usage.titleHead': "Your plan's usage at the Board's last run ({read}).",
       'usage.titleRenewed': '{name}: renewed {at}; the current usage shows on the next run.',
       'usage.titlePct': '{name}: {pct}%, renews {at}.',
+      'usage.quota': 'Quota',
+      'usage.titleAgy': 'Antigravity CLI: {pct}% of the Google quota used ({model}), renews {at}.',
+      'usage.titleAgyNone': 'Antigravity CLI: the Board reads the Google quota in automatic mode, after each run and every 20 minutes while it is in use.',
     },
     es: {
       'tab.runs': 'Ejecuciones',
@@ -389,13 +395,13 @@ export const settings = defineMessages(
 
       'f.maxConcurrency': 'Ejecuciones simultáneas',
       'h.maxConcurrency':
-        'cuántas tarjetas de la cola "Lista" ejecuta Claude Code al mismo tiempo (Antigravity CLI tiene su propio límite, justo debajo); también vale para las tareas de una tarjeta dividida. Automático: el Board abre las que quepan para que el uso de la sesión de 5 h acompañe el tiempo de la ventana, sin pasar el límite. 0: nada nuevo sale de la cola. ∞: toda tarjeta de la cola empieza en el acto. También puedes cambiarlo en el contador "en curso" del encabezado',
+        'cuántas tarjetas de la cola "Lista" ejecuta Claude Code al mismo tiempo (Antigravity CLI tiene su propio límite, justo debajo); también vale para las tareas de una tarjeta dividida. Automático: el Board abre las que quepan para que el uso de la sesión de 5 h acompañe el tiempo de la ventana, sin pasar el límite. 0: nada nuevo sale de la cola. ∞: toda tarjeta de la cola empieza en el acto. También puedes cambiarlo en el contador de ejecuciones del encabezado',
       'opt.auto': 'Automático',
       'opt.unlimited': '∞ (sin límite)',
       'opt.zero': '0 (cola detenida)',
       'f.autoSplit': 'Dividir una tarjeta con lista en tareas',
       'h.autoSplit':
-        'en la 1.ª ejecución de una tarjeta cuya descripción es una lista, Claude decide si los ítems son tareas independientes y crea una tarjeta para cada una',
+        'en la 1.ª ejecución de una tarjeta cuya descripción es una lista, el agente decide si los ítems son tareas independientes y crea una tarjeta para cada una',
       'f.userProfile': 'Perfil del usuario (va en el prompt de cada ejecución)',
       'f.workspaceDir': 'Workspace de VS Code',
       'h.workspaceDir': 'las ejecuciones empiezan aquí, con el mismo CLAUDE.md, skills y configuración; vacío = carpeta propia del Board',
@@ -553,6 +559,9 @@ export const settings = defineMessages(
       'usage.titleHead': 'Uso de tu plan en la última ejecución del Board ({read}).',
       'usage.titleRenewed': '{name}: renovada {at}; el uso actual aparece en la próxima ejecución.',
       'usage.titlePct': '{name}: {pct}%, se renueva {at}.',
+      'usage.quota': 'Cuota',
+      'usage.titleAgy': 'Antigravity CLI: {pct}% de la cuota de Google usada ({model}), se renueva {at}.',
+      'usage.titleAgyNone': 'Antigravity CLI: el Board lee la cuota de Google en el modo automático, después de cada ejecución y cada 20 minutos mientras está en uso.',
     },
   },
 );

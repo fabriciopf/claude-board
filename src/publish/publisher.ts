@@ -730,7 +730,7 @@ export class Publisher {
       if (lastHead === conflict.targetHead) {
         service.addComment(card.id, {
           author: 'system',
-          bodyMd: `O conflito continua depois de o Claude integrar a ${code(conflict.target)}. Não devolvi o card de novo, para não entrar em laço: resolva à mão ou peça ajustes.`,
+          bodyMd: `O conflito continua depois de o agente integrar a ${code(conflict.target)}. Não devolvi o card de novo, para não entrar em laço: resolva à mão ou peça ajustes.`,
         });
         return;
       }
@@ -738,7 +738,7 @@ export class Publisher {
       service.recordEvent(card.id, CONFLICT_HANDBACK_EVENT, { entryId: e.id, targetHead: conflict.targetHead, files: conflict.files }, 'system');
       service.addComment(card.id, {
         author: 'system',
-        bodyMd: `Devolvi o card ao Claude para integrar a ${code(conflict.target)} e resolver o conflito. Quando ele entregar de novo, a publicação volta para a fila sozinha.`,
+        bodyMd: `Devolvi o card ao agente para integrar a ${code(conflict.target)} e resolver o conflito. Quando ele entregar de novo, a publicação volta para a fila sozinha.`,
       });
       service.moveCard(card.id, { status: 'ready', reason: 'conflito na publicação' }, 'system');
     } catch (err) {
