@@ -9,6 +9,7 @@ import { mergeDecisions } from './decisions.js';
 import { Mirror, type MirrorOptions } from './mirror.js';
 import { canonicalDir, git, gitShow, linkDir, runCommand, samePath, spawnDetached, syncDir, unlinkJunction, type CmdResult } from './git.js';
 import { CLI_NAME, isBoardEnvKey } from '../shared/brand.js';
+import { countTestFiles, progressDetail, testProgress } from './test-progress.js';
 
 /**
  * Publication of the Board's own improvements (D42). A delivered card of the Board's repo enters the
@@ -40,15 +41,16 @@ export const DEFAULT_COMMANDS: PublishCommands = {
   install: ['npm', ['install']],
   // Half the cores and 60 s per test: the machine is shared with the running executions (card #110).
   // vitest.config.ts says the same; repeated here so the publication keeps it if the config changes.
-  test: ['npm', ['test', '--', '--maxWorkers=50%', '--testTimeout=60000', '--hookTimeout=60000', '--teardownTimeout=60000']],
-  testRetry: ['npm', ['test', '--', '--no-file-parallelism', '--testTimeout=120000', '--hookTimeout=120000', '--teardownTimeout=120000']],
+  // The verbose reporter prints each test as its file finishes, which gives the progress in % (card #213).
+  test: ['npm', ['test', '--', '--reporter=verbose', '--maxWorkers=50%', '--testTimeout=60000', '--hookTimeout=60000', '--teardownTimeout=60000']],
+  testRetry: ['npm', ['test', '--', '--reporter=verbose', '--no-file-parallelism', '--testTimeout=120000', '--hookTimeout=120000', '--teardownTimeout=120000']],
   build: ['npm', ['run', 'build']],
   buildUi: ['npm', ['run', 'build:ui']],
 };
 
 export interface PublisherOptions {
   commands?: Partial<PublishCommands>;
-  run?: (cmd: string, args: string[], cwd: string, env?: NodeJS.ProcessEnv) => Promise<CmdResult>;
+  run?: (cmd: string, args: string[], cwd: string, env?: NodeJS.ProcessEnv, onOutput?: (chunk: string) => void) => Promise<CmdResult>;
   /** Replaces the detached restart (tests). */
   restart?: () => Promise<void> | void;
   pollMs?: number;
@@ -647,17 +649,31 @@ export class Publisher {
 
   /** Tests, with one serial rerun before blaming the batch (card #110). */
   private async testStep(cwd: string, env: NodeJS.ProcessEnv): Promise<void> {
-    this.setPhase('preparing', 'Rodando os testes');
+    const label = 'Rodando os testes';
+    this.setPhase('preparing', label);
     const [cmd, args] = this.commands.test;
-    const first = await this.run(cmd, args, cwd, env);
+    const first = await this.run(cmd, args, cwd, env, this.progress(cwd, label));
     if (first.ok) return;
     this.log(`testes falharam na primeira rodada; repetindo um arquivo por vez.${fence(first.out)}`);
     const [retryCmd, retryArgs] = this.commands.testRetry;
-    this.setPhase('preparing', 'Repetindo os testes, um arquivo por vez');
-    const second = await this.run(retryCmd, retryArgs, cwd, env);
+    const retryLabel = 'Repetindo os testes, um arquivo por vez';
+    this.setPhase('preparing', retryLabel);
+    const second = await this.run(retryCmd, retryArgs, cwd, env, this.progress(cwd, retryLabel));
     if (second.ok) return;
     const shown = [retryCmd, ...retryArgs].join(' ');
     throw new PublishError(`Rodando os testes: \`${shown}\` falhou também na segunda rodada, um arquivo por vez.${fence(second.out)}`);
+  }
+
+  /**
+   * Follows the test output and shows the share of finished files in the step ("Rodando os testes:
+   * 42% (33 de 79 arquivos)", card #213). Only the detail changes: no log line per percent.
+   */
+  private progress(cwd: string, label: string): (chunk: string) => void {
+    const total = countTestFiles(cwd);
+    return testProgress(total, (percent, done) => {
+      this.detail = progressDetail(label, percent, done, total);
+      this.changed();
+    });
   }
 
   /** The only conflict is DECISIONS.md and the branch only appended entries: renumber them. */

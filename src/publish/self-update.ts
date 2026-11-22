@@ -10,6 +10,7 @@ import { expandHome } from '../config.js';
 import { canonicalDir, git, linkDir, repoRoot, runCommand, samePath, syncDir, type CmdResult } from './git.js';
 import { DEFAULT_COMMANDS, isScreenOnly, type Publisher, type PublishCommands } from './publisher.js';
 import { isBoardEnvKey } from '../shared/brand.js';
+import { countTestFiles, progressDetail, testProgress } from './test-progress.js';
 
 /**
  * Update of the Board from the git remote it was cloned from (card #183, D89).
@@ -32,7 +33,7 @@ const FAILURE_KEY = 'selfUpdateFailure';
 
 export interface SelfUpdaterOptions {
   commands?: Partial<PublishCommands>;
-  run?: (cmd: string, args: string[], cwd: string, env?: NodeJS.ProcessEnv) => Promise<CmdResult>;
+  run?: (cmd: string, args: string[], cwd: string, env?: NodeJS.ProcessEnv, onOutput?: (chunk: string) => void) => Promise<CmdResult>;
   /** Replaces the detached restart (tests). */
   restart?: () => Promise<void> | void;
   /** First check after the server starts. */
@@ -510,14 +511,25 @@ export class SelfUpdater implements SelfUpdateControl {
     if (!r.ok) throw new UpdateError(`${label}: \`${[cmd, ...args].join(' ')}\` falhou.${fence(r.out)}`);
   }
 
+  /** Share of finished test files in the step, as the publication shows it (card #213). */
+  private progress(cwd: string, label: string): (chunk: string) => void {
+    const total = countTestFiles(cwd);
+    return testProgress(total, (percent, done) => {
+      this.detail = progressDetail(label, percent, done, total);
+      this.changed();
+    });
+  }
+
   /** Tests, with one serial rerun before blaming the update (as the publication does, card #110). */
   private async testStep(cwd: string, env: NodeJS.ProcessEnv): Promise<void> {
-    this.setPhase('preparing', 'Rodando os testes');
+    const label = 'Rodando os testes';
+    this.setPhase('preparing', label);
     const [cmd, args] = this.commands.test;
-    if ((await this.run(cmd, args, cwd, env)).ok) return;
-    this.setPhase('preparing', 'Repetindo os testes, um arquivo por vez');
+    if ((await this.run(cmd, args, cwd, env, this.progress(cwd, label))).ok) return;
+    const retryLabel = 'Repetindo os testes, um arquivo por vez';
+    this.setPhase('preparing', retryLabel);
     const [retryCmd, retryArgs] = this.commands.testRetry;
-    const second = await this.run(retryCmd, retryArgs, cwd, env);
+    const second = await this.run(retryCmd, retryArgs, cwd, env, this.progress(cwd, retryLabel));
     if (!second.ok) throw new UpdateError(`Rodando os testes: \`${[retryCmd, ...retryArgs].join(' ')}\` falhou também na segunda rodada.${fence(second.out)}`);
   }
 }
