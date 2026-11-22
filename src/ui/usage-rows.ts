@@ -15,6 +15,11 @@ export interface UsageRow {
   value: string;
   /** 0..100 for the bar; null = no bar (no reading, or the window already renewed). */
   pct: number | null;
+  /**
+   * 0..100: how much of the window has gone by since its last reset, drawn as a white tick on the bar
+   * (card #206), so usage can be read against time. Null whenever pct is null.
+   */
+  elapsed: number | null;
   /** Text after the bar: "reset em 1h12", "às 14:00", "sem leitura ainda". */
   note: string;
   tone: '' | 'attention' | 'danger';
@@ -33,6 +38,16 @@ export function duration(ms: number): string {
   return h ? `${h}h${String(m).padStart(2, '0')}` : `${m} min`;
 }
 
+/** Length of each window: the 5-hour session and the 7-day week (Claude Code and Antigravity alike). */
+export const WINDOW_MS = { fiveHour: 5 * 3600000, week: 7 * 24 * 3600000 } as const;
+
+/** Share of the window already gone by, 0..100 with one decimal: 5h window resetting in 1h12 → 76. */
+export function elapsedPct(weekly: boolean, resetsAtSec: number, now: number): number {
+  const left = resetsAtSec * 1000 - now;
+  const pct = 100 * (1 - left / (weekly ? WINDOW_MS.week : WINDOW_MS.fiveHour));
+  return Math.round(Math.min(100, Math.max(0, pct)) * 10) / 10;
+}
+
 const clock = (unixSec: number) => new Date(unixSec * 1000).toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' });
 const dayClock = (unixSec: number) =>
   new Date(unixSec * 1000).toLocaleString(locale(), { weekday: 'short', hour: '2-digit', minute: '2-digit' });
@@ -40,22 +55,22 @@ const dayClock = (unixSec: number) =>
 function windowRow(key: UsageRow['key'], agent: AgentId, weekly: boolean, w: Pick<UsageWindow, 'utilization' | 'resetsAt'>, now: number): UsageRow {
   const label = weekly ? t('settings.usage.week') : t('settings.usage.fiveHour');
   const at = weekly ? dayClock(w.resetsAt) : clock(w.resetsAt);
-  if (w.resetsAt * 1000 <= now) return { key, agent, label, value: t('settings.usage.renewed'), pct: null, note: t('settings.usage.at', { time: at }), tone: '' };
+  if (w.resetsAt * 1000 <= now) return { key, agent, label, value: t('settings.usage.renewed'), pct: null, elapsed: null, note: t('settings.usage.at', { time: at }), tone: '' };
   const pct = Math.round(w.utilization * 100);
   const tone = pct >= 95 ? 'danger' : pct >= 80 ? 'attention' : '';
-  return { key, agent, label, value: `${pct}%`, pct: Math.min(100, Math.max(0, pct)), note: t('settings.usage.resetIn', { d: duration(w.resetsAt * 1000 - now) }), tone };
+  return { key, agent, label, value: `${pct}%`, pct: Math.min(100, Math.max(0, pct)), elapsed: elapsedPct(weekly, w.resetsAt, now), note: t('settings.usage.resetIn', { d: duration(w.resetsAt * 1000 - now) }), tone };
 }
 
 function claudeRows(usage: UsageSnapshot | null, now: number): UsageRow[] {
   const rows: UsageRow[] = [];
   if (usage?.fiveHour) rows.push(windowRow('fiveHour', 'claude', false, usage.fiveHour, now));
   if (usage?.sevenDay) rows.push(windowRow('sevenDay', 'claude', true, usage.sevenDay, now));
-  if (rows.length === 0) rows.push({ key: 'fiveHour', agent: 'claude', label: t('settings.usage.fiveHour'), value: '—', pct: null, note: t('settings.usage.noReading'), tone: '' });
+  if (rows.length === 0) rows.push({ key: 'fiveHour', agent: 'claude', label: t('settings.usage.fiveHour'), value: '—', pct: null, elapsed: null, note: t('settings.usage.noReading'), tone: '' });
   return rows;
 }
 
 function antigravityRows(w: AgyUsageWindow | null | undefined, now: number): UsageRow[] {
-  if (!w) return [{ key: 'antigravity', agent: 'antigravity', label: t('settings.usage.quota'), value: '—', pct: null, note: t('settings.usage.noReading'), tone: '' }];
+  if (!w) return [{ key: 'antigravity', agent: 'antigravity', label: t('settings.usage.quota'), value: '—', pct: null, elapsed: null, note: t('settings.usage.noReading'), tone: '' }];
   return [windowRow('antigravity', 'antigravity', w.weekly, w, now)];
 }
 

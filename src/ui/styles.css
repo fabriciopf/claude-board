@@ -687,15 +687,16 @@ pre {
 }
 
 /* The warning colors only the progress bar; the text keeps the pill's color (comment on card #174). */
-.usage-row.attention .usage-bar > span {
+.usage-row.attention .usage-bar > .usage-fill {
   background: var(--warn);
 }
 
-.usage-row.danger .usage-bar > span {
+.usage-row.danger .usage-bar > .usage-fill {
   background: var(--danger);
 }
 
 .usage-bar {
+  position: relative;
   display: inline-block;
   width: 48px;
   height: 6px;
@@ -704,17 +705,28 @@ pre {
   overflow: hidden;
 }
 
-.usage-bar > span {
+/* Time gone by since the last reset (card #206): a white tick, outlined so it shows on the light theme too. */
+.usage-bar > .usage-elapsed {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: #fff;
+  box-shadow: 0 0 0 0.5px rgb(0 0 0 / 0.35);
+}
+
+.usage-bar > .usage-fill {
   display: block;
   height: 100%;
   background: var(--ok);
 }
 
-.counter.attention .usage-bar > span {
+.counter.attention .usage-bar > .usage-fill {
   background: var(--warn);
 }
 
-.counter.danger .usage-bar > span {
+.counter.danger .usage-bar > .usage-fill {
   background: var(--danger);
 }
 
