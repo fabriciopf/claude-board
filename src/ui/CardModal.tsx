@@ -599,7 +599,7 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
                     }}
                   />
                   <span>{item.text}</span>
-                  {item.createdBy === 'claude' && <span className="pill">Claude</span>}
+                  {item.createdBy === 'claude' && <span className="pill">{t('card.author.claude')}</span>}
                   <ActionButton className="btn link small" aria-label={t('card.removeItem')} onAction={() => run(() => api.del(`/api/checklist/${item.id}`))}>
                     ✕
                   </ActionButton>
@@ -701,7 +701,7 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
                 <label htmlFor="f-owner">{t('card.owner')}</label>
                 <select id="f-owner" className="input" value={card.owner} onChange={(e) => void patch({ owner: e.target.value })}>
                   <option value="user">{t('card.ownerUser')}</option>
-                  <option value="claude">Claude</option>
+                  <option value="claude">{t('board.owner.claude')}</option>
                 </select>
               </div>
               <div className="field">

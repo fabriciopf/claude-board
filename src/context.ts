@@ -1,5 +1,5 @@
 import type { Config } from './config.js';
-import type { AgyQuotaReading, ConcurrencyInfo } from './shared/domain.js';
+import type { AgyQuotaReading, AgyUsageWindow, ConcurrencyInfo } from './shared/domain.js';
 import type { Db } from './db/index.js';
 import type { EventBus } from './server/bus.js';
 import type { BoardService } from './service/board.js';
@@ -22,6 +22,8 @@ export interface RunnerControl {
   antigravityConcurrency?(): ConcurrencyInfo;
   /** Last reading of the Google quota of Antigravity CLI (D100). */
   antigravityUsage?(): AgyQuotaReading | null;
+  /** The quota that limits the Antigravity runs, as one window (card #198 review). */
+  antigravityWindow?(): AgyUsageWindow | null;
 }
 
 /** Incremental import, filled in by M5. */

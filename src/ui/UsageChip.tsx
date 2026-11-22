@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { UsageSnapshot } from '../shared/domain';
-import { USAGE_TICK_MS, usageRows, usageTitle, type UsageRow } from './usage-rows';
+import { AgentMark } from './AgentIcon';
+import { USAGE_TICK_MS, usageRows, usageTitle, type UsageAgents, type UsageRow } from './usage-rows';
 
 function reducedMotion(): boolean {
   try {
@@ -13,6 +14,7 @@ function reducedMotion(): boolean {
 function Row({ row }: { row: UsageRow }) {
   return (
     <span className={'usage-row' + (row.tone ? ' ' + row.tone : '')}>
+      <AgentMark agent={row.agent} />
       {row.label}: <strong>{row.value}</strong>
       {row.pct !== null && (
         <span className="usage-bar" aria-hidden="true">
@@ -28,8 +30,10 @@ function Row({ row }: { row: UsageRow }) {
  * Second half of the runner pill (D83): "5 horas: 38% ▬ reset em 1h12" and "Semana: 12% ▬ reset em 3d05h",
  * one at a time, scrolling up every 5 seconds. Every line sits in the same column, so the pill is as wide
  * as the widest line and nothing else in the header moves when the line changes. Hovering holds the line.
+ * Since the card #198 review each line carries its agent's mark, and the lines are those of every agent
+ * with a run going (`agents`, the runner state), or of the default agent when none is.
  */
-export function UsageChip({ usage }: { usage: UsageSnapshot | null }) {
+export function UsageChip({ usage, agents }: { usage: UsageSnapshot | null; agents?: UsageAgents | null }) {
   const [now, setNow] = useState(() => Date.now());
   const [tick, setTick] = useState({ step: 0, animate: false });
   const [held, setHeld] = useState(false);
@@ -38,7 +42,7 @@ export function UsageChip({ usage }: { usage: UsageSnapshot | null }) {
     return () => window.clearInterval(t);
   }, []);
 
-  const rows = usageRows(usage, now);
+  const rows = usageRows(usage, now, agents);
   const n = rows.length;
   const signature = rows.map((r) => r.key).join('|');
   useEffect(() => setTick({ step: 0, animate: false }), [signature]);
@@ -59,7 +63,7 @@ export function UsageChip({ usage }: { usage: UsageSnapshot | null }) {
   return (
     <span
       className="usage-part"
-      title={usageTitle(usage, now)}
+      title={usageTitle(usage, now, agents)}
       onMouseEnter={() => setHeld(true)}
       onMouseLeave={() => setHeld(false)}
     >

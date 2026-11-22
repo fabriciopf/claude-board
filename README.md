@@ -6,7 +6,7 @@ The command is `dexm`. The project had another name until November 2026; the old
 
 Everything runs on `127.0.0.1`, with no login and no cloud: one process serves the API, the web UI, the runner and an MCP server.
 
-> **Language:** the UI speaks Brazilian Portuguese, English and Spanish: pick one with the globe button in the header (by default, the browser's language). The prompts the runner sends to Claude, the CLI messages and the texts the server writes (system comments, error messages) stay in Brazilian Portuguese. The list names below are given in English with the Portuguese label the UI shows.
+> **Language:** the UI speaks Brazilian Portuguese, English and Spanish: pick one with the globe button in the header (by default, the browser's language). The prompts the runner sends to the agent, the CLI messages and the texts the server writes (system comments, error messages) stay in Brazilian Portuguese. The list names below are given in English with the Portuguese label the UI shows.
 
 ## Requirements
 
@@ -54,18 +54,18 @@ claude mcp add --scope user --transport http dexm http://127.0.0.1:4317/mcp
 | List (UI label) | Meaning | Who puts a card there |
 | --- | --- | --- |
 | Triage (Triagem) | Import suggestions not accepted yet | System |
-| Not started (Não iniciada) | Backlog, outside Claude's queue | You |
-| Ready for Claude (Pronta para o Claude) | The runner's queue | You or Claude |
+| Not started (Não iniciada) | Backlog, outside the agent's queue | You |
+| Ready for the agent (Pronta para o agente) | The runner's queue | You or the agent |
 | In progress (Em andamento) | A run is going on now | Runner |
-| Waiting for you (Aguardando você) | Claude asked something, or the run failed | Runner or MCP |
-| Waiting for a third party (Aguardando terceiro) | Depends on someone else, a deploy or access, or on the tasks of a split card | You or Claude |
-| In review (Em revisão) | Claude finished; you still have to check | Runner or MCP |
+| Waiting for you (Aguardando você) | The agent asked something, or the run failed | Runner or MCP |
+| Waiting for a third party (Aguardando terceiro) | Depends on someone else, a deploy or access, or on the tasks of a split card | You or the agent |
+| In review (Em revisão) | The agent finished; you still have to check | Runner or MCP |
 | Done (Concluída) | Approved by you | Only you |
 
-- **Send to Claude:** drag the card to "Ready for Claude" or use the button on the card. A card you own does not enter the queue; the Board asks whether to hand it to Claude.
-- **Answer:** when Claude asks, the card goes to "Waiting for you" with the question highlighted and the options as buttons. Answering puts the card back in the queue, and the runner resumes the same session (`claude --resume`).
-- **Review:** in "In review", **Approve** moves the card to "Done", and **Request changes** sends it back to Claude with your comment, in the same session.
-- **Stop:** kills the Claude process and everything it started. The card goes to "Waiting for you", and **Try again** resumes where it stopped.
+- **Send to the agent:** drag the card to "Ready for the agent" or use the button on the card. A card you own does not enter the queue; the Board asks whether to hand it to the agent.
+- **Answer:** when the agent asks, the card goes to "Waiting for you" with the question highlighted and the options as buttons. Answering puts the card back in the queue, and the runner resumes the same session (`claude --resume`).
+- **Review:** in "In review", **Approve** moves the card to "Done", and **Request changes** sends it back to the agent with your comment, in the same session.
+- **Stop:** kills the agent's process and everything it started. The card goes to "Waiting for you", and **Try again** resumes where it stopped.
 - **Continue in the terminal:** copies `cd "<folder>"; claude --resume <session>`.
 - **Project:** the product or project the task is about. A card has at most one project, shown on its cover and filterable on the board. Projects are registered under Settings › Projects and labels, with a name, a color and an optional folder; the panel suggests the repositories of the workspace and their `apps/*` folders (monorepos), skipping worktrees. The run gets the project's name and folder in its prompt. On import, a session gets the project whose folder holds most of the files it edited. In the code, the API and the MCP the field is still called `app`.
 
@@ -83,7 +83,7 @@ claude mcp add --scope user --transport http dexm http://127.0.0.1:4317/mcp
 
 ## The runner
 
-Every 30 seconds (and right away when a card enters the queue), the runner takes the next card from "Ready for Claude", by priority and then by position, and runs:
+Every 30 seconds (and right away when a card enters the queue), the runner takes the next card from "Ready for the agent", by priority and then by position, and runs:
 
 ```text
 claude -p --output-format stream-json --verbose [--max-turns N] [--model M] [--effort E] [--name <name>]
@@ -97,11 +97,11 @@ claude -p --output-format stream-json --verbose [--max-turns N] [--model M] [--e
 - **Same setup as your editor:** with `workspaceDir` set, every run starts at the workspace root and loads the same `CLAUDE.md`, skills, project `settings.json` and memory. With no permission mode on the card, the one in your Claude Code `settings.json` applies.
 - **Where it works:** a card with a repository gets its own worktree next to the repo (`../<repo>-cb-<id>`), on branch `cb/<id>-<title>`, created from the base branch. The main branch is never touched. The worktree joins the session through `--add-dir`. A card with no repository works in the workspace (or in `~/.dexm/work/<id>/` when there is no `workspaceDir`).
 - **Transcript:** each run is stored in `~/.dexm/transcripts/<id>.jsonl` and shown on the card, with messages, collapsed tool calls and highlighted errors.
-- **No limits by default:** a run goes until Claude finishes, like an interactive session. A card can set its own maximum turns. "Pausar runner" in the header holds the whole queue.
+- **No limits by default:** a run goes until the agent finishes, like an interactive session. A card can set its own maximum turns. "Pausar runner" in the header holds the whole queue.
 - **Session name:** on the first run, Claude gives the task a short name (`card_rename`), which becomes the card title and the Claude Code session name. The original title and description stay on the card.
-- **Sound:** when Claude or the runner moves a card to "Waiting for you", "Waiting for a third party" or "In review", the Board plays a short chime. Moves you make yourself are silent. The header toggle turns it off for that browser; with several tabs open, only one plays.
+- **Sound:** when the agent or the runner moves a card to "Waiting for you", "Waiting for a third party" or "In review", the Board plays a short chime. Moves you make yourself are silent. The header toggle turns it off for that browser; with several tabs open, only one plays.
 - **No automatic retry:** whatever fails comes back to you.
-- **Git remotes:** by default Claude neither pushes nor opens PRs (`prPolicy = "none"`). Settings can allow pushing the `cb/*` branch, or pushing and opening a draft PR, when the card asks for it. Force pushes and pushes to the branches in `protectedBranches` are always blocked, by the agent's rules and by a `pre-push` hook the Board installs in each card's worktree.
+- **Git remotes:** by default the agent neither pushes nor opens PRs (`prPolicy = "none"`). Settings can allow pushing the `cb/*` branch, or pushing and opening a draft PR, when the card asks for it. Force pushes and pushes to the branches in `protectedBranches` are always blocked, by the agent's rules and by a `pre-push` hook the Board installs in each card's worktree.
 - **Dangerous mode:** only with the "Perigoso: rodar sem permissões" checkbox ticked on the card, which asks for confirmation.
 
 Runs use the same Claude Code login you use interactively, so they draw on the same plan quota.
@@ -126,10 +126,10 @@ node bin/agy-acp.mjs runs/<id>/agy-run.json
 
 ### Cards with several items
 
-When a card's description is a list (with or without surrounding context), the first run starts by asking Claude whether the items are independent tasks or steps of a single task.
+When a card's description is a list (with or without surrounding context), the first run starts by asking the agent whether the items are independent tasks or steps of a single task.
 
-- **Independent tasks:** Claude calls `card_split` and stops. The Board creates one card per task, already in "Ready for Claude", with that task's description, the shared context and the original card's settings (project, labels, priority, due date, repository, permissions, links). Each task has its own session and follows its own path. They run in parallel up to "Execuções simultâneas" (concurrent runs).
-- **A single task:** Claude goes on with the card as usual.
+- **Independent tasks:** the agent calls `card_split` and stops. The Board creates one card per task, already in "Ready for the agent", with that task's description, the shared context and the original card's settings (project, labels, priority, due date, repository, permissions, links). Each task has its own session and follows its own path. They run in parallel up to "Execuções simultâneas" (concurrent runs).
+- **A single task:** the agent goes on with the card as usual.
 
 The original card waits in "Waiting for a third party", with its tasks and their status on the cover, and moves to "Done" by itself when you approve the last one. To keep a card whole, say so in its description; to turn the question off for every card, untick "Dividir card com lista em tarefas" in Settings.
 
@@ -141,7 +141,7 @@ With `autoPublish` on, a card whose branch lives in the Board's own repository i
 
 **Automations**, in the header menu (☰), holds recurring tasks. You describe one in plain words, such as "every Monday at 9am, list the open PRs that have been idle for 3 days" or "when an e-mail from Omar arrives, summarize it and turn the requests into a checklist". Claude Code (the `classificationModel`, with no tools) reads the text into a name, a trigger and an instruction. The list shows what it understood. To change an automation, rewrite its text.
 
-Each firing creates a card in "Ready for Claude" with the instruction as its description. The rest is the same as for any other card: the runner, the questions, the review.
+Each firing creates a card in "Ready for the agent" with the instruction as its description. The rest is the same as for any other card: the runner, the questions, the review.
 
 | Trigger | How it fires |
 | --- | --- |
@@ -168,9 +168,9 @@ You can also turn each automation on and off, or run it now. An automation stays
 | `card_wait_third_party` | Card goes to "Waiting for a third party" |
 | `card_submit_for_review` | Delivery: card goes to "In review" |
 | `card_split` | Split the card into independent tasks, each a queued card |
-| `automation_list`, `automation_create`, `automation_update` | Recurring tasks: Claude reads the request itself and passes the trigger and the instruction |
+| `automation_list`, `automation_create`, `automation_update` | Recurring tasks: the agent reads the request itself and passes the trigger and the instruction |
 
-The rules are enforced by the server, not only by the UI: the MCP refuses to move a card to "Done". Claude can queue cards, even from inside a run, but not the card it is running nor a card you own. `card_split` only splits the card of its own run, once.
+The rules are enforced by the server, not only by the UI: the MCP refuses to move a card to "Done". The agent can queue cards, even from inside a run, but not the card it is running nor a card you own. `card_split` only splits the card of its own run, once.
 
 There are two transports: HTTP at `http://127.0.0.1:4317/mcp`, which the runner uses, and stdio (`dexm mcp`), which forwards to HTTP. The server is named `dexm`, so its tools reach Claude Code as `mcp__dexm__card_*`.
 
@@ -221,7 +221,7 @@ Stored in `~/.dexm/config.json` and editable in Settings.
 | `antigravityModel` | empty | Model of Antigravity runs when the card does not choose; empty = Antigravity CLI's default (`agy models` lists them) |
 | `heartbeatSeconds` | 30 | Runner interval |
 | `maxConcurrency` | `"auto"` | Concurrent runs: `"auto"` (paces runs so the 5-hour usage tracks the window, and only opens a run when what is left until the reset pays for the runs in progress plus one more with slack) or 1 to 20 |
-| `autoSplit` | `true` | On a card's first run, Claude decides whether a list description becomes separate tasks |
+| `autoSplit` | `true` | On a card's first run, the agent decides whether a list description becomes separate tasks |
 | `runTimeoutMinutes` | 0 | Maximum run time; 0 = no limit |
 | `defaultMaxTurns` | 0 | Turns per run; 0 = no limit |
 | `workspaceDir` | empty | Folder where runs start (your editor workspace) |

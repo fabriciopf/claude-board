@@ -133,7 +133,7 @@ function Transcript({ executionId }: { executionId: number }) {
         if (it.kind === 'text' || it.kind === 'user') {
           return (
             <div key={i} className={'tr-item ' + it.kind}>
-              <div className="muted small">{it.kind === 'user' ? t('card.transcript.prompt') : 'Claude'}</div>
+              <div className="muted small">{it.kind === 'user' ? t('card.transcript.prompt') : t('card.author.claude')}</div>
               <div className="md" style={{ padding: 0, background: 'transparent' }} dangerouslySetInnerHTML={{ __html: renderMarkdown(it.text ?? '') }} />
             </div>
           );

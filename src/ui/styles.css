@@ -613,9 +613,27 @@ pre {
   cursor: default;
 }
 
-/* Counter split by agent (D99): "rodando 1 de 3 (auto) Claude · 2 de 2 Antigravity". */
-.runner-agent {
-  color: var(--text-muted);
+/* Counter split by agent (D99), each agent's mark before its count and before each usage line
+   (card #198 review): "[Claude] rodando 1 de 3 (auto) · [Antigravity] 2 de 2". */
+.agent-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  flex: none;
+}
+
+/* The Claude spark white on the orange disc, like its avatar (card #180). */
+.agent-mark.claude {
+  border-radius: 50%;
+  background: var(--accent);
+  color: #ffffff;
+}
+
+.agent-mark img {
+  display: block;
+  pointer-events: none;
 }
 
 .runner-part-agent::before {

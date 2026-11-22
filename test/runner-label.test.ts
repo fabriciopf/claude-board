@@ -72,8 +72,22 @@ describe('runner and session share one pill in the header (D83)', () => {
     const fs = await import('node:fs');
     const app = fs.readFileSync(new URL('../src/ui/App.tsx', import.meta.url), 'utf8');
     const pill = app.slice(app.indexOf('className="counter runner-usage"'));
-    expect(pill.indexOf('<UsageChip usage={data?.usage ?? null} />')).toBeGreaterThan(0);
+    // The runner state goes along: the ticker shows the usage of the agents with runs going (card #198 review).
+    expect(pill.indexOf('<UsageChip usage={data?.usage ?? null} agents={runner} />')).toBeGreaterThan(0);
     expect(pill.indexOf('<UsageChip')).toBeLessThan(pill.indexOf('<AgendaChip'));
     expect(app.match(/<UsageChip/g)).toHaveLength(1);
+  });
+
+  it('each count starts with its agent mark, and the names are not spelled out (card #198 review)', async () => {
+    const fs = await import('node:fs');
+    const app = fs.readFileSync(new URL('../src/ui/App.tsx', import.meta.url), 'utf8');
+    const pill = app.slice(app.indexOf('className="counter runner-usage"'), app.indexOf('<UsageChip'));
+    // Split counter: Claude mark before "rodando", Antigravity mark before its count; single counter: Claude mark.
+    expect(pill.match(/<AgentMark agent="claude" \/> \{t\('app\.runner\.running'\)\}/g)).toHaveLength(2);
+    expect(pill).toMatch(/<AgentMark agent="antigravity" \/> <strong>\{runner\.antigravity\.running\}<\/strong>/);
+    expect(pill).not.toMatch(/runner-agent/);
+    // Each usage line carries the mark of its agent too.
+    const chip = fs.readFileSync(new URL('../src/ui/UsageChip.tsx', import.meta.url), 'utf8');
+    expect(chip).toMatch(/<AgentMark agent=\{row\.agent\} \/>/);
   });
 });

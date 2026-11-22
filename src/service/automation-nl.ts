@@ -136,7 +136,7 @@ function prompt(text: string, apps: App[], now: Date): string {
 
 {
   "name": "nome curto da automação, em português, até 60 caracteres",
-  "instruction": "o que o Claude deve fazer a cada disparo, escrito como pedido completo e autossuficiente (sem a parte de quando rodar)",
+  "instruction": "o que o agente deve fazer a cada disparo, escrito como pedido completo e autossuficiente (sem a parte de quando rodar)",
   "trigger": { ...um dos três formatos abaixo... },
   "app": "nome de um projeto da lista, só se o pedido citar um; senão null",
   "priority": 1 a 4 (1 alta, 3 padrão), só se o pedido disser; senão null
@@ -217,7 +217,7 @@ export interface Interpretation {
 /** Claude first, the local parser second; a RuleError when neither finds when to run. */
 export async function interpretRequest(config: Config, text: string, apps: App[]): Promise<Interpretation> {
   const request = String(text ?? '').trim();
-  if (!request) throw new RuleError('empty_request', 'Descreva a automação: quando ela roda e o que o Claude deve fazer.', 400);
+  if (!request) throw new RuleError('empty_request', 'Descreva a automação: quando ela roda e o que o agente deve fazer.', 400);
   try {
     return { draft: await interpretWithClaude(config, request, apps), by: 'claude' };
   } catch {

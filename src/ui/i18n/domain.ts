@@ -43,8 +43,8 @@ export const domain = defineMessages(
     en: {
       'status.triage': 'Triage',
       'status.backlog': 'Not started',
-      'status.ready': 'Ready for Claude',
-      'status.running': 'In progress (Claude)',
+      'status.ready': 'Ready for the agent',
+      'status.running': 'In progress (agent)',
       'status.waiting_user': 'Waiting on you',
       'status.waiting_third_party': 'Waiting on others',
       'status.review': 'In review',
@@ -62,16 +62,16 @@ export const domain = defineMessages(
       'desc.triage':
         'Suggestions from the history import and from VS Code sessions, not accepted yet. Open the card to accept, adjust or ignore it.',
       'desc.backlog':
-        'Accepted tasks that are not with Claude yet. Use "Send to Claude" or drag the card to the queue when you want it to start.',
-      'desc.ready': "Claude's queue. The runner takes the next card from here, by priority and then by position in the list.",
-      'desc.running': 'Claude is working on these cards right now. Only the runner puts cards here; to interrupt one, use "Stop" inside the card.',
+        'Accepted tasks that are not with the agent yet. Use "Send to the agent" or drag the card to the queue when you want it to start.',
+      'desc.ready': "The agent's queue. The runner takes the next card from here, by priority and then by position in the list.",
+      'desc.running': 'The agent is working on these cards right now. Only the runner puts cards here; to interrupt one, use "Stop" inside the card.',
       'desc.waiting_user':
-        'Claude asked a question or the run stopped. Answer or use "Try again" inside the card; the card goes back to the queue.',
+        'The agent asked a question or the run stopped. Answer or use "Try again" inside the card; the card goes back to the queue.',
       'desc.waiting_third_party':
-        'Depends on another person, a deploy or an access; the reason is recorded on the card. A card Claude split into tasks waits here until you approve all of them.',
+        'Depends on another person, a deploy or an access; the reason is recorded on the card. A card the agent split into tasks waits here until you approve all of them.',
       'desc.review':
-        "Claude finished and delivered a summary. Check it and approve, or ask for changes, which go back to Claude in the same session. A comment from you also sends the card back to Claude's queue.",
-      'desc.done': "Work you approved. Only you move a card here. A comment from you sends the card back to Claude's queue.",
+        "The agent finished and delivered a summary. Check it and approve, or ask for changes, which go back to the agent in the same session. A comment from you also sends the card back to the agent's queue.",
+      'desc.done': "Work you approved. Only you move a card here. A comment from you sends the card back to the agent's queue.",
 
       'exec.running': 'running',
       'exec.success': 'success',
@@ -83,8 +83,8 @@ export const domain = defineMessages(
     es: {
       'status.triage': 'Triaje',
       'status.backlog': 'No iniciada',
-      'status.ready': 'Lista para Claude',
-      'status.running': 'En curso (Claude)',
+      'status.ready': 'Lista para el agente',
+      'status.running': 'En curso (agente)',
       'status.waiting_user': 'Esperando por ti',
       'status.waiting_third_party': 'Esperando a terceros',
       'status.review': 'En revisión',
@@ -102,17 +102,17 @@ export const domain = defineMessages(
       'desc.triage':
         'Sugerencias de la importación del historial y de las sesiones de VS Code, aún no aceptadas. Abre la tarjeta para aceptarla, ajustarla o ignorarla.',
       'desc.backlog':
-        'Tareas aceptadas que aún no están con Claude. Usa "Enviar a Claude" o arrastra la tarjeta a la cola cuando quieras que empiece.',
-      'desc.ready': 'La cola de Claude. El runner toma de aquí la siguiente tarjeta, por prioridad y luego por posición en la lista.',
+        'Tareas aceptadas que aún no están con el agente. Usa "Enviar al agente" o arrastra la tarjeta a la cola cuando quieras que empiece.',
+      'desc.ready': 'La cola del agente. El runner toma de aquí la siguiente tarjeta, por prioridad y luego por posición en la lista.',
       'desc.running':
-        'Claude está trabajando en estas tarjetas ahora. Solo el runner pone tarjetas aquí; para interrumpir una, usa "Detener" dentro de la tarjeta.',
+        'El agente está trabajando en estas tarjetas ahora. Solo el runner pone tarjetas aquí; para interrumpir una, usa "Detener" dentro de la tarjeta.',
       'desc.waiting_user':
-        'Claude hizo una pregunta o la ejecución se detuvo. Responde o usa "Reintentar" dentro de la tarjeta; la tarjeta vuelve a la cola.',
+        'El agente hizo una pregunta o la ejecución se detuvo. Responde o usa "Reintentar" dentro de la tarjeta; la tarjeta vuelve a la cola.',
       'desc.waiting_third_party':
-        'Depende de otra persona, de un deploy o de un acceso; el motivo queda registrado en la tarjeta. Una tarjeta que Claude dividió en tareas espera aquí hasta que apruebes todas.',
+        'Depende de otra persona, de un deploy o de un acceso; el motivo queda registrado en la tarjeta. Una tarjeta que el agente dividió en tareas espera aquí hasta que apruebes todas.',
       'desc.review':
-        'Claude terminó y entregó un resumen. Revísalo y apruébalo, o pide ajustes, que vuelven a Claude en la misma sesión. Un comentario tuyo también devuelve la tarjeta a la cola de Claude.',
-      'desc.done': 'Trabajo que aprobaste. Solo tú mueves una tarjeta aquí. Un comentario tuyo devuelve la tarjeta a la cola de Claude.',
+        'El agente terminó y entregó un resumen. Revísalo y apruébalo, o pide ajustes, que vuelven al agente en la misma sesión. Un comentario tuyo también devuelve la tarjeta a la cola del agente.',
+      'desc.done': 'Trabajo que aprobaste. Solo tú mueves una tarjeta aquí. Un comentario tuyo devuelve la tarjeta a la cola del agente.',
 
       'exec.running': 'en curso',
       'exec.success': 'éxito',

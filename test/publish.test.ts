@@ -332,7 +332,7 @@ describe('publication (D42)', () => {
     expect(back.nextPrompt).toContain('git merge master');
     expect(back.nextPrompt).toContain(`\`${branch}\``);
     expect(back.nextPrompt).toContain('`src/server.ts`');
-    expect(comments(card.id)).toMatch(/Devolvi o card ao Claude para integrar a `master`/);
+    expect(comments(card.id)).toMatch(/Devolvi o card ao agente para integrar a `master`/);
 
     // Claude merges master, resolves and delivers again: the same entry goes back to the queue and publishes.
     git(wt, 'merge', '-q', 'master', '-X', 'theirs', '-m', 'merge master');
