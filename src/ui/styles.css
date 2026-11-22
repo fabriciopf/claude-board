@@ -501,7 +501,7 @@ pre {
   flex: none;
 }
 
-/* The runner pill shrinks too, down to "rodando x de y | 5 horas: n% ▬": only the "reset em …" note gives way, with an ellipsis. */
+/* The runner pill shrinks too, down to "x de y | 5 horas: n% ▬": only the "reset em …" note gives way, with an ellipsis. */
 .counters > .runner-usage {
   flex: 0 1 auto;
   min-width: var(--usage-min);
@@ -596,7 +596,7 @@ pre {
   cursor: default;
 }
 
-/* "rodando x de y" and the plan usage share one pill (D83); each half keeps its own tooltip. */
+/* "x de y" and the plan usage share one pill (D83); each half keeps its own tooltip. */
 .counter.runner-usage {
   gap: 8px;
 }
@@ -614,7 +614,7 @@ pre {
 }
 
 /* Counter split by agent (D99), each agent's mark before its count and before each usage line
-   (card #198 review): "[Claude] rodando 1 de 3 (auto) · [Antigravity] 2 de 2". */
+   (card #198 review): "[Claude] 1 de 3 (auto) · [Antigravity] 2 de 2". */
 .agent-mark {
   display: inline-flex;
   align-items: center;
