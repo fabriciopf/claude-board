@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { boardHome, paths } from '../src/config.js';
 import { nowIso } from '../src/db/index.js';
 import { mergeDecisions } from '../src/publish/decisions.js';
-import { DEFAULT_COMMANDS, isScreenOnly, Publisher } from '../src/publish/publisher.js';
+import { conflictPrompt, DEFAULT_COMMANDS, isScreenOnly, Publisher } from '../src/publish/publisher.js';
 import { ensureWorkdir } from '../src/runner/worktree.js';
 import { runnerState } from '../src/service/runner-state.js';
 import { makeContext, tempDir } from './helpers.js';
@@ -341,6 +341,43 @@ describe('publication (D42)', () => {
     await publisher.whenIdle();
     expect(entry(card.id).status).toBe('published');
     expect(git(repo, 'merge-base', '--is-ancestor', branch, 'master')).toBe('');
+  });
+
+  it('a conflict on a card approved before its publication hands it back too, and the new delivery publishes (card #212)', async () => {
+    const { card, branch } = cardWithBranch('Aprovado antes', { 'src/server.ts': 'export const port = 1111;\n' }, 'backlog');
+    publisher.onDelivered(card.id);
+    ctx.service.moveCard(card.id, { status: 'review' }, 'system');
+    ctx.service.approve(card.id);
+    expect(ctx.service.getCard(card.id).status).toBe('done');
+    fs.writeFileSync(path.join(repo, 'src', 'server.ts'), 'export const port = 2222;\n');
+    git(repo, 'commit', '-q', '-am', 'master moves');
+    publisher.kick();
+    await publisher.whenIdle();
+
+    expect(entry(card.id).status).toBe('failed');
+    const back = ctx.service.getCard(card.id);
+    expect([back.status, back.owner, back.nextPromptKind, back.branch]).toEqual(['ready', 'claude', 'adjust', branch]);
+    expect(back.nextPrompt).toContain('git merge master');
+    expect(comments(card.id)).toMatch(/já estava em "Concluída"[\s\S]*Devolvi o card ao agente/);
+    // While the card is with the agent the failure is no longer the strip's error.
+    expect(publisher.state().entries.map((e) => [e.status, e.withAgent])).toEqual([['failed', true]]);
+
+    // The runner reopens the worktree on the same branch; the agent merges master and delivers again.
+    const wd = ensureWorkdir(back, { ...ctx.config, worktreeRoot: tempDir('cb-wt-') });
+    expect(wd.branch).toBe(branch);
+    git(wd.worktreePath as string, 'merge', '-q', 'master', '-X', 'theirs', '-m', 'merge master');
+    ctx.service.setRunFields(card.id, { worktreePath: wd.worktreePath });
+    ctx.service.moveCard(card.id, { status: 'review' }, 'system');
+    publisher.onDelivered(card.id);
+    await publisher.whenIdle();
+    expect([entry(card.id).status, entry(card.id).error_md]).toEqual(['published', null]);
+    expect(git(repo, 'merge-base', '--is-ancestor', branch, 'master')).toBe('');
+  });
+
+  it('the conflict prompt tells how to merge DECISIONS.md (card #212)', () => {
+    const prompt = conflictPrompt('cb/1-x', { files: ['DECISIONS.md'], target: 'master', targetHead: 'abc' });
+    expect(prompt).toMatch(/`DECISIONS\.md`, fique com o arquivo da `master` inteiro/);
+    expect(prompt).toMatch(/Não deixe trecho sem título/);
   });
 
   it('a conflict that survives the hand-back at the same master stays failed, without looping (D68)', async () => {

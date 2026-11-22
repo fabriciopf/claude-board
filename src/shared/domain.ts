@@ -557,6 +557,11 @@ export interface PublishEntry {
   finishedAt: string | null;
   commit: string | null;
   errorMd: string | null;
+  /**
+   * Failed entry whose card is back with the agent (reopened, or handed back after a conflict, D68):
+   * the next delivery requeues it, so there is nothing to retry and the strip is not an error (card #212).
+   */
+  withAgent: boolean;
 }
 
 export interface PublishState {

@@ -63,6 +63,8 @@ export function isScreenOnly(files: string[]): boolean {
 
 const PACKAGE_FILES = ['package.json', 'package-lock.json'];
 const ELIGIBLE: Card['status'][] = ['review', 'done'];
+/** Cards a merge conflict hands back to the agent (D68; "Concluída" since card #212). */
+const HAND_BACK_FROM: Card['status'][] = ['review', 'done'];
 
 /** A merge conflict of a card's branch with the publish branch (D68). */
 export interface MergeConflict {
@@ -101,6 +103,7 @@ export function conflictPrompt(branch: string, c: MergeConflict): string {
     '',
     `1. No worktree do card, rode ${code(`git merge ${c.target}`)}.`,
     `2. Resolva os conflitos mantendo o que a ${t} trouxe e reaplicando a sua mudança sobre a estrutura nova: se o código mudou de lugar, leve a sua mudança para o lugar novo.`,
+    `   No ${code('DECISIONS.md')}, fique com o arquivo da ${t} inteiro e acrescente no fim só as entradas deste card, cada uma começando no próprio título ${code('## Dnn.')}. Não deixe trecho sem título nem versão antiga de entrada de outro card: o publicador recusa o arquivo (card #212).`,
     '3. Rode o typecheck e os testes dos arquivos afetados, e commite o merge.',
     '4. Chame card_submit_for_review com um resumo curto do que o conflito exigiu. A publicação volta para a fila sozinha.',
     '',
@@ -295,13 +298,14 @@ export class Publisher {
       worktreePath: r.worktree_path ?? null,
       commit: r.commit_sha ?? null,
       errorMd: r.error_md ?? null,
+      withAgent: r.status === 'failed' && !ELIGIBLE.includes(r.card_status),
     };
   }
 
   entries(statuses: PublishStatus[]): PublishEntry[] {
     const rows = this.ctx.db
       .prepare(
-        `SELECT q.*, c.title FROM publish_queue q JOIN cards c ON c.id = q.card_id
+        `SELECT q.*, c.title, c.status AS card_status FROM publish_queue q JOIN cards c ON c.id = q.card_id
          WHERE q.status IN (${statuses.map(() => '?').join(',')}) ORDER BY q.queued_at, q.id`,
       )
       .all(...statuses) as Record<string, any>[];
@@ -716,13 +720,15 @@ export class Publisher {
    * A merge conflict does not go away by retrying: the branch stays the same. The card goes back to
    * Claude with the instruction to bring the publish branch in (D68), and delivering it again requeues
    * the publication. Once per commit of the publish branch: a conflict that survives Claude's merge
-   * stays failed instead of looping.
+   * stays failed instead of looping. A card approved before its publication ("Concluída") goes back
+   * too (card #212): nothing else would ever fix its branch, and the failure would stay in the strip.
    */
   private handBackConflict(e: PublishEntry, conflict: MergeConflict): void {
     const { service, db } = this.ctx;
     try {
       const card = service.getCard(e.cardId);
-      if (card.status !== 'review' || card.archived || service.hasRunningExecution(card.id)) return;
+      if (!HAND_BACK_FROM.includes(card.status) || card.archived || service.hasRunningExecution(card.id)) return;
+      const wasDone = card.status === 'done';
       const last = db
         .prepare('SELECT payload_json FROM events WHERE card_id = ? AND type = ? ORDER BY id DESC LIMIT 1')
         .get(card.id, CONFLICT_HANDBACK_EVENT) as { payload_json: string } | undefined;
@@ -738,7 +744,9 @@ export class Publisher {
       service.recordEvent(card.id, CONFLICT_HANDBACK_EVENT, { entryId: e.id, targetHead: conflict.targetHead, files: conflict.files }, 'system');
       service.addComment(card.id, {
         author: 'system',
-        bodyMd: `Devolvi o card ao agente para integrar a ${code(conflict.target)} e resolver o conflito. Quando ele entregar de novo, a publicação volta para a fila sozinha.`,
+        bodyMd:
+          (wasDone ? `O card já estava em "Concluída", mas o trabalho dele ainda não entrou na ${code(conflict.target)}. ` : '') +
+          `Devolvi o card ao agente para integrar a ${code(conflict.target)} e resolver o conflito. Quando ele entregar de novo, a publicação volta para a fila sozinha.`,
       });
       service.moveCard(card.id, { status: 'ready', reason: 'conflito na publicação' }, 'system');
     } catch (err) {
