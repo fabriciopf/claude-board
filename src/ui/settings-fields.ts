@@ -57,13 +57,13 @@ export const FIELDS: Field[] = [
     optionLabels: () => ({ [AUTO_CONCURRENCY]: t('settings.opt.auto'), [UNLIMITED_CONCURRENCY]: t('settings.opt.unlimited'), '0': t('settings.opt.zero') }),
     hasHint: true,
   }),
-  // Antigravity CLI runs have their own limit (D99): next to the Claude Code one, with no automatic mode.
+  // Antigravity CLI runs have their own limit (D99): next to the Claude Code one, with its own automatic mode (D100).
   field({
     key: 'antigravityConcurrency',
     tab: 'runs',
     type: 'select',
     options: ANTIGRAVITY_CONCURRENCY_PRESETS,
-    optionLabels: () => ({ [UNLIMITED_CONCURRENCY]: t('settings.opt.unlimited'), '0': t('settings.opt.zero') }),
+    optionLabels: () => ({ [AUTO_CONCURRENCY]: t('settings.opt.auto'), [UNLIMITED_CONCURRENCY]: t('settings.opt.unlimited'), '0': t('settings.opt.zero') }),
     hasHint: true,
   }),
   // The agent of every card that does not choose one (D93): a choice about runs, so it lives here, not on an agent's tab.

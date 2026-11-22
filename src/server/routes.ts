@@ -12,7 +12,7 @@ import { discoverApps } from '../service/apps.js';
 import { interpretRequest } from '../service/automation-nl.js';
 import { automationsOf } from '../service/automations.js';
 import { registerImages } from './images.js';
-import { runnerState } from '../service/runner-state.js';
+import { runnerState, type AgentLaneRuntime } from '../service/runner-state.js';
 import { RuleError } from '../service/rules.js';
 import type { CardInput, CardPatch } from '../service/board.js';
 import type { Status } from '../shared/domain.js';
@@ -51,7 +51,7 @@ export async function registerApi(app: FastifyInstance, ctx: AppContext): Promis
       apps: s.listApps(true),
       labels: s.listLabels(),
       repositories: s.listRepositories(),
-      runner: runnerState(ctx.db, isPaused(ctx), ctx.runner?.concurrency?.(), ctx.config),
+      runner: runnerState(ctx.db, isPaused(ctx), ctx.runner?.concurrency?.(), ctx.config, agyRuntime(ctx)),
       // The cover of a card without its own agent shows this one (D98).
       defaultAgent: ctx.config.defaultAgent,
       usage: ctx.usage?.get() ?? null,
@@ -98,14 +98,14 @@ export async function registerApi(app: FastifyInstance, ctx: AppContext): Promis
     return selfUpdate().state();
   });
 
-  app.get('/api/runner', async () => runnerState(ctx.db, isPaused(ctx), ctx.runner?.concurrency?.(), ctx.config));
+  app.get('/api/runner', async () => runnerState(ctx.db, isPaused(ctx), ctx.runner?.concurrency?.(), ctx.config, agyRuntime(ctx)));
 
   app.post('/api/runner/pause', async (req) => {
     const paused = !!(req.body as Body)?.paused;
     if (ctx.runner) ctx.runner.setPaused(paused);
     else s.setSetting('runnerPaused', paused);
     ctx.bus.publish({ type: 'runner.changed' });
-    return runnerState(ctx.db, isPaused(ctx), ctx.runner?.concurrency?.(), ctx.config);
+    return runnerState(ctx.db, isPaused(ctx), ctx.runner?.concurrency?.(), ctx.config, agyRuntime(ctx));
   });
 
   // ---------- cards ----------
@@ -283,7 +283,7 @@ export async function registerApi(app: FastifyInstance, ctx: AppContext): Promis
     const id = num(req.params.id);
     const a = automations().get(id);
     if (a.trigger.kind === 'watch') {
-      if (!ctx.automationEngine) throw new RuleError('engine_off', 'As verificações só rodam com o Board iniciado por "claude-board start".', 409);
+      if (!ctx.automationEngine) throw new RuleError('engine_off', 'As verificações só rodam com o Board iniciado por "dexm start".', 409);
       const r = await ctx.automationEngine.check(id);
       return { cardIds: r.created, error: r.error ?? null };
     }
@@ -411,4 +411,10 @@ export async function registerApi(app: FastifyInstance, ctx: AppContext): Promis
       unsubscribe();
     });
   });
+}
+
+/** The Antigravity CLI side as the runner decides it now (D100), when the runner is active here. */
+function agyRuntime(ctx: AppContext): AgentLaneRuntime | undefined {
+  if (!ctx.runner?.antigravityConcurrency) return undefined;
+  return { concurrency: ctx.runner.antigravityConcurrency(), usage: ctx.runner.antigravityUsage?.() ?? null };
 }

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { ConcurrencyInfo } from '../shared/domain';
+import type { AntigravityLane, ConcurrencyInfo } from '../shared/domain';
 import { api } from './api';
 import { t } from './i18n';
 import { antigravityConcurrencyOptions, antigravityConcurrencyValue, concurrencyOptions, concurrencyValue } from './runner-label';
@@ -24,13 +24,13 @@ export function ConcurrencySelect(props: { concurrency: ConcurrencyInfo; onChang
   );
 }
 
-/** The same selector for the Antigravity CLI runs (D99): 0, 1, 2, 4, 8 or ∞, saved in `antigravityConcurrency`. */
-export function AntigravityConcurrencySelect(props: { limit: number | null; onChanged: () => void; notify: Notify }) {
+/** The same selector for the Antigravity CLI runs (D99): auto (D100), 0, 1, 2, 4, 8 or ∞, saved in `antigravityConcurrency`. */
+export function AntigravityConcurrencySelect(props: { lane: AntigravityLane; onChanged: () => void; notify: Notify }) {
   return (
     <SettingSelect
       field="antigravityConcurrency"
-      value={antigravityConcurrencyValue(props.limit)}
-      options={antigravityConcurrencyOptions(props.limit)}
+      value={antigravityConcurrencyValue(props.lane)}
+      options={antigravityConcurrencyOptions(props.lane)}
       ariaLabel={t('settings.f.antigravityConcurrency')}
       onChanged={props.onChanged}
       notify={props.notify}

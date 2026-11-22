@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { boardHome, loadConfig } from '../config.js';
 import { isAlive } from '../runner/process.js';
 import { spawnDetached } from './git.js';
+import { CLI_NAME, HEALTH_NAMES } from '../shared/brand.js';
 
 /** How long the old server has to exit before the new one is started anyway. */
 const OLD_EXIT_MS = 120000;
@@ -30,7 +31,7 @@ export interface RelaunchDeps {
 
 const quote = (s: string) => `'${s.replace(/'/g, "''")}'`;
 
-/** The PowerShell line the new window runs: the same `claude-board start …` of the manual deploy. */
+/** The PowerShell line the new window runs: the same `dexm start …` of the manual deploy. */
 export function startCommand(repo: string, node: string, bin: string, startArgs: string[]): string {
   return `Set-Location -LiteralPath ${quote(repo)}; & ${quote(node)} ${quote(bin)} ${startArgs.map(quote).join(' ')}`;
 }
@@ -85,7 +86,7 @@ function defaultDeps(repo: string, bin: string): RelaunchDeps {
     isUp: async (url) => {
       try {
         const r = await fetch(url, { signal: AbortSignal.timeout(2000) });
-        return r.ok && ((await r.json()) as { name?: string }).name === 'claude-board';
+        return r.ok && (HEALTH_NAMES as readonly string[]).includes(String(((await r.json()) as { name?: string }).name));
       } catch {
         return false;
       }
@@ -104,7 +105,7 @@ async function waitUp(deps: RelaunchDeps, url: string): Promise<boolean> {
 }
 
 /**
- * `claude-board relaunch --wait-pid N --mode window|background -- start …`: the detached half of a
+ * `dexm relaunch --wait-pid N --mode window|background -- start …`: the detached half of a
  * publication's restart (D42). Waits for the old server to exit, then starts the new one the way
  * the manual deploy does: its own PowerShell window on Windows, or a background process.
  * It only ends after the new server answers. A window that does not bring the server up is
@@ -121,7 +122,7 @@ export async function relaunch(args: string[], overrides: Partial<RelaunchDeps> 
   const pid = Number(get('--wait-pid'));
   const mode: RestartMode = get('--mode') === 'background' ? 'background' : 'window';
   const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
-  const bin = path.join(repo, 'bin', 'claude-board.mjs');
+  const bin = path.join(repo, 'bin', `${CLI_NAME}.mjs`);
   const deps = { ...defaultDeps(repo, bin), ...overrides };
   const { log } = deps;
 
@@ -150,5 +151,5 @@ export async function relaunch(args: string[], overrides: Partial<RelaunchDeps> 
   log(`servidor novo em segundo plano, pid ${child}`);
   if (oldAlive) return;
   if (await waitUp(deps, url)) log(`servidor novo respondendo em ${url}`);
-  else log(`o servidor novo não respondeu em ${seconds} s. Suba à mão: claude-board ${startArgs.join(' ')}`);
+  else log(`o servidor novo não respondeu em ${seconds} s. Suba à mão: ${CLI_NAME} ${startArgs.join(' ')}`);
 }

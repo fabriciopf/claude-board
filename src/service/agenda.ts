@@ -3,6 +3,7 @@ import spawn from 'cross-spawn';
 import { boardHome } from '../config.js';
 import type { AppContext } from '../context.js';
 import { parseCalendarEvents, type AgendaState } from '../shared/agenda.js';
+import { boardEnvVars } from '../shared/brand.js';
 
 /** The calendar tool, whatever the connector's server is called (`claude_ai_Google_Calendar` today). */
 export const LIST_EVENTS_TOOL = /^mcp__.*google_?calendar.*__list_events$/i;
@@ -146,8 +147,9 @@ export class AgendaWatcher {
       '--no-session-persistence',
       '--disable-slash-commands',
     ];
-    const env: NodeJS.ProcessEnv = { ...process.env, CLAUDE_BOARD_INTERNAL: '1' };
+    const env: NodeJS.ProcessEnv = { ...process.env, ...boardEnvVars({ INTERNAL: '1' }) };
     delete env.CLAUDECODE;
+    delete env.DEXM_EXECUTION_ID;
     delete env.CLAUDE_BOARD_EXECUTION_ID;
     return new Promise((resolve, reject) => {
       // The Board's home has no CLAUDE.md: the session does not load the workspace's.

@@ -1,5 +1,5 @@
 import type { Config } from './config.js';
-import type { ConcurrencyInfo } from './shared/domain.js';
+import type { AgyQuotaReading, ConcurrencyInfo } from './shared/domain.js';
 import type { Db } from './db/index.js';
 import type { EventBus } from './server/bus.js';
 import type { BoardService } from './service/board.js';
@@ -18,6 +18,10 @@ export interface RunnerControl {
   reschedule?(): void;
   /** How many runs may be going now, and why. */
   concurrency?(): ConcurrencyInfo;
+  /** The same for the Antigravity CLI runs (D99, D100). */
+  antigravityConcurrency?(): ConcurrencyInfo;
+  /** Last reading of the Google quota of Antigravity CLI (D100). */
+  antigravityUsage?(): AgyQuotaReading | null;
 }
 
 /** Incremental import, filled in by M5. */
@@ -43,7 +47,7 @@ export interface AppContext {
   publisher?: PublisherControl;
   /** Update of the Board from the remote it was cloned from (D89). */
   selfUpdate?: SelfUpdateControl;
-  /** Arguments of the running `claude-board start`, reused by the restart after a publication. */
+  /** Arguments of the running `dexm start`, reused by the restart after a publication. */
   startArgs?: string[];
   /** Graceful stop of the running server (same as Ctrl+C). */
   shutdown?: () => Promise<void>;

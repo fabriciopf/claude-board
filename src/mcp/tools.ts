@@ -10,6 +10,7 @@ import { AUTO_CONCURRENCY, UNLIMITED_CONCURRENCY, EFFORT_LEVELS, STATUS_LABELS, 
 
 const EFFORT_ENUM = EFFORT_LEVELS as [EffortLevel, ...EffortLevel[]];
 import { VERSION } from '../version.js';
+import { MCP_NAME, PRODUCT_NAME } from '../shared/brand.js';
 
 /** Who is calling: an execution started by the runner, or an interactive session. */
 export interface McpSession {
@@ -39,10 +40,10 @@ const cardIdArg = z.number().int().positive().optional().describe('Id do card. P
 export function createMcpServer(ctx: AppContext, session: McpSession): McpServer {
   const s = ctx.service;
   const server = new McpServer(
-    { name: 'claude-board', version: VERSION },
+    { name: MCP_NAME, version: VERSION },
     {
       instructions:
-        'Claude Board: quadro de tarefas do usuário. Use estas ferramentas para reportar andamento, fazer perguntas e entregar trabalho. ' +
+        `${PRODUCT_NAME}: quadro de tarefas do usuário. Use estas ferramentas para reportar andamento, fazer perguntas e entregar trabalho. ` +
         'Nunca mova um card para "done" (Concluída): só o usuário aprova. Ao terminar, chame card_submit_for_review.',
     },
   );

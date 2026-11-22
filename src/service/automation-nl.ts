@@ -3,6 +3,7 @@ import { boardHome, type Config } from '../config.js';
 import { triggerProblem, WATCH_DEFAULT_MINUTES, WATCH_MIN_MINUTES, type AutomationDraft, type AutomationTrigger } from '../shared/automation.js';
 import type { App } from '../shared/domain.js';
 import { RuleError } from './rules.js';
+import { boardEnvVars, PRODUCT_NAME } from '../shared/brand.js';
 
 // Turns a request in plain words into an automation (D72). Claude reads it first; a local parser of the
 // common Portuguese phrasings is the fallback when Claude Code does not answer or answers something unusable.
@@ -131,7 +132,7 @@ export function cleanDraft(raw: any, apps: App[]): AutomationDraft | null {
 function prompt(text: string, apps: App[], now: Date): string {
   const offset = -now.getTimezoneOffset();
   const tz = `${offset >= 0 ? '+' : '-'}${String(Math.floor(Math.abs(offset) / 60)).padStart(2, '0')}:${String(Math.abs(offset) % 60).padStart(2, '0')}`;
-  return `Você configura automações do Claude Board, um quadro de tarefas em que cada disparo cria um card que o Claude Code executa. Leia o pedido do usuário e responda SÓ com um objeto JSON, sem nada antes nem depois:
+  return `Você configura automações do ${PRODUCT_NAME}, um quadro de tarefas em que cada disparo cria um card que o Claude Code executa. Leia o pedido do usuário e responda SÓ com um objeto JSON, sem nada antes nem depois:
 
 {
   "name": "nome curto da automação, em português, até 60 caracteres",
@@ -171,8 +172,9 @@ export function interpretWithClaude(config: Config, text: string, apps: App[], n
       '--safe-mode',
       '--no-session-persistence',
     ];
-    const env: NodeJS.ProcessEnv = { ...process.env, CLAUDE_BOARD_INTERNAL: '1' };
+    const env: NodeJS.ProcessEnv = { ...process.env, ...boardEnvVars({ INTERNAL: '1' }) };
     delete env.CLAUDECODE;
+    delete env.DEXM_EXECUTION_ID;
     delete env.CLAUDE_BOARD_EXECUTION_ID;
     let child;
     try {

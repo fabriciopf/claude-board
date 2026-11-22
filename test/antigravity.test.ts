@@ -194,8 +194,8 @@ describe('runner with the fake agy (ACP)', () => {
     expect(call.mode).toBeNull();
     expect(call.entrypoint).toBeNull();
     // The Board's rules ride at the top of the prompt; the MCP server is the card's, over HTTP.
-    expect(call.prompt).toMatch(/^<claude-board-rules>[\s\S]*card_submit_for_review[\s\S]*<\/claude-board-rules>/);
-    expect(call.mcp[0]).toMatchObject({ type: 'http', name: 'claude-board', headers: expect.arrayContaining([{ name: 'x-claude-board-card', value: String(card.id) }]) });
+    expect(call.prompt).toMatch(/^<board-rules>[\s\S]*card_submit_for_review[\s\S]*<\/board-rules>/);
+    expect(call.mcp[0]).toMatchObject({ type: 'http', name: 'dexm', headers: expect.arrayContaining([{ name: 'x-dexm-card', value: String(card.id) }]) });
 
     const items = transcriptItems(fs.readFileSync(x.transcriptPath!, 'utf8'));
     expect(items.map((i) => i.kind)).toEqual(['user', 'system', 'text', 'tool_use', 'tool_result', 'tool_use', 'tool_result', 'tool_use', 'tool_result', 'text', 'result']);
@@ -283,8 +283,8 @@ describe('runner with the fake agy (ACP)', () => {
     const card = queue('Stdio', 'Faça. [fake:success]', { agent: 'antigravity' });
     await runOnce();
     const call = prompts().at(-1);
-    expect(call.mcp[0]).toMatchObject({ name: 'claude-board', args: [expect.stringMatching(/claude-board\.mjs$/), 'mcp'] });
-    // The stdio server is bin/claude-board.mjs, which imports dist/server/cli.js. The publication runs
+    expect(call.mcp[0]).toMatchObject({ name: 'dexm', args: [expect.stringMatching(/dexm\.mjs$/), 'mcp'] });
+    // The stdio server is bin/dexm.mjs, which imports dist/server/cli.js. The publication runs
     // the suite before it builds, in a worktree with no dist/ (card #189): there the end-to-end half
     // is skipped, as in mcp.test.ts; the fallback choice above is checked either way.
     if (!hasBuild) return;

@@ -65,6 +65,12 @@ export class BurnMeter {
   private steps: { t: number; n: number }[] = [];
   private samples: Sample[] = [];
 
+  /**
+   * `lookbackMinutes`: readings older than this do not enter the rate. The Antigravity quota is read
+   * far less often than the Claude window (each reading costs a model turn, D100), so it looks further back.
+   */
+  constructor(private lookbackMinutes = RATE_LOOKBACK_MINUTES) {}
+
   setRunning(n: number, t = Date.now()): void {
     const last = this.steps[this.steps.length - 1];
     if (last && last.n === n) return;
@@ -75,9 +81,14 @@ export class BurnMeter {
   sample(usage: UsageSnapshot | null, t = Date.now()): void {
     const w = usage?.fiveHour;
     if (!w) return;
+    this.sampleWindow(w.utilization, w.resetsAt, t);
+  }
+
+  /** One reading of any window: utilization 0..1 and its reset in unix seconds. */
+  sampleWindow(utilization: number, resetsAt: number, t = Date.now()): void {
     const last = this.samples[this.samples.length - 1];
     if (last && last.t > t) return;
-    this.samples.push({ t, u: w.utilization, resetsAt: w.resetsAt });
+    this.samples.push({ t, u: utilization, resetsAt });
     this.trim(t);
   }
 
@@ -100,7 +111,7 @@ export class BurnMeter {
     let first = last;
     for (let i = this.samples.length - 2; i >= 0; i--) {
       const s = this.samples[i];
-      if (s.resetsAt !== last.resetsAt || s.u > first.u || now - s.t > RATE_LOOKBACK_MINUTES * MIN) break;
+      if (s.resetsAt !== last.resetsAt || s.u > first.u || now - s.t > this.lookbackMinutes * MIN) break;
       first = s;
     }
     if (last.t - first.t < MIN_RATE_SPAN_MINUTES * MIN) return null;
@@ -110,7 +121,7 @@ export class BurnMeter {
   }
 
   private trim(now: number): void {
-    const keepFrom = now - 2 * RATE_LOOKBACK_MINUTES * MIN;
+    const keepFrom = now - 2 * this.lookbackMinutes * MIN;
     while (this.samples.length > 1 && this.samples[0].t < keepFrom) this.samples.shift();
     // Keep the step in force at keepFrom, so the integral stays right.
     while (this.steps.length > 1 && this.steps[1].t <= keepFrom) this.steps.shift();

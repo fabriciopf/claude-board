@@ -29,7 +29,7 @@ using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Text;
 
-public static class ClaudeBoardHiddenLaunch {
+public static class DexmHiddenLaunch {
   [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
   struct STARTUPINFO {
     public int cb; public string lpReserved; public string lpDesktop; public string lpTitle;
@@ -123,9 +123,9 @@ public static class ClaudeBoardHiddenLaunch {
 
 const SCRIPT = `
 $ErrorActionPreference = 'Stop'
-$p = Get-Content -LiteralPath $env:CLAUDE_BOARD_LAUNCH -Raw -Encoding UTF8 | ConvertFrom-Json
+$p = Get-Content -LiteralPath $env:DEXM_LAUNCH -Raw -Encoding UTF8 | ConvertFrom-Json
 Add-Type -TypeDefinition $p.source
-[ClaudeBoardHiddenLaunch]::Start($p.application, $p.commandLine, $p.cwd, [string[]]$p.environment, $p.stdin, $p.stdout, $p.stderr)
+[DexmHiddenLaunch]::Start($p.application, $p.commandLine, $p.cwd, [string[]]$p.environment, $p.stdin, $p.stdout, $p.stderr)
 `;
 
 /** Quotes one argument the way CommandLineToArgvW reads it back (same rules as libuv). */
@@ -200,7 +200,7 @@ export function startHidden(command: string, args: string[], opts: HiddenLaunchO
   const r = spawnSync(
     'powershell.exe',
     ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', Buffer.from(SCRIPT, 'utf16le').toString('base64')],
-    { env: { ...process.env, CLAUDE_BOARD_LAUNCH: opts.launchFile }, encoding: 'utf8', windowsHide: true, timeout: 60000 },
+    { env: { ...process.env, DEXM_LAUNCH: opts.launchFile }, encoding: 'utf8', windowsHide: true, timeout: 60000 },
   );
   const pid = Number((r.stdout ?? '').trim().split(/\r?\n/).pop());
   if (r.status === 0 && Number.isInteger(pid) && pid > 0) return pid;

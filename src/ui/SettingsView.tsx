@@ -7,6 +7,7 @@ import { HooksPanel } from './HooksPanel';
 import { t } from './i18n';
 import { SelfUpdatePanel } from './SelfUpdatePanel';
 import { FIELDS, SETTINGS_TABS, dirtyKeys, followLiveValue, toPatchValue, type Config, type Field, type SettingsTab } from './settings-fields';
+import { CLI_NAME, MCP_NAME } from '../shared/brand';
 
 interface DoctorCheck {
   name: string;
@@ -227,8 +228,8 @@ export function SettingsView({
   const doctorWarnings = doctor?.filter((c) => !c.ok && !c.required).length ?? 0;
   const tabDirty = (which: SettingsTab) => FIELDS.some((f) => f.tab === which && dirty.includes(f.key));
 
-  const mcpHttp = `claude mcp add --scope user --transport http claude-board http://127.0.0.1:${config?.port ?? 4317}/mcp`;
-  const mcpStdio = 'claude mcp add --scope user claude-board -- claude-board mcp';
+  const mcpHttp = `claude mcp add --scope user --transport http ${MCP_NAME} http://127.0.0.1:${config?.port ?? 4317}/mcp`;
+  const mcpStdio = `claude mcp add --scope user ${MCP_NAME} -- ${CLI_NAME} mcp`;
 
   const configFields = (which: SettingsTab) => (
     <ConfigFields tab={which} config={config} draft={draft} setDraft={setDraft} dirty={dirty} onSave={save} onDiscard={() => config && setDraft(config)} />

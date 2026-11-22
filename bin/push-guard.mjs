@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Claude Board's push lock in git itself (D96). Run by the pre-push hook the Board writes in a card's
+// The Board's push lock in git itself (D96). Run by the pre-push hook the Board writes in a card's
 // worktree (src/runner/push-guard.ts), with git's pre-push input on stdin: one line per ref,
 // `<local ref> <local sha> <remote ref> <remote sha>`.
 //
@@ -18,7 +18,7 @@ import fs from 'node:fs';
 const ZERO = /^0+$/;
 
 function refuse(lines) {
-  process.stderr.write(`\nClaude Board: push recusado pela trava do worktree do card.\n${lines.map((l) => `  - ${l}`).join('\n')}\n\n`);
+  process.stderr.write(`\nDeus Ex Machina: push recusado pela trava do worktree do card.\n${lines.map((l) => `  - ${l}`).join('\n')}\n\n`);
   process.exit(1);
 }
 

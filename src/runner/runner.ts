@@ -6,12 +6,15 @@ import type { AppContext, RunnerControl } from '../context.js';
 import { nowIso } from '../db/index.js';
 import { AUTO_CONCURRENCY, UNLIMITED_CONCURRENCY, runLane, type AgentId, type AgentQuotaNote, type Card, type ConcurrencyInfo, type ExecutionStatus, type Status } from '../shared/domain.js';
 import { agentName, buildLaunch, isQuotaError, resolveAgent, type Launch } from './agents.js';
+import { AGY_RATE_LOOKBACK_MINUTES, AgyQuotaTracker, decideAgyAuto, quotaFor } from './agy-quota.js';
 import { BurnMeter, decideAuto, typicalRunMinutes, type RunTiming } from './auto-concurrency.js';
+import { antigravityInUse } from '../service/runner-state.js';
 import { isAlive, killTree, processStartTimes, spawnDetached } from './process.js';
 import { buildSystemPrompt, buildUserPrompt, splitCandidate, type PromptKind } from './prompt.js';
 import { applyEvent, emptyState, parseLine, type StreamState } from './stream.js';
 import { FileTail, readTail } from './tail.js';
 import { ensureWorkdir } from './worktree.js';
+import { boardEnvVars, CLI_NAME } from '../shared/brand.js';
 
 interface ActiveRun {
   executionId: number;
@@ -95,9 +98,17 @@ export class Runner implements RunnerControl {
   private inflight = new Set<Promise<void>>();
   private closed = false;
   private meter = new BurnMeter();
+  /** The Antigravity pace learns from its own runs and from the readings of the Google quota (D100). */
+  private agyMeter = new BurnMeter(AGY_RATE_LOOKBACK_MINUTES);
+  private agyQuota: AgyQuotaTracker;
   private lastConcurrency = '';
 
-  constructor(private ctx: AppContext) {}
+  constructor(private ctx: AppContext) {
+    this.agyQuota = new AgyQuotaTracker(ctx.service, ctx.bus, () => this.ctx.config, path.join(paths.runs(), 'agy-quota'), (reading) => {
+      const q = quotaFor(reading, this.ctx.config.antigravityModel || null);
+      if (q) this.agyMeter.sampleWindow(1 - q.quota.remaining, q.quota.resetsAt, Date.parse(reading.observedAt));
+    });
+  }
 
   // ---------- lifecycle ----------
 
@@ -186,11 +197,43 @@ export class Runner implements RunnerControl {
     return decideAuto({ usage: this.ctx.usage?.get() ?? null, now, rate: this.meter.measure(now), runs: this.runTiming(now) });
   }
 
-  /** Antigravity CLI runs that may be going at the same time (D99); null = no ceiling. */
-  antigravityLimit(): number | null {
+  /**
+   * How many Antigravity CLI runs may be going now (D99): the fixed number, no ceiling, or the
+   * automatic pace by the Google quota (D100), which has its own meter and its own run timing.
+   */
+  antigravityConcurrency(now = Date.now()): ConcurrencyInfo {
     const setting = this.ctx.config.antigravityConcurrency;
-    if (setting === UNLIMITED_CONCURRENCY) return null;
-    return Math.max(0, Math.floor(Number(setting)) || 0);
+    if (setting === UNLIMITED_CONCURRENCY) return { mode: 'unlimited', limit: null, reason: '' };
+    if (setting !== AUTO_CONCURRENCY) return { mode: 'fixed', limit: Math.max(0, Math.floor(Number(setting)) || 0), reason: '' };
+    return decideAgyAuto({
+      reading: this.agyQuota.get(),
+      model: this.ctx.config.antigravityModel || null,
+      now,
+      rate: this.agyMeter.measure(now),
+      runs: this.runTiming(now, 'antigravity'),
+    });
+  }
+
+  /** Antigravity CLI runs that may be going at the same time; null = no ceiling. */
+  antigravityLimit(now = Date.now()): number | null {
+    return this.antigravityConcurrency(now).limit;
+  }
+
+  /** Last reading of the Google quota (D100). */
+  antigravityUsage() {
+    return this.agyQuota.get();
+  }
+
+  /**
+   * In automatic mode, reads the Google quota when it is due: none yet, or the last one is stale while
+   * Antigravity is in use. The tracker never reads twice within its minimum interval (each reading is
+   * a model turn paid from that quota).
+   */
+  private maybeReadAgyQuota(force = false): void {
+    if (this.closed || this.ctx.config.antigravityConcurrency !== AUTO_CONCURRENCY) return;
+    if (!force && !this.agyQuota.isStale()) return;
+    if (!force && this.activeOf('antigravity') === 0 && !antigravityInUse(this.ctx.db, this.ctx.config.defaultAgent)) return;
+    void this.agyQuota.refresh().catch(() => {});
   }
 
   /** Runs this Board follows that count against an agent's limit. */
@@ -203,16 +246,17 @@ export class Runner implements RunnerControl {
   /** The automatic pace learns from Claude Code runs only: an Antigravity run does not move the 5-hour window (D99). */
   private updateMeter(): void {
     this.meter.setRunning(this.activeOf('claude'));
+    this.agyMeter.setRunning(this.activeOf('antigravity'));
   }
 
-  /** How long the Claude Code runs in progress have been going, and how long one usually takes (last 40 finished). */
-  private runTiming(now: number): RunTiming {
+  /** How long the runs of one agent in progress have been going, and how long one usually takes (last 40 finished). */
+  private runTiming(now: number, lane: AgentId = 'claude'): RunTiming {
     const minutes = (from: string, to: number) => (to - Date.parse(from)) / 60000;
-    // A run without an agent is from before D92, so Claude Code.
-    const claude = "(agent IS NULL OR agent = 'claude')";
-    const running = this.ctx.db.prepare(`SELECT started_at FROM executions WHERE status = 'running' AND ${claude}`).all() as { started_at: string }[];
+    // A run without an agent is from before D92, so Claude Code; "gemini" is the agent D93 replaced.
+    const filter = lane === 'claude' ? "(agent IS NULL OR agent = 'claude')" : "agent IN ('antigravity', 'gemini')";
+    const running = this.ctx.db.prepare(`SELECT started_at FROM executions WHERE status = 'running' AND ${filter}`).all() as { started_at: string }[];
     const finished = this.ctx.db
-      .prepare(`SELECT started_at, ended_at FROM executions WHERE ended_at IS NOT NULL AND ${claude} ORDER BY id DESC LIMIT 40`)
+      .prepare(`SELECT started_at, ended_at FROM executions WHERE ended_at IS NOT NULL AND ${filter} ORDER BY id DESC LIMIT 40`)
       .all() as { started_at: string; ended_at: string }[];
     return {
       ages: running.map((r) => Math.max(0, minutes(r.started_at, now))).filter(Number.isFinite),
@@ -227,9 +271,11 @@ export class Runner implements RunnerControl {
   tick(): number {
     if (this.closed) return 0;
     const { limit, reason } = this.concurrency();
-    const limits: Record<AgentId, number | null> = { claude: limit, antigravity: this.antigravityLimit() };
+    const agy = this.antigravityConcurrency();
+    const limits: Record<AgentId, number | null> = { claude: limit, antigravity: agy.limit };
+    this.maybeReadAgyQuota();
     // The automatic limit moves with time and usage: let the header know when it changes.
-    const key = `${limit}|${reason}`;
+    const key = `${limit}|${reason}|${agy.limit}|${agy.reason}`;
     if (key !== this.lastConcurrency) {
       this.lastConcurrency = key;
       this.ctx.bus.publish({ type: 'runner.changed' });
@@ -338,7 +384,7 @@ export class Runner implements RunnerControl {
   /** The process's stderr, also kept at the end of the transcript when there is any. */
   private collectStderr(executionId: number, transcriptPath: string): string {
     const text = readTail(stderrFile(executionId));
-    if (text.trim()) fs.appendFileSync(transcriptPath, JSON.stringify({ type: 'claude_board_stderr', text }) + '\n');
+    if (text.trim()) fs.appendFileSync(transcriptPath, JSON.stringify({ type: 'board_stderr', text }) + '\n');
     return text;
   }
 
@@ -425,7 +471,7 @@ export class Runner implements RunnerControl {
     db.prepare('UPDATE executions SET model = ?, effort = ? WHERE id = ?').run(launch.model, launch.effort, run.executionId);
 
     const transcriptPath = path.join(paths.transcripts(), `${run.executionId}.jsonl`);
-    fs.writeFileSync(transcriptPath, JSON.stringify({ type: 'claude_board_prompt', kind, prompt: userPrompt, at: nowIso() }) + '\n');
+    fs.writeFileSync(transcriptPath, JSON.stringify({ type: 'board_prompt', kind, prompt: userPrompt, at: nowIso() }) + '\n');
     // An agent that picks its own session id (Antigravity CLI) reports it in the stream; until then the
     // card holds no session, so a run that dies before starting one is not resumed with another agent's id.
     const knownSession = launch.presetSession || resumeId ? sessionId : null;
@@ -433,9 +479,7 @@ export class Runner implements RunnerControl {
     service.setRunFields(card.id, { claudeSessionId: knownSession });
 
     const env = launchEnv(process.env, launch, {
-      CLAUDE_BOARD_CARD_ID: String(card.id),
-      CLAUDE_BOARD_EXECUTION_ID: String(run.executionId),
-      CLAUDE_BOARD_URL: boardUrl,
+      ...boardEnvVars({ CARD_ID: String(card.id), EXECUTION_ID: String(run.executionId), URL: boardUrl }),
     });
 
     // The process writes the stream straight into the transcript and reads the prompt from a file,
@@ -478,7 +522,7 @@ export class Runner implements RunnerControl {
     if (spawnError) {
       return this.finish(run, state, {
         forcedStatus: 'error',
-        errorMd: `Não consegui iniciar o ${agentName(launch.agent)} ("${launch.bin}"): ${spawnError.message}. Confira o executável nas configurações e rode "claude-board doctor".`,
+        errorMd: `Não consegui iniciar o ${agentName(launch.agent)} ("${launch.bin}"): ${spawnError.message}. Confira o executável nas configurações e rode "${CLI_NAME} doctor".`,
       });
     }
     return this.finish(run, state, { exitCode: code, stderr });
@@ -541,7 +585,7 @@ export class Runner implements RunnerControl {
       target = 'waiting_user';
       const detail = state.result?.text || opts.stderr?.trim().split('\n').slice(-12).join('\n') || '';
       errorMd = `A execução falhou${subtype ? ` (${subtype})` : ''}${opts.exitCode != null ? `, código de saída ${opts.exitCode}` : ''}.${detail ? `\n\n${detail}` : ''}`;
-      // The Board reads no usage of the Google quota: an error that says so is the only sign (D99).
+      // An error that names the Google quota (D99); in automatic mode the reading after the run says how much is left (D100).
       if (runLane(row?.agent) === 'antigravity' && isQuotaError(detail)) {
         this.setAntigravityQuota({ at: nowIso(), message: detail.trim().split('\n').slice(-3).join(' ').slice(0, 300) });
         errorMd += '\n\nParece o limite de cota do Google: o cabeçalho mostra o aviso ao lado das execuções do Antigravity CLI.';
@@ -549,6 +593,8 @@ export class Runner implements RunnerControl {
     }
     // A finished Antigravity run shows the quota is back.
     if (status === 'success' && runLane(row?.agent) === 'antigravity') this.setAntigravityQuota(null);
+    // In automatic mode, what the run consumed is read now (the tracker keeps its minimum interval).
+    if (runLane(row?.agent) === 'antigravity') this.maybeReadAgyQuota(true);
 
     if (state.result?.permissionDenials && status !== 'success') {
       errorMd = `${errorMd ?? ''}\n\n${state.result.permissionDenials} chamada(s) de ferramenta foram negadas por permissão.`.trim();

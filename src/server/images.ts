@@ -7,7 +7,7 @@ import { IMAGE_MAX_BYTES, IMAGE_NAME, IMAGE_TYPES, sniffImage } from '../shared/
 
 /**
  * Images pasted into a card (D57). The browser posts the raw bytes; the Board keeps them in
- * ~/.claude-board/images under a content hash, so the same paste twice is one file.
+ * ~/.dexm/images under a content hash, so the same paste twice is one file.
  * Only PNG, JPEG, GIF and WebP, checked by the bytes themselves: no SVG (it can carry script).
  */
 export function registerImages(app: FastifyInstance): void {

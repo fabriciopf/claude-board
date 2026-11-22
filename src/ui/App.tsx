@@ -33,6 +33,7 @@ import { BannerDock } from './BannerDock';
 import { HelpButton } from './HelpButton';
 import { setDefaultAgent } from './default-agent';
 import { isHelpKey } from './help';
+import { PRODUCT_NAME } from '../shared/brand';
 
 type Theme = 'system' | 'light' | 'dark';
 
@@ -364,7 +365,7 @@ export function App() {
               <rect x="12" y="4" width="8" height="16" rx="2" fill="#d97757" opacity=".7" />
               <rect x="22" y="4" width="8" height="10" rx="2" fill="#d97757" opacity=".45" />
             </svg>
-            <span className="brand-name">Claude Board</span>
+            <span className="brand-name">{PRODUCT_NAME}</span>
           </button>
         </div>
         {/* Pending tab only with something pending, text and count together (card #170).
@@ -399,7 +400,7 @@ export function App() {
                     </span>
                     <span className="runner-part runner-part-agent" title={antigravityTitle(runner.antigravity)}>
                       <strong>{runner.antigravity.running}</strong>
-                      <AntigravityConcurrencySelect limit={runner.antigravity.limit} onChanged={() => void load()} notify={notify} />
+                      <AntigravityConcurrencySelect lane={runner.antigravity} onChanged={() => void load()} notify={notify} />
                       <span className="runner-agent">Antigravity</span>
                       {runner.antigravity.quota && <span className="runner-quota">{t('settings.conc.quotaShort')}</span>}
                     </span>
@@ -566,7 +567,7 @@ export function App() {
           repositories={data.repositories}
           notify={notify}
           liveConcurrency={runner?.concurrency ? concurrencyValue(runner.concurrency) : undefined}
-          liveAntigravityConcurrency={runner?.antigravity ? antigravityConcurrencyValue(runner.antigravity.limit) : undefined}
+          liveAntigravityConcurrency={runner?.antigravity ? antigravityConcurrencyValue(runner.antigravity) : undefined}
         />
       )}
 

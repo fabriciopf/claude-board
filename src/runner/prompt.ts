@@ -3,6 +3,7 @@ import { paths, protectedBranchList, type Config } from '../config.js';
 import { imageRefs } from '../shared/images.js';
 import { readList } from '../service/split.js';
 import { STATUS_LABELS, STATUS_SHORT_LABELS, type App, type CardDetail, type CardRef, type Label, type Repository } from '../shared/domain.js';
+import { MCP_NAME, PRODUCT_NAME } from '../shared/brand.js';
 
 export type PromptKind = 'first' | 'reply' | 'adjust' | 'comment' | 'retry' | 'requeue' | 'moved';
 
@@ -100,9 +101,9 @@ export function buildSystemPrompt({ config, detail, cwd, branch, startDir }: Pro
       ? `\n\nA sessão começa em ${startDir}, a raiz do workspace do VS Code, para carregar o mesmo CLAUDE.md, as mesmas skills e as mesmas configurações. O trabalho deste card acontece em ${cwd}: use caminhos absolutos ou entre nessa pasta antes de cada comando.`
       : '';
   const card = detail.card;
-  return `# Você está executando uma tarefa do Claude Board
+  return `# Você está executando uma tarefa do ${PRODUCT_NAME}
 
-O Claude Board é o quadro de tarefas do usuário. Ninguém acompanha esta execução em tempo real: você trabalha sozinho e conversa com o usuário pelas ferramentas MCP do servidor "claude-board". Esta execução é do card #${card.id}, então pode omitir o "id" nas chamadas. Se uma ferramenta do "claude-board" falhar com ECONNREFUSED ("Unable to connect"), o Board está reiniciando e esta execução continua: espere uns 10 segundos (por exemplo, com um comando que só espera) e chame de novo.${where}
+O ${PRODUCT_NAME} (o "Board") é o quadro de tarefas do usuário. Ninguém acompanha esta execução em tempo real: você trabalha sozinho e conversa com o usuário pelas ferramentas MCP do servidor "${MCP_NAME}". Esta execução é do card #${card.id}, então pode omitir o "id" nas chamadas. Se uma ferramenta do "${MCP_NAME}" falhar com ECONNREFUSED ("Unable to connect"), o Board está reiniciando e esta execução continua: espere uns 10 segundos (por exemplo, com um comando que só espera) e chame de novo.${where}
 
 ${config.userProfile.trim() ? `Perfil do usuário: ${config.userProfile.trim()}
 

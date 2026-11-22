@@ -80,7 +80,7 @@ function originalHooksDir(worktree: string, commonDir: string): string {
 function prePushHook(rulesFile: string, original: string): string {
   const orig = sq(slash(path.join(original, 'pre-push')));
   return `#!/bin/sh
-# Claude Board (D96): push lock of this card's worktree. The Board rewrites this file on every run.
+# Deus Ex Machina (D96): push lock of this card's worktree. The Board rewrites this file on every run.
 # It refuses force pushes, deletions, mirrors and pushes to protected branches, and any push when
 # the Board's push policy is "none". Then it runs the repository's own pre-push hook, if any.
 updates=$(cat)
@@ -98,7 +98,7 @@ exit 0
 function forwardHook(target: string): string {
   const t = sq(slash(target));
   return `#!/bin/sh
-# Claude Board (D96): forwards to the repository's own hook; this worktree's hooks folder is the Board's.
+# Deus Ex Machina (D96): forwards to the repository's own hook; this worktree's hooks folder is the Board's.
 [ -f ${t} ] && [ -x ${t} ] || exit 0
 exec ${t} "$@"
 `;

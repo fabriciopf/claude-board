@@ -125,7 +125,7 @@ export const settings = defineMessages(
     'doctor.warning': 'Aviso',
     'mcp.title': 'Registrar o MCP do Board no Claude Code',
     'mcp.intro': 'Assim, numa sessão do VS Code, dá para pedir “transforma isso num card”. As execuções do runner já recebem o MCP sozinhas.',
-    'mcp.stdio': 'Alternativa por stdio (exige o comando claude-board no PATH):',
+    'mcp.stdio': 'Alternativa por stdio (exige o comando dexm no PATH):',
 
     // Hooks panel
     'hooks.title': 'Hooks do Claude Code',
@@ -171,8 +171,10 @@ export const settings = defineMessages(
     'conc.titleZero': 'Execuções rodando agora. Em 0, nada novo sai da fila. Clique para escolher outro modo.',
     'conc.titleFixed': 'Execuções rodando agora. Clique para escolher quantas rodam ao mesmo tempo.',
     'f.antigravityConcurrency': 'Execuções simultâneas do Antigravity CLI',
-    'h.antigravityConcurrency': 'limite próprio dos cards que rodam no Antigravity CLI, à parte do limite acima, que vale para o Claude Code. Sem modo automático: a cota do Google é outra e o Board não lê o uso dela. 0: nenhum card do Antigravity sai da fila',
-    'conc.titleAntigravity': 'Execuções do Antigravity CLI rodando agora, com limite próprio: a cota do Google é outra e o Board não lê o uso dela. Clique para escolher quantas rodam ao mesmo tempo.',
+    'h.antigravityConcurrency': 'limite próprio dos cards que rodam no Antigravity CLI, à parte do limite acima, que vale para o Claude Code. Automático: o Board lê a cota do Google pela ferramenta swarm do agy e segue o mesmo ritmo do Claude. Cada leitura é um turno do modelo mais barato, pago dessa cota, então acontece no máximo a cada 20 minutos: depois de cada execução do Antigravity e de hora em hora enquanto ele está em uso. 0: nenhum card do Antigravity sai da fila',
+    'conc.titleAntigravity': 'Execuções do Antigravity CLI rodando agora, com limite próprio: a cota do Google é outra. Clique para escolher quantas rodam ao mesmo tempo.',
+    'conc.titleAntigravityAuto': 'Execuções do Antigravity CLI rodando agora. Automático: até {limit} por vez ({reason}). Clique para escolher outro modo.',
+    'conc.usageAntigravity': 'Última leitura da cota do Google, às {time}: {models}.',
     'conc.quotaAntigravity': 'Às {time} uma execução do Antigravity parou por limite de cota: {message}. O aviso some quando uma execução dele terminar bem.',
     'conc.quotaShort': 'cota',
 
@@ -309,7 +311,7 @@ export const settings = defineMessages(
       'doctor.warning': 'Warning',
       'mcp.title': "Register the Board's MCP in Claude Code",
       'mcp.intro': 'That way, in a VS Code session, you can ask "turn this into a card". The runner\'s runs already get the MCP on their own.',
-      'mcp.stdio': 'Alternative over stdio (needs the claude-board command on the PATH):',
+      'mcp.stdio': 'Alternative over stdio (needs the dexm command on the PATH):',
 
       'hooks.title': 'Claude Code hooks',
       'hooks.intro':
@@ -352,8 +354,10 @@ export const settings = defineMessages(
       'conc.titleZero': 'Runs going on now. At 0, nothing new leaves the queue. Click to choose another mode.',
       'conc.titleFixed': 'Runs going on now. Click to choose how many run at the same time.',
       'f.antigravityConcurrency': 'Simultaneous Antigravity CLI runs',
-      'h.antigravityConcurrency': 'a limit of its own for the cards that run on Antigravity CLI, apart from the limit above, which applies to Claude Code. No automatic mode: the Google quota is another one and the Board does not read its usage. 0: no Antigravity card leaves the queue',
-      'conc.titleAntigravity': 'Antigravity CLI runs going on now, with a limit of their own: the Google quota is another one and the Board does not read its usage. Click to choose how many run at the same time.',
+      'h.antigravityConcurrency': 'a limit of its own for the cards that run on Antigravity CLI, apart from the limit above, which applies to Claude Code. Automatic: the Board reads the Google quota through the swarm tool of agy and keeps the same pace as Claude. Each reading is a turn of the cheapest model, paid from that quota, so it happens at most every 20 minutes: after each Antigravity run and every hour while it is in use. 0: no Antigravity card leaves the queue',
+      'conc.titleAntigravity': 'Antigravity CLI runs going on now, with a limit of their own: the Google quota is another one. Click to choose how many run at the same time.',
+      'conc.titleAntigravityAuto': 'Antigravity CLI runs going on now. Automatic: up to {limit} at a time ({reason}). Click to choose another mode.',
+      'conc.usageAntigravity': 'Last reading of the Google quota, at {time}: {models}.',
       'conc.quotaAntigravity': 'At {time} an Antigravity run stopped on a quota limit: {message}. The notice goes away when one of its runs ends well.',
       'conc.quotaShort': 'quota',
 
@@ -488,7 +492,7 @@ export const settings = defineMessages(
       'doctor.warning': 'Aviso',
       'mcp.title': 'Registrar el MCP del Board en Claude Code',
       'mcp.intro': 'Así, en una sesión de VS Code, puedes pedir “convierte esto en una tarjeta”. Las ejecuciones del runner ya reciben el MCP solas.',
-      'mcp.stdio': 'Alternativa por stdio (requiere el comando claude-board en el PATH):',
+      'mcp.stdio': 'Alternativa por stdio (requiere el comando dexm en el PATH):',
 
       'hooks.title': 'Hooks de Claude Code',
       'hooks.intro':
@@ -531,8 +535,10 @@ export const settings = defineMessages(
       'conc.titleZero': 'Ejecuciones en curso ahora. En 0, nada nuevo sale de la cola. Haz clic para elegir otro modo.',
       'conc.titleFixed': 'Ejecuciones en curso ahora. Haz clic para elegir cuántas corren al mismo tiempo.',
       'f.antigravityConcurrency': 'Ejecuciones simultáneas de Antigravity CLI',
-      'h.antigravityConcurrency': 'límite propio de las tarjetas que corren en Antigravity CLI, aparte del límite de arriba, que vale para Claude Code. Sin modo automático: la cuota de Google es otra y el Board no lee su uso. 0: ninguna tarjeta de Antigravity sale de la cola',
-      'conc.titleAntigravity': 'Ejecuciones de Antigravity CLI en curso ahora, con límite propio: la cuota de Google es otra y el Board no lee su uso. Haz clic para elegir cuántas corren al mismo tiempo.',
+      'h.antigravityConcurrency': 'límite propio de las tarjetas que corren en Antigravity CLI, aparte del límite de arriba, que vale para Claude Code. Automático: el Board lee la cuota de Google con la herramienta swarm de agy y sigue el mismo ritmo de Claude. Cada lectura es un turno del modelo más barato, pagado de esa cuota, así que ocurre como máximo cada 20 minutos: después de cada ejecución de Antigravity y cada hora mientras está en uso. 0: ninguna tarjeta de Antigravity sale de la cola',
+      'conc.titleAntigravity': 'Ejecuciones de Antigravity CLI en curso ahora, con límite propio: la cuota de Google es otra. Haz clic para elegir cuántas corren al mismo tiempo.',
+      'conc.titleAntigravityAuto': 'Ejecuciones de Antigravity CLI en curso ahora. Automático: hasta {limit} a la vez ({reason}). Haz clic para elegir otro modo.',
+      'conc.usageAntigravity': 'Última lectura de la cuota de Google, a las {time}: {models}.',
       'conc.quotaAntigravity': 'A las {time} una ejecución de Antigravity se detuvo por límite de cuota: {message}. El aviso desaparece cuando una ejecución suya termine bien.',
       'conc.quotaShort': 'cuota',
 

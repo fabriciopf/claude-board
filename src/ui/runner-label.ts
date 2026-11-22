@@ -31,24 +31,38 @@ export function concurrencyOptions(c: ConcurrencyInfo): { value: string; label: 
   }));
 }
 
-/** The Antigravity CLI limit as the header selector shows it (D99). */
-export function antigravityConcurrencyValue(limit: number | null): string {
-  return limit === null ? UNLIMITED_CONCURRENCY : String(limit);
+/** The Antigravity CLI setting as the header selector shows it (D99): the runner's mode when it has one (D100), else the limit. */
+export function antigravityConcurrencyValue(lane: Pick<AntigravityLane, 'limit' | 'concurrency'>): string {
+  if (lane.concurrency) return concurrencyValue(lane.concurrency);
+  return lane.limit === null ? UNLIMITED_CONCURRENCY : String(lane.limit);
 }
 
-/** Choices of the Antigravity CLI selector: no automatic mode, plus a number from config.json outside the presets. */
-export function antigravityConcurrencyOptions(limit: number | null): { value: string; label: string }[] {
-  const current = antigravityConcurrencyValue(limit);
+/** Choices of the Antigravity CLI selector: auto with its current limit (D100), the presets, plus a number from config.json outside them. */
+export function antigravityConcurrencyOptions(lane: Pick<AntigravityLane, 'limit' | 'concurrency'>): { value: string; label: string }[] {
+  const current = antigravityConcurrencyValue(lane);
   const values = ANTIGRAVITY_CONCURRENCY_PRESETS.includes(current) ? [...ANTIGRAVITY_CONCURRENCY_PRESETS] : insertNumber(ANTIGRAVITY_CONCURRENCY_PRESETS, current);
-  return values.map((value) => ({ value, label: concurrencyOptionLabel(value) }));
+  return values.map((value) => ({
+    value,
+    label: value === AUTO_CONCURRENCY && lane.concurrency?.mode === 'auto' ? `${lane.concurrency.limit} (auto)` : concurrencyOptionLabel(value),
+  }));
 }
 
-/** Tooltip of the Antigravity CLI part of the counter, with the last quota error when there is one. */
+/** Tooltip of the Antigravity CLI part of the counter: the automatic reason, the last quota reading and the last quota error. */
 export function antigravityTitle(lane: AntigravityLane): string {
-  const base = t('settings.conc.titleAntigravity');
-  if (!lane.quota) return base;
-  const time = new Date(lane.quota.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  return `${base}\n\n${t('settings.conc.quotaAntigravity', { time, message: lane.quota.message })}`;
+  const c = lane.concurrency;
+  const parts = [c?.mode === 'auto' ? t('settings.conc.titleAntigravityAuto', { limit: String(c.limit), reason: c.reason }) : t('settings.conc.titleAntigravity')];
+  if (lane.usage) {
+    const time = new Date(lane.usage.observedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const models = Object.entries(lane.usage.models)
+      .map(([id, q]) => `${id} ${Math.round(q.remaining * 100)}%`)
+      .join(', ');
+    parts.push(t('settings.conc.usageAntigravity', { time, models }));
+  }
+  if (lane.quota) {
+    const time = new Date(lane.quota.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    parts.push(t('settings.conc.quotaAntigravity', { time, message: lane.quota.message }));
+  }
+  return parts.join('\n\n');
 }
 
 /** Puts a number among the presets in numeric order (between auto and ∞). */

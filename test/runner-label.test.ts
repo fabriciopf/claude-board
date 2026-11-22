@@ -1,6 +1,36 @@
 import { describe, expect, it } from 'vitest';
-import { concurrencyOptions, concurrencyTitle, concurrencyValue, insertNumber } from '../src/ui/runner-label.js';
-import { CONCURRENCY_PRESETS } from '../src/shared/domain.js';
+import { antigravityConcurrencyOptions, antigravityConcurrencyValue, antigravityTitle, concurrencyOptions, concurrencyTitle, concurrencyValue, insertNumber } from '../src/ui/runner-label.js';
+import { ANTIGRAVITY_CONCURRENCY_PRESETS, CONCURRENCY_PRESETS, type AntigravityLane } from '../src/shared/domain.js';
+
+describe('Antigravity CLI part of the counter (D99, D100)', () => {
+  const lane = (over: Partial<AntigravityLane>): AntigravityLane => ({ running: 1, limit: 2, shown: true, quota: null, ...over });
+
+  it('offers auto first and shows its current limit, like the Claude side', () => {
+    const auto = lane({ limit: 1, concurrency: { mode: 'auto', limit: 1, reason: 'cota 57% usada' } });
+    expect(antigravityConcurrencyValue(auto)).toBe('auto');
+    expect(antigravityConcurrencyOptions(auto).map((o) => o.label)).toEqual(['1 (auto)', '0', '1', '2', '4', '8', '∞']);
+    expect(ANTIGRAVITY_CONCURRENCY_PRESETS[0]).toBe('auto');
+    // Without the runner's decision (another process), the limit alone decides.
+    expect(antigravityConcurrencyValue(lane({ limit: null }))).toBe('unlimited');
+    expect(antigravityConcurrencyValue(lane({ limit: 3 }))).toBe('3');
+    expect(antigravityConcurrencyOptions(lane({ limit: 3, concurrency: { mode: 'fixed', limit: 3, reason: '' } })).map((o) => o.value)).toEqual(['auto', '0', '1', '2', '3', '4', '8', 'unlimited']);
+  });
+
+  it('the tooltip gives the automatic reason, the last reading per model and the quota error', () => {
+    const title = antigravityTitle(
+      lane({
+        concurrency: { mode: 'auto', limit: 1, reason: 'cota 57% usada · tempo 2% da semana' },
+        usage: { observedAt: new Date().toISOString(), note: null, models: { 'gemini-3.8-flash-low': { remaining: 0.43, resetsAt: 1795898991 } } },
+        quota: { at: new Date().toISOString(), message: '429 RESOURCE_EXHAUSTED' },
+      }),
+    );
+    expect(title).toContain('Automático: até 1 por vez (cota 57% usada · tempo 2% da semana)');
+    expect(title).toContain('gemini-3.8-flash-low 43%');
+    expect(title).toContain('RESOURCE_EXHAUSTED');
+    // The old claim that the Board does not read the quota is gone.
+    expect(antigravityTitle(lane({}))).not.toMatch(/não lê o uso/);
+  });
+});
 
 describe('runner counter in the header (D83)', () => {
   it('the selector shows the chosen mode: auto, a number or ∞', () => {

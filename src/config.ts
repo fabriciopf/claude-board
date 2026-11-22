@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { AUTO_CONCURRENCY, DEFAULT_ANTIGRAVITY_CONCURRENCY, SELF_UPDATE_MODES, UNLIMITED_CONCURRENCY, DEFAULT_RUN_EFFORT, DEFAULT_RUN_MODEL, MAX_CONCURRENCY, isAgentId, isEffortLevel, isValidModelId, type AgentConcurrencySetting, type AgentId, type ConcurrencySetting, type SelfUpdateMode } from './shared/domain.js';
+import { boardEnv, HOME_DIR_NAME, LEGACY_HOME_DIR_NAME } from './shared/brand.js';
 
 export interface Config {
   port: number;
@@ -23,7 +24,7 @@ export interface Config {
   heartbeatSeconds: number;
   /** Claude Code runs at the same time: 0 to MAX_CONCURRENCY, 'auto' to pace them by the 5-hour usage (D47), or 'unlimited' (D83). */
   maxConcurrency: ConcurrencySetting;
-  /** Antigravity CLI runs at the same time, apart from the Claude Code ones (D99): 0 to MAX_CONCURRENCY or 'unlimited'. */
+  /** Antigravity CLI runs at the same time, apart from the Claude Code ones (D99): 0 to MAX_CONCURRENCY, 'auto' to pace them by the Google quota (D100), or 'unlimited'. */
   antigravityConcurrency: AgentConcurrencySetting;
   runTimeoutMinutes: number;
   defaultMaxTurns: number;
@@ -134,9 +135,18 @@ export function expandHome(p: string): string {
   return p;
 }
 
-/** Root of everything the Board writes: db, transcripts, work dirs, hooks. */
+/**
+ * Root of everything the Board writes: db, transcripts, work dirs, hooks. DEXM_HOME (or the old
+ * CLAUDE_BOARD_HOME) wins; then ~/.dexm. A machine that only has the folder of the previous name
+ * (~/.claude-board) keeps using it, so the rename loses no card (D101).
+ */
 export function boardHome(): string {
-  return path.resolve(expandHome(process.env.CLAUDE_BOARD_HOME || '~/.claude-board'));
+  const set = boardEnv('HOME', process.env);
+  if (set) return path.resolve(expandHome(set));
+  const fresh = path.join(os.homedir(), HOME_DIR_NAME);
+  const legacy = path.join(os.homedir(), LEGACY_HOME_DIR_NAME);
+  if (!fs.existsSync(fresh) && fs.existsSync(legacy)) return legacy;
+  return fresh;
 }
 
 export const paths = {
@@ -249,17 +259,16 @@ export function parseConcurrency(value: unknown): ConcurrencySetting {
 }
 
 /**
- * The Antigravity CLI limit (D99): 'unlimited' or a whole number from 0 to MAX_CONCURRENCY. There is
- * no automatic mode, because the Board reads no usage of the Google quota to pace by.
+ * The Antigravity CLI limit (D99): 'auto', 'unlimited' or a whole number from 0 to MAX_CONCURRENCY.
+ * D99 had no automatic mode; D100 added it, paced by the Google quota read through agy's swarm tool.
  */
 export function parseAgentConcurrency(value: unknown): AgentConcurrencySetting {
   if (value === UNLIMITED_CONCURRENCY || value === '∞') return UNLIMITED_CONCURRENCY;
-  if (value === AUTO_CONCURRENCY) {
-    throw new Error('Execuções simultâneas do Antigravity CLI: não há modo automático, porque o Board não lê o uso da cota do Google. Use "∞" ou um número.');
-  }
+  // D100: the Board reads the Google quota through agy's swarm tool, so automatic pacing exists here too.
+  if (value === AUTO_CONCURRENCY) return AUTO_CONCURRENCY;
   const n = typeof value === 'string' && value.trim() ? Number(value) : value;
   if (typeof n !== 'number' || !Number.isInteger(n) || n < 0 || n > MAX_CONCURRENCY) {
-    throw new Error(`Execuções simultâneas do Antigravity CLI: use "∞" ou um número inteiro de 0 a ${MAX_CONCURRENCY}.`);
+    throw new Error(`Execuções simultâneas do Antigravity CLI: use "auto", "∞" ou um número inteiro de 0 a ${MAX_CONCURRENCY}.`);
   }
   return n;
 }

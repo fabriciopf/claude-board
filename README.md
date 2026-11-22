@@ -1,6 +1,8 @@
-# Claude Board
+# Deus Ex Machina
 
-A local, Trello-style task board that Claude Code works through on its own. You create a card, drag it to the Claude queue, and the Board runs the `claude` CLI installed on your machine, in a git worktree of its own for that card. Progress shows up live, and the card comes back to you when Claude asks something or finishes.
+A local, Trello-style task board that coding agents work through on their own: Claude Code, and also Antigravity CLI. You create a card, drag it to the agent queue, and the Board runs the CLI installed on your machine (`claude` by default), in a git worktree of its own for that card. Progress shows up live, and the card comes back to you when the agent asks something or finishes.
+
+The command is `dexm`. The project had another name until November 2026; the old command (`claude-board`), MCP server name, `CLAUDE_BOARD_*` variables and `~/.claude-board` folder keep working (see "Renamed from the previous name").
 
 Everything runs on `127.0.0.1`, with no login and no cloud: one process serves the API, the web UI, the runner and an MCP server.
 
@@ -15,36 +17,36 @@ Everything runs on `127.0.0.1`, with no login and no cloud: one process serves t
 ## Install
 
 ```bash
-git clone https://github.com/fabriciopf/claude-board.git
-cd claude-board
+git clone https://github.com/fabriciopf/deus-ex-machina.git
+cd deus-ex-machina
 npm install
 npm run build
-npm link          # puts the claude-board command on the PATH
-claude-board doctor
-claude-board start
+npm link          # puts the dexm command on the PATH
+dexm doctor
+dexm start
 ```
 
-Without `npm link`, use `node bin/claude-board.mjs <command>`.
+Without `npm link`, use `node bin/dexm.mjs <command>`.
 
 On Windows, to start the Board in a window of its own that does not close with your terminal:
 
 ```powershell
-Start-Process powershell -ArgumentList '-NoExit','-Command','claude-board start'
+Start-Process powershell -ArgumentList '-NoExit','-Command','dexm start'
 ```
 
 The Board must run on the same machine where you use Claude Code, because it reads that machine's `~/.claude`. If you use Claude Code on two machines, run one Board on each.
 
 ## First run
 
-1. `claude-board doctor` lists what is missing (Node, `claude` on the PATH, git, a free port, transcript retention).
-2. `claude-board start` and open <http://127.0.0.1:4317>.
+1. `dexm doctor` lists what is missing (Node, `claude` on the PATH, git, a free port, transcript retention).
+2. `dexm start` and open <http://127.0.0.1:4317>.
 3. Under **Importação** (Import), click **Manter 365 dias** (keep 365 days). By default Claude Code deletes transcripts older than 30 days, and the import reads its history from them. The Board backs up `settings.json` before changing it.
 4. Under **Importação**, click **Ler o histórico** (read history). Sessions with signs of unfinished work become cards in Triage.
 5. Under **Configurações** (Settings), install the hooks if you want the sessions you open yourself to show up on the board.
 6. Register the Board's MCP server in Claude Code, so you can say "turn this into a card" in any session:
 
 ```bash
-claude mcp add --scope user --transport http claude-board http://127.0.0.1:4317/mcp
+claude mcp add --scope user --transport http dexm http://127.0.0.1:4317/mcp
 ```
 
 ## How the board works
@@ -87,14 +89,14 @@ Every 30 seconds (and right away when a card enters the queue), the runner takes
 claude -p --output-format stream-json --verbose [--max-turns N] [--model M] [--effort E] [--name <name>]
        --append-system-prompt <Board rules>
        --mcp-config <the Board's MCP over HTTP>
-       --allowedTools mcp__claude-board --permission-prompts none
+       --allowedTools mcp__dexm --permission-prompts none
        [--permission-mode M] [--add-dir <worktree>] --disallowedTools <git push…>
        (--session-id UUID | --resume ID)
 ```
 
 - **Same setup as your editor:** with `workspaceDir` set, every run starts at the workspace root and loads the same `CLAUDE.md`, skills, project `settings.json` and memory. With no permission mode on the card, the one in your Claude Code `settings.json` applies.
-- **Where it works:** a card with a repository gets its own worktree next to the repo (`../<repo>-cb-<id>`), on branch `cb/<id>-<title>`, created from the base branch. The main branch is never touched. The worktree joins the session through `--add-dir`. A card with no repository works in the workspace (or in `~/.claude-board/work/<id>/` when there is no `workspaceDir`).
-- **Transcript:** each run is stored in `~/.claude-board/transcripts/<id>.jsonl` and shown on the card, with messages, collapsed tool calls and highlighted errors.
+- **Where it works:** a card with a repository gets its own worktree next to the repo (`../<repo>-cb-<id>`), on branch `cb/<id>-<title>`, created from the base branch. The main branch is never touched. The worktree joins the session through `--add-dir`. A card with no repository works in the workspace (or in `~/.dexm/work/<id>/` when there is no `workspaceDir`).
+- **Transcript:** each run is stored in `~/.dexm/transcripts/<id>.jsonl` and shown on the card, with messages, collapsed tool calls and highlighted errors.
 - **No limits by default:** a run goes until Claude finishes, like an interactive session. A card can set its own maximum turns. "Pausar runner" in the header holds the whole queue.
 - **Session name:** on the first run, Claude gives the task a short name (`card_rename`), which becomes the card title and the Claude Code session name. The original title and description stay on the card.
 - **Sound:** when Claude or the runner moves a card to "Waiting for you", "Waiting for a third party" or "In review", the Board plays a short chime. Moves you make yourself are silent. The header toggle turns it off for that browser; with several tabs open, only one plays.
@@ -115,11 +117,12 @@ node bin/agy-acp.mjs runs/<id>/agy-run.json
          → session/set_model, session/set_mode plan (when the card asks) → session/prompt
 ```
 
-- **Same card flow:** each session gets the Board's MCP server with the card's headers (over HTTP, or over stdio through `claude-board mcp` when agy offers no HTTP MCP). The Board's rules go at the top of the prompt. Questions, deliveries, splits, retries and "Continue in terminal" (`agy --conversation <id>`) work as with Claude Code. The client writes the run in Claude Code's stream format, so the transcript, turns and tokens show the same way.
+- **Same card flow:** each session gets the Board's MCP server with the card's headers (over HTTP, or over stdio through `dexm mcp` when agy offers no HTTP MCP). The Board's rules go at the top of the prompt. Questions, deliveries, splits, retries and "Continue in terminal" (`agy --conversation <id>`) work as with Claude Code. The client writes the run in Claude Code's stream format, so the transcript, turns and tokens show the same way.
 - **Permissions:** the client answers every permission request agy makes: it allows them, except the shell commands the `prPolicy` and `protectedBranches` rules forbid, which it refuses (a compound command is checked part by part).
 - **Sessions:** agy picks the session id; the Board learns it from the run. A reply loads the same session. A card moved from one agent to the other starts a new session, with the card history in the prompt.
 - **Turn limit:** the card's maximum turns cancels the session when it is reached.
-- **What only Claude Code has:** your `CLAUDE.md`, skills, plugins, claude.ai connectors and the Artifact tool. Antigravity CLI reads `GEMINI.md`, `AGENTS.md` and its own plugins. The automatic concurrency has no plan reading to pace Antigravity runs by.
+- **What only Claude Code has:** your `CLAUDE.md`, skills, plugins, claude.ai connectors and the Artifact tool. Antigravity CLI reads `GEMINI.md`, `AGENTS.md` and its own plugins.
+- **Automatic concurrency for Antigravity:** set its limit to `auto` and the Board paces Antigravity runs by the Google quota, the same way it paces Claude Code by the 5-hour window. Neither ACP nor `agy -p` report that quota, so the Board reads it from agy's own `swarm` tool (`swarm{action:"models"}`, opened by a `/swarm` prompt in `agy -p --output-format stream-json`), never from agy's credentials. Each reading is one turn of the cheapest model, paid from that quota, so it happens at most every 20 minutes: after each Antigravity run, and every hour while Antigravity is in use. With the quota at zero no Antigravity run starts until it renews, unless AI credits pay for it.
 
 ### Cards with several items
 
@@ -169,22 +172,22 @@ You can also turn each automation on and off, or run it now. An automation stays
 
 The rules are enforced by the server, not only by the UI: the MCP refuses to move a card to "Done". Claude can queue cards, even from inside a run, but not the card it is running nor a card you own. `card_split` only splits the card of its own run, once.
 
-There are two transports: HTTP at `http://127.0.0.1:4317/mcp`, which the runner uses, and stdio (`claude-board mcp`), which forwards to HTTP.
+There are two transports: HTTP at `http://127.0.0.1:4317/mcp`, which the runner uses, and stdio (`dexm mcp`), which forwards to HTTP. The server is named `dexm`, so its tools reach Claude Code as `mcp__dexm__card_*`.
 
 ## Hooks
 
-`claude-board hooks install` adds three hooks (`SessionStart`, `Stop`, `SessionEnd`) to `~/.claude/settings.json`, backing the file up first. They never call an LLM:
+`dexm hooks install` adds three hooks (`SessionStart`, `Stop`, `SessionEnd`) to `~/.claude/settings.json`, backing the file up first. They never call an LLM:
 
 - a session opened in a card's worktree gets a summary of the card in its context;
 - a session with no card is recorded and shows up in the incremental import;
 - with the Board down, the hook exits in under a second, without error.
 
-`claude-board hooks uninstall` removes only the Board's hooks.
+`dexm hooks uninstall` removes only the Board's hooks (also the ones installed under the previous name).
 
 ## Importing your history
 
-1. `claude-board import scan` (or the button in the UI) reads `~/.claude/projects` and `history.jsonl`, without an LLM. It looks for four signals: open todos, unanswered questions, a question at the end of the conversation, and errors. Sessions with a signal become cards in Triage. It can run any number of times and only rereads what changed.
-2. `claude-board import classify` sends each session's summary, in batches, to a cheap model that suggests a title, a list and a confidence. It shows the token estimate and only runs after you confirm.
+1. `dexm import scan` (or the button in the UI) reads `~/.claude/projects` and `history.jsonl`, without an LLM. It looks for four signals: open todos, unanswered questions, a question at the end of the conversation, and errors. Sessions with a signal become cards in Triage. It can run any number of times and only rereads what changed.
+2. `dexm import classify` sends each session's summary, in batches, to a cheap model that suggests a title, a list and a confidence. It shows the token estimate and only runs after you confirm.
 
 In Triage you accept, adjust or ignore suggestions, one by one or in bulk by minimum confidence.
 
@@ -206,7 +209,7 @@ When a check cannot reach the remote (no network, DNS, proxy, credentials), the 
 
 ## Configuration
 
-Stored in `~/.claude-board/config.json` and editable in Settings.
+Stored in `~/.dexm/config.json` and editable in Settings.
 
 | Key | Default | What it does |
 | --- | --- | --- |
@@ -240,14 +243,28 @@ Stored in `~/.claude-board/config.json` and editable in Settings.
 | `selfUpdate` | `notify` | Update from the remote the Board was cloned from: `off`, `notify` (strip with a button) or `auto` (see "Updates") |
 | `selfUpdateSource` | empty | Remote branch to follow, as `remote/branch`; empty = the branch the checkout tracks |
 
-The Board's folder is `~/.claude-board`; `CLAUDE_BOARD_HOME` changes it.
+The Board's folder is `~/.dexm`; `DEXM_HOME` changes it.
 
 ## Security
 
 - The Board listens only on `127.0.0.1` and refuses other hosts without `--allow-remote`. Requests whose `Host` header is not local get a 403, which blocks DNS rebinding.
 - There is no login: any process on your machine can call the API.
-- Transcripts may contain sensitive data. They live in `~/.claude-board/transcripts` and are deleted after `transcriptRetentionDays`.
+- Transcripts may contain sensitive data. They live in `~/.dexm/transcripts` and are deleted after `transcriptRetentionDays`.
 - The push rules are best effort: they block the common `git push` forms through `--disallowedTools`, not every way a shell could reach a remote. A card with a repository also gets a `pre-push` hook in its worktree (set through the worktree's own `core.hooksPath`, the repository's hooks still run), which checks what the push actually sends. `git push --no-verify` skips it, and the agent rules refuse that form; a card without a repository runs without the hook.
+
+## Renamed from the previous name
+
+The project had another name until November 2026. A machine set up under the old name keeps working after the update, with nothing to do:
+
+| Old | New | What happens with the old one |
+| --- | --- | --- |
+| `claude-board` command | `dexm` | Still installed by `npm link` as an alias |
+| `~/.claude-board` folder | `~/.dexm` | Used while `~/.dexm` does not exist, so no card is lost. To move it, stop the Board and rename the folder |
+| `CLAUDE_BOARD_*` variables | `DEXM_*` | Read when the new one is unset; runs get both |
+| MCP server `claude-board` | `dexm` | The same endpoint answers both registrations; runs get `dexm` |
+| Hooks marked `claude-board-hook` | `dexm-hook` | Keep working; `dexm hooks install` replaces them |
+
+To finish the switch on a machine: run `npm link` again (for the `dexm` command), `dexm hooks install`, and register the MCP server as `dexm` (the old registration can stay, or go with `claude mcp remove --scope user claude-board`).
 
 ## Development
 

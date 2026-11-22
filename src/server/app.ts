@@ -9,6 +9,7 @@ import { registerApi } from './routes.js';
 import { uiAssets, type UiBuildInfo } from '../shared/ui-build.js';
 
 import { VERSION } from '../version.js';
+import { CLI_NAME, PRODUCT_NAME } from '../shared/brand.js';
 export { VERSION };
 
 export async function buildApp(ctx: AppContext, opts: { logger?: boolean; serveUi?: boolean; allowAnyHost?: boolean; uiDir?: string } = {}): Promise<FastifyInstance> {
@@ -25,7 +26,7 @@ export async function buildApp(ctx: AppContext, opts: { logger?: boolean; serveU
     if (host && !loopback.test(host)) return reply.code(403).send({ error: 'forbidden_host', message: 'Host não permitido.' });
   });
 
-  app.get('/health', async () => ({ ok: true, name: 'claude-board', version: VERSION }));
+  app.get('/health', async () => ({ ok: true, name: CLI_NAME, product: PRODUCT_NAME, version: VERSION }));
 
   await registerApi(app, ctx);
   registerMcpHttp(app, ctx);
@@ -66,7 +67,7 @@ export async function buildApp(ctx: AppContext, opts: { logger?: boolean; serveU
       });
     } else {
       app.get('/', async (_req, reply) =>
-        reply.type('text/plain; charset=utf-8').send('Interface não compilada. Rode "npm run build" no diretório do Claude Board.'),
+        reply.type('text/plain; charset=utf-8').send(`Interface não compilada. Rode "npm run build" no diretório do ${PRODUCT_NAME}.`),
       );
     }
   }

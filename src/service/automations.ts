@@ -19,6 +19,7 @@ import {
 } from '../shared/automation.js';
 import type { Card } from '../shared/domain.js';
 import { RuleError } from './rules.js';
+import { boardEnvVars } from '../shared/brand.js';
 
 // Automations (D72). Each firing creates a card in Claude's queue: the runner, the questions, the review
 // and the publication stay the ones every card already has.
@@ -560,8 +561,9 @@ export class AutomationEngine {
       '--no-session-persistence',
       '--disable-slash-commands',
     ];
-    const env: NodeJS.ProcessEnv = { ...process.env, CLAUDE_BOARD_INTERNAL: '1' };
+    const env: NodeJS.ProcessEnv = { ...process.env, ...boardEnvVars({ INTERNAL: '1' }) };
     delete env.CLAUDECODE;
+    delete env.DEXM_EXECUTION_ID;
     delete env.CLAUDE_BOARD_EXECUTION_ID;
     return new Promise((resolve, reject) => {
       const child = spawn(config.claudeBin, args, { cwd: boardHome(), env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });

@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import spawn from 'cross-spawn';
 import { PolledProcess, startHidden } from './win-hidden.js';
+import { boardEnv } from '../shared/brand.js';
 
 const isWindows = process.platform === 'win32';
 
@@ -46,12 +47,12 @@ export interface RunProcess extends EventEmitter {
  * If that launch fails, it falls back to the detached spawn and says so on stderr.
  */
 export function spawnDetached(command: string, args: string[], opts: DetachedOptions): RunProcess {
-  if (isWindows && process.env.CLAUDE_BOARD_NO_HIDDEN_CONSOLE !== '1') {
+  if (isWindows && boardEnv('NO_HIDDEN_CONSOLE', process.env) !== '1') {
     try {
       const pid = startHidden(command, args, { ...opts, launchFile: path.join(path.dirname(opts.stdinFile), 'launch.json') });
       return new PolledProcess(pid, isAlive).unref();
     } catch (err) {
-      fs.appendFileSync(opts.stderrFile, `[claude-board] console oculto indisponível, abrindo sem console (as janelas podem aparecer): ${(err as Error).message}\n`);
+      fs.appendFileSync(opts.stderrFile, `[dexm] console oculto indisponível, abrindo sem console (as janelas podem aparecer): ${(err as Error).message}\n`);
     }
   }
   const fds = [fs.openSync(opts.stdinFile, 'r'), fs.openSync(opts.stdoutFile, 'a'), fs.openSync(opts.stderrFile, 'a')];
