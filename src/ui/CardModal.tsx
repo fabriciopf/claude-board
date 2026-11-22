@@ -630,6 +630,7 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
               {REOPEN_ON_COMMENT.includes(card.status) && !card.archived && (
                 <div className="muted small">{t('card.commentReopens', { status: statusLabel('ready') })}</div>
               )}
+              {card.status === 'running' && <div className="muted small">{t('card.commentWhileRunning', { status: statusLabel('ready') })}</div>}
               <textarea
                 className="input"
                 rows={2}

@@ -125,6 +125,37 @@ switch (scenario) {
     result({ result: 'Pronto, devagar.' });
     break;
   }
+  case 'comment_midrun':
+  case 'comment_before_submit':
+  case 'comment_after_submit': {
+    // The user comments while the run is in progress (D104): mid-run, right before the delivery, or
+    // after it. The text of every tool reply goes to the log, to check what the run got to read.
+    const c = await board();
+    const cardId = process.env.DEXM_CARD_ID;
+    const userComment = (body) =>
+      fetch(`${process.env.DEXM_URL}/api/cards/${cardId}/comments`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ body }) });
+    const replies = [];
+    const logged = async (name, input) => {
+      const r = await call(c, name, input);
+      replies.push({ name, isError: !!r.isError, text: r.content.map((x) => x.text).join('\n') });
+      return r;
+    };
+    if (scenario === 'comment_midrun') {
+      await userComment('Use tabela, não lista.');
+      await logged('card_comment', { text: 'Montando o relatório.' });
+      await logged('card_submit_for_review', { summary: 'Relatório em tabela.' });
+    } else if (scenario === 'comment_before_submit') {
+      await userComment('Inclua o mês de outubro.');
+      const first = await logged('card_submit_for_review', { summary: 'Relatório sem outubro.' });
+      if (first.isError) await logged('card_submit_for_review', { summary: 'Relatório com outubro.' });
+    } else {
+      await logged('card_submit_for_review', { summary: 'Relatório pronto.' });
+      await userComment('Faltou o total no rodapé.');
+    }
+    if (process.env.FAKE_CLAUDE_LOG) fs.appendFileSync(process.env.FAKE_CLAUDE_LOG, JSON.stringify({ scenario, replies }) + '\n');
+    result({ result: 'Pronto.' });
+    break;
+  }
   case 'no_report':
     assistant([{ type: 'text', text: 'Terminei: criei o arquivo notas.md.' }]);
     result({ result: 'Terminei: criei o arquivo notas.md.' });
