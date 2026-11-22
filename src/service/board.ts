@@ -1,14 +1,20 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { nowIso, tx, type Db } from '../db/index.js';
+import { normalizePluginRules } from '../shared/plugins.js';
 import type { EventBus } from '../server/bus.js';
 import {
   AGENTS,
+  DEFAULT_TOKEN_WEIGHTS,
+  equivalentTokens,
   EFFORT_LEVELS,
   NEWEST_FIRST_STATUSES,
   UNSEEN_STATUSES,
   isAgentId,
+  isResumeMode,
+  RESUME_MODES,
   type AgentId,
+  type ResumeMode,
   REOPEN_ON_COMMENT,
   STATUSES,
   isEffortLevel,
@@ -23,6 +29,11 @@ import {
   type CardRef,
   type CardSummary,
   type CardTokens,
+  type TokenParts,
+  type TokenWeights,
+  type UsageDelta,
+  type UsageSnapshot,
+  type UsageWindow,
   type ChecklistItem,
   type Comment,
   type CommentKind,
@@ -35,6 +46,7 @@ import {
   type Status,
 } from '../shared/domain.js';
 import { appForText } from './apps.js';
+import { isConnectorId } from '../shared/connectors.js';
 import { assertStatus, checkMove, RuleError } from './rules.js';
 import { sharedContext } from './split.js';
 
@@ -81,6 +93,9 @@ export function rowToCard(r: Row, labelIds: number[] = [], repositoryIds: number
     model: r.model ?? null,
     effort: r.effort ?? null,
     agent: r.agent ?? null,
+    plugins: r.plugins ?? null,
+    connectors: json<string[] | null>(r.connectors_json, null),
+    resumeMode: isResumeMode(r.resume_mode) ? r.resume_mode : null,
     dangerousAllowed: bool(r.dangerous_allowed),
     claudeSessionId: r.claude_session_id ?? null,
     nextPrompt: r.next_prompt ?? null,
@@ -103,7 +118,43 @@ export function rowToCard(r: Row, labelIds: number[] = [], repositoryIds: number
   };
 }
 
-export function rowToExecution(r: Row): Execution {
+/** The four token parts of an executions row; null for a run from before migration 18 (D126). */
+function rowParts(r: Row): TokenParts | null {
+  if (r.tokens_input == null) return null;
+  return { input: r.tokens_input, cacheWrite: r.tokens_cache_write ?? 0, cacheRead: r.tokens_cache_read ?? 0, output: r.tokens_out ?? 0 };
+}
+
+function parseSnapshot(json: unknown): UsageSnapshot | null {
+  if (typeof json !== 'string' || !json) return null;
+  try {
+    return JSON.parse(json) as UsageSnapshot;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * How much one window moved between two readings (D126). Null when either reading is missing, both are
+ * the same reading, or the window reset in between (a different resetsAt): then the difference says nothing.
+ */
+export function windowDelta(a: UsageWindow | null | undefined, b: UsageWindow | null | undefined, sameReading: boolean, shared: boolean): UsageDelta | null {
+  if (!a || !b || sameReading || a.resetsAt !== b.resetsAt) return null;
+  return { points: Math.round((b.utilization - a.utilization) * 1000) / 10, shared };
+}
+
+function rowUsageDelta(r: Row): Execution['usageDelta'] {
+  const start = parseSnapshot(r.usage_start_json);
+  const end = parseSnapshot(r.usage_end_json);
+  if (!start || !end) return null;
+  const same = start.observedAt === end.observedAt;
+  const shared = r.usage_shared === 1;
+  const fiveHour = windowDelta(start.fiveHour, end.fiveHour, same, shared);
+  const sevenDay = windowDelta(start.sevenDay, end.sevenDay, same, shared);
+  return fiveHour || sevenDay ? { fiveHour, sevenDay } : null;
+}
+
+export function rowToExecution(r: Row, weights: TokenWeights = DEFAULT_TOKEN_WEIGHTS): Execution {
+  const parts = rowParts(r);
   return {
     id: r.id,
     cardId: r.card_id,
@@ -114,6 +165,9 @@ export function rowToExecution(r: Row): Execution {
     turns: r.turns,
     tokensIn: r.tokens_in,
     tokensOut: r.tokens_out,
+    tokenParts: parts,
+    tokensEquivalent: parts ? equivalentTokens(parts, weights) : null,
+    usageDelta: rowUsageDelta(r),
     transcriptPath: r.transcript_path ?? null,
     summaryMd: r.summary_md ?? null,
     errorMd: r.error_md ?? null,
@@ -124,6 +178,7 @@ export function rowToExecution(r: Row): Execution {
     model: r.model ?? null,
     effort: r.effort ?? null,
     agent: r.agent ?? null,
+    sessionMode: r.session_mode ?? null,
   };
 }
 
@@ -163,6 +218,35 @@ function checkAgent(v: string | null | undefined): AgentId | null {
   return v;
 }
 
+/** Plugin rules of a card or project (D128), saved normalized; null/'' = no rules of its own. */
+function checkPlugins(v: string | null | undefined): string | null {
+  if (v === null || v === undefined) return null;
+  try {
+    return normalizePluginRules(v) || null;
+  } catch (err) {
+    throw new RuleError('invalid_plugins', (err as Error).message, 400);
+  }
+}
+
+/**
+ * Connectors of a card or project (D124): a list of ids, or null to inherit. Stored as JSON, so the
+ * value returned here is what goes into the column.
+ */
+function checkConnectors(v: unknown): string | null {
+  if (v === null || v === undefined) return null;
+  if (!Array.isArray(v) || v.some((x) => !isConnectorId(x))) {
+    throw new RuleError('invalid_connectors', 'Conectores: uma lista de nomes (letras, números, hífen e sublinhado), ou null para herdar.', 400);
+  }
+  return JSON.stringify([...new Set(v as string[])]);
+}
+
+/** Card resume mode (D129): handoff or resume, or null/'' for the settings default. */
+function checkResumeMode(v: string | null | undefined): ResumeMode | null {
+  if (!v) return null;
+  if (!isResumeMode(v)) throw new RuleError('invalid_resume_mode', `Modo de retomada é ${RESUME_MODES.join(' ou ')}.`, 400);
+  return v;
+}
+
 /** Card effort: one of Claude Code's levels, or null/'' for the settings default. */
 function checkEffort(v: string | null | undefined): EffortLevel | null {
   if (!v) return null;
@@ -185,6 +269,8 @@ export interface CardInput {
   model?: string | null;
   effort?: EffortLevel | null;
   agent?: AgentId | null;
+  plugins?: string | null;
+  connectors?: string[] | null;
   labelIds?: number[];
   repositoryIds?: number[];
   links?: CardLink[];
@@ -209,6 +295,9 @@ export interface CardPatch {
   model?: string | null;
   effort?: EffortLevel | null;
   agent?: AgentId | null;
+  plugins?: string | null;
+  connectors?: string[] | null;
+  resumeMode?: ResumeMode | null;
   dangerousAllowed?: boolean;
   suggestedStatus?: Status | null;
   suggestionConfidence?: number | null;
@@ -229,6 +318,9 @@ const PATCH_COLUMNS: Record<keyof CardPatch, string> = {
   model: 'model',
   effort: 'effort',
   agent: 'agent',
+  plugins: 'plugins',
+  connectors: 'connectors_json',
+  resumeMode: 'resume_mode',
   dangerousAllowed: 'dangerous_allowed',
   suggestedStatus: 'suggested_status',
   suggestionConfidence: 'suggestion_confidence',
@@ -278,6 +370,9 @@ const UNSEEN_SQL = `CASE WHEN c.status IN (${UNSEEN_STATUSES.map((s) => `'${s}'`
     ORDER BY m.id DESC LIMIT 1), 0) ELSE 0 END`;
 
 export class BoardService {
+  /** Weights of the "tokens equivalentes" (D126); the settings screen and the start-up set them from the config. */
+  tokenWeights: TokenWeights = { ...DEFAULT_TOKEN_WEIGHTS };
+
   constructor(
     private db: Db,
     private bus: EventBus,
@@ -321,6 +416,8 @@ export class BoardService {
       color: r.color,
       description: r.description,
       archived: bool(r.archived),
+      plugins: r.plugins ?? '',
+      connectors: json<string[] | null>(r.connectors_json, null),
     }));
   }
 
@@ -344,20 +441,20 @@ export class BoardService {
     return resolved;
   }
 
-  createApp(input: { name: string; path?: string | null; color?: string; description?: string }): App {
+  createApp(input: { name: string; path?: string | null; color?: string; description?: string; plugins?: string }): App {
     const name = input.name?.trim();
     if (!name) throw new RuleError('invalid_app', 'O projeto precisa de um nome.', 400);
     if (this.listApps(true).some((a) => a.name.toLowerCase() === name.toLowerCase())) {
       throw new RuleError('invalid_app', `Já existe um projeto chamado "${name}".`, 400);
     }
     const r = this.db
-      .prepare('INSERT INTO apps (name, path, color, description, created_at) VALUES (?, ?, ?, ?, ?)')
-      .run(name, this.normalizeAppPath(input.path), input.color || '#64748b', input.description || '', nowIso());
+      .prepare('INSERT INTO apps (name, path, color, description, plugins, created_at) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(name, this.normalizeAppPath(input.path), input.color || '#64748b', input.description || '', checkPlugins(input.plugins) ?? '', nowIso());
     this.bus.publish({ type: 'apps.changed' });
     return this.listApps(true).find((a) => a.id === Number(r.lastInsertRowid))!;
   }
 
-  updateApp(id: number, patch: { name?: string; path?: string | null; color?: string; description?: string; archived?: boolean }): App {
+  updateApp(id: number, patch: { name?: string; path?: string | null; color?: string; description?: string; archived?: boolean; plugins?: string; connectors?: string[] | null }): App {
     const current = this.listApps(true).find((a) => a.id === id);
     if (!current) throw new RuleError('not_found', `Projeto ${id} não existe.`, 404);
     const name = patch.name === undefined ? current.name : patch.name.trim();
@@ -366,13 +463,15 @@ export class BoardService {
       throw new RuleError('invalid_app', `Já existe um projeto chamado "${name}".`, 400);
     }
     this.db
-      .prepare('UPDATE apps SET name = ?, path = ?, color = ?, description = ?, archived = ? WHERE id = ?')
+      .prepare('UPDATE apps SET name = ?, path = ?, color = ?, description = ?, archived = ?, plugins = ?, connectors_json = ? WHERE id = ?')
       .run(
         name,
         patch.path === undefined ? current.path : this.normalizeAppPath(patch.path),
         patch.color ?? current.color,
         patch.description ?? current.description,
         (patch.archived ?? current.archived) ? 1 : 0,
+        patch.plugins === undefined ? current.plugins : (checkPlugins(patch.plugins) ?? ''),
+        patch.connectors === undefined ? (current.connectors ? JSON.stringify(current.connectors) : null) : checkConnectors(patch.connectors),
         id,
       );
     this.bus.publish({ type: 'apps.changed' });
@@ -603,24 +702,54 @@ export class BoardService {
   private tokensOf(ids: number[]): Map<number, CardTokens> {
     const out = new Map<number, CardTokens>();
     if (!ids.length) return out;
+    // detailed = 1 for runs that recorded the four parts (migration 18, D126), 0 for older ones.
     const rows = this.db
       .prepare(
-        `SELECT card_id, COALESCE(agent, 'claude') AS agent, SUM(tokens_in) AS input, SUM(tokens_out) AS output, COUNT(*) AS runs
+        `SELECT card_id, COALESCE(agent, 'claude') AS agent, tokens_input IS NOT NULL AS detailed,
+            SUM(tokens_in) AS input, SUM(tokens_out) AS output, COUNT(*) AS runs,
+            SUM(COALESCE(tokens_input, 0)) AS plain, SUM(COALESCE(tokens_cache_write, 0)) AS cache_write, SUM(COALESCE(tokens_cache_read, 0)) AS cache_read
           FROM executions WHERE card_id IN (${ids.map(() => '?').join(',')})
-          GROUP BY card_id, COALESCE(agent, 'claude')`,
+          GROUP BY card_id, COALESCE(agent, 'claude'), tokens_input IS NOT NULL`,
       )
       .all(...ids) as Row[];
     for (const r of rows) {
-      const t = out.get(r.card_id) ?? { input: 0, output: 0, runs: 0, byAgent: [] };
+      const t = out.get(r.card_id) ?? { input: 0, output: 0, runs: 0, byAgent: [], detail: null, undetailed: null };
       t.input += r.input;
       t.output += r.output;
       t.runs += r.runs;
-      t.byAgent.push({ agent: r.agent, input: r.input, output: r.output, runs: r.runs });
+      const a = t.byAgent.find((x) => x.agent === r.agent);
+      if (a) {
+        a.input += r.input;
+        a.output += r.output;
+        a.runs += r.runs;
+      } else t.byAgent.push({ agent: r.agent, input: r.input, output: r.output, runs: r.runs });
+      if (r.detailed) {
+        const d = t.detail ?? { input: 0, cacheWrite: 0, cacheRead: 0, output: 0, equivalent: 0, runs: 0, weights: this.tokenWeights };
+        d.input += r.plain;
+        d.cacheWrite += r.cache_write;
+        d.cacheRead += r.cache_read;
+        d.output += r.output;
+        d.runs += r.runs;
+        t.detail = d;
+      } else {
+        const u = t.undetailed ?? { input: 0, output: 0, runs: 0 };
+        u.input += r.input;
+        u.output += r.output;
+        u.runs += r.runs;
+        t.undetailed = u;
+      }
       out.set(r.card_id, t);
     }
     for (const [id, t] of out) {
-      if (t.input + t.output === 0) out.delete(id);
-      else t.byAgent.sort((a, b) => b.input + b.output - (a.input + a.output));
+      if (t.input + t.output === 0) {
+        out.delete(id);
+        continue;
+      }
+      t.byAgent.sort((a, b) => b.input + b.output - (a.input + a.output));
+      if (t.detail) t.detail.equivalent = equivalentTokens(t.detail, this.tokenWeights);
+      // A detailed run with no tokens (it failed before the first message) says nothing.
+      if (t.detail && t.detail.input + t.detail.cacheWrite + t.detail.cacheRead + t.detail.output === 0) t.detail = null;
+      if (t.undetailed && t.undetailed.input + t.undetailed.output === 0) t.undetailed = null;
     }
     return out;
   }
@@ -664,7 +793,7 @@ export class BoardService {
     const card = this.getCard(id);
     const checklist = (this.db.prepare('SELECT * FROM checklist_items WHERE card_id = ? ORDER BY position, id').all(id) as Row[]).map(rowToChecklist);
     const comments = (this.db.prepare('SELECT * FROM comments WHERE card_id = ? ORDER BY id').all(id) as Row[]).map(rowToComment);
-    const executions = (this.db.prepare('SELECT * FROM executions WHERE card_id = ? ORDER BY id').all(id) as Row[]).map(rowToExecution);
+    const executions = (this.db.prepare('SELECT * FROM executions WHERE card_id = ? ORDER BY id').all(id) as Row[]).map((r) => rowToExecution(r, this.tokenWeights));
     const events = (this.db.prepare('SELECT * FROM events WHERE card_id = ? ORDER BY id').all(id) as Row[]).map(rowToEvent);
     const parentRow = card.parentId ? (this.db.prepare('SELECT id, title, status FROM cards WHERE id = ?').get(card.parentId) as Row | undefined) : undefined;
     const parent = parentRow ? { id: parentRow.id, title: parentRow.title, status: parentRow.status } : null;
@@ -702,15 +831,15 @@ export class BoardService {
       throw new RuleError('invalid_priority', 'Prioridade vai de 1 (alta) a 4 (baixa).', 400);
     }
     this.assertApp(input.appId);
-    input = { ...input, model: checkModel(input.model), effort: checkEffort(input.effort), agent: checkAgent(input.agent) };
+    input = { ...input, model: checkModel(input.model), effort: checkEffort(input.effort), agent: checkAgent(input.agent), plugins: checkPlugins(input.plugins) };
     const now = nowIso();
     const r = this.db
       .prepare(
         `INSERT INTO cards (title, description_md, status, position, owner, app_id, priority, due_date, origin,
-           repo_path, base_branch, permission_mode, max_turns, model, effort, agent, links_json,
+           repo_path, base_branch, permission_mode, max_turns, model, effort, agent, plugins, links_json,
            suggested_status, suggestion_confidence, suggestion_evidence, created_at, updated_at, completed_at,
-           parent_id, dangerous_allowed, automation_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           parent_id, dangerous_allowed, automation_id, connectors_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         title,
@@ -729,6 +858,7 @@ export class BoardService {
         input.model ?? null,
         input.effort ?? null,
         input.agent ?? null,
+        input.plugins ?? null,
         JSON.stringify(input.links ?? []),
         input.suggestedStatus ?? null,
         input.suggestionConfidence ?? null,
@@ -739,6 +869,7 @@ export class BoardService {
         extra.parentId ?? null,
         extra.dangerousAllowed ? 1 : 0,
         input.automationId ?? null,
+        checkConnectors(input.connectors),
       );
     const cardId = Number(r.lastInsertRowid);
     for (const labelId of input.labelIds ?? []) {
@@ -785,6 +916,8 @@ export class BoardService {
             model: parent.model,
             effort: parent.effort,
             agent: parent.agent,
+            plugins: parent.plugins,
+            connectors: parent.connectors,
             labelIds: parent.labelIds,
             repositoryIds: parent.repositoryIds,
             links: parent.links,
@@ -845,6 +978,9 @@ export class BoardService {
       if (key === 'model') value = checkModel(value as string | null);
       if (key === 'effort') value = checkEffort(value as string | null);
       if (key === 'agent') value = checkAgent(value as string | null);
+      if (key === 'plugins') value = checkPlugins(value as string | null);
+      if (key === 'connectors') value = checkConnectors(value);
+      if (key === 'resumeMode') value = checkResumeMode(value as string | null);
       if (key === 'dangerousAllowed') {
         if (actor !== 'user') throw new RuleError('target_not_allowed', 'Só o usuário libera o modo sem permissões.', 403);
         value = value ? 1 : 0;

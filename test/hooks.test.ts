@@ -107,10 +107,15 @@ describe('hook script', () => {
   it('with the Board off, exits 0 quickly and prints nothing', async () => {
     const script = path.join(dir, 'off.mjs');
     fs.writeFileSync(script, hookScript(await freePort()));
+    // Node start-up alone, measured under the same load: a fixed bound on the total failed on a loaded
+    // machine with no defect (1643 ms against 1500, card #228). The script itself gives up at 0.9 s.
+    const noop = path.join(dir, 'noop.mjs');
+    fs.writeFileSync(noop, "process.stdin.resume();\nprocess.stdin.on('end', () => process.exit(0));\n");
+    const startup = await runHook(noop, 'SessionStart', {});
     const r = await runHook(script, 'SessionStart', { session_id: 's-off', cwd: dir });
     expect(r.code).toBe(0);
     expect(r.stdout).toBe('');
-    expect(r.ms).toBeLessThan(1500); // includes Node start-up; the script itself gives up at 0.9 s
+    expect(r.ms - startup.ms).toBeLessThan(1500);
   });
 
   // The script gives up at 0.9 s by design (it must never slow Claude Code down); on a machine loaded

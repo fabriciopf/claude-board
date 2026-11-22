@@ -6,7 +6,8 @@ import { runCommand, type CmdResult } from '../src/publish/git.js';
 import { blockedHits, githubSlug, isEnvFile, pickMergeMethod, secretHits, splitList, textSecretHits } from '../src/publish/mirror.js';
 import { MIRROR_OFF_NOTE, Publisher } from '../src/publish/publisher.js';
 import { DEFAULT_CONFIG } from '../src/config.js';
-import { makeContext, tempDir } from './helpers.js';
+import { copyFixture } from './git-fixture.js';
+import { makeContext } from './helpers.js';
 
 const fakeBuild = path.resolve('test/fake-build.mjs');
 const node = process.execPath;
@@ -43,8 +44,15 @@ const APP = 'export const title = "x";\n';
 
 /** The Board's repo (master, with DECISIONS.md), a bare "GitHub" and the public checkout cloned from it. */
 function setup() {
-  const root = tempDir('cb-mirror-');
+  const root = copyFixture('mirror', 'cb-mirror-', buildRepos);
   repo = path.join(root, 'claude-board');
+  bare = path.join(root, 'github.git');
+  mirror = path.join(root, 'claude-board-public');
+}
+
+/** Built once per file and copied for each test (card #228). */
+function buildRepos(root: string) {
+  const repo = path.join(root, 'claude-board');
   fs.mkdirSync(path.join(repo, 'src', 'ui'), { recursive: true });
   fs.writeFileSync(path.join(repo, 'src', 'ui', 'App.tsx'), APP);
   git(repo, 'init', '-q', '-b', 'master');
@@ -55,9 +63,9 @@ function setup() {
   git(repo, 'add', '-A');
   git(repo, 'commit', '-q', '-m', 'init');
 
-  bare = path.join(root, 'github.git');
+  const bare = path.join(root, 'github.git');
   git(root, 'init', '-q', '--bare', '-b', 'main', bare);
-  mirror = path.join(root, 'claude-board-public');
+  const mirror = path.join(root, 'claude-board-public');
   fs.mkdirSync(mirror);
   git(mirror, 'init', '-q', '-b', 'main');
   identity(mirror, 'me@personal.example');
@@ -512,5 +520,34 @@ describe('mirror helpers', () => {
     expect(isEnvFile('prod.env')).toBe(true);
     expect(isEnvFile('.env.sample')).toBe(false);
     expect(isEnvFile('.envrc')).toBe(false);
+  });
+});
+
+describe('signed public commits (card #225)', () => {
+  const hasSshKeygen = spawnSync('ssh-keygen', ['-?'], { windowsHide: true }).error === undefined;
+
+  it.skipIf(!hasSshKeygen)('signs the commit when the public checkout has commit.gpgsign, so installs in auto can verify it', async () => {
+    const key = path.join(path.dirname(mirror), 'signing');
+    const r = spawnSync('ssh-keygen', ['-q', '-t', 'ed25519', '-N', '', '-C', 'mirror', '-f', key], { windowsHide: true });
+    expect(r.status).toBe(0);
+    git(mirror, 'config', 'gpg.format', 'ssh');
+    git(mirror, 'config', 'user.signingkey', key);
+    git(mirror, 'config', 'commit.gpgsign', 'true');
+    const allowed = path.join(path.dirname(mirror), 'allowed_signers');
+    fs.writeFileSync(allowed, `me@personal.example namespaces="git" ${fs.readFileSync(`${key}.pub`, 'utf8').trim()}\n`);
+    git(mirror, 'config', 'gpg.ssh.allowedSignersFile', allowed);
+
+    const card = publishedCard('Assinado', { 'src/b.ts': 'export const b = 2;\n' });
+    ctx.service.approve(card.id);
+    await publisher.mirror.whenIdle();
+    const sha = git(bare, 'rev-parse', `cb/${card.id}-assinado`);
+    expect(git(bare, '-c', `gpg.ssh.allowedSignersFile=${allowed}`, 'log', '-1', '--format=%G?', sha)).toBe('G');
+  });
+
+  it('leaves the commit unsigned without commit.gpgsign', async () => {
+    const card = publishedCard('Sem assinatura', { 'src/b.ts': 'export const b = 2;\n' });
+    ctx.service.approve(card.id);
+    await publisher.mirror.whenIdle();
+    expect(git(bare, 'log', '-1', '--format=%G?', `cb/${card.id}-sem-assinatura`)).toBe('N');
   });
 });

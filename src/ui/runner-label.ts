@@ -1,4 +1,4 @@
-import { ANTIGRAVITY_CONCURRENCY_PRESETS, AUTO_CONCURRENCY, CONCURRENCY_PRESETS, UNLIMITED_CONCURRENCY, concurrencyOptionLabel, type AntigravityLane, type ConcurrencyInfo, type RunnerState } from '../shared/domain';
+import { ANTIGRAVITY_CONCURRENCY_PRESETS, AUTO_CONCURRENCY, CODEX_CONCURRENCY_PRESETS, CONCURRENCY_PRESETS, UNLIMITED_CONCURRENCY, concurrencyOptionLabel, type AntigravityLane, type CodexLane, type ConcurrencyInfo, type RunnerState } from '../shared/domain';
 import { t } from './i18n';
 
 /**
@@ -37,6 +37,18 @@ export function concurrencyOptions(c: ConcurrencyInfo): { value: string; label: 
     value,
     label: value === AUTO_CONCURRENCY && c.mode === 'auto' ? `${c.limit} (auto)` : concurrencyOptionLabel(value),
   }));
+}
+
+/** The Codex CLI setting as the header selector shows it (D125): its fixed number or ∞. */
+export function codexConcurrencyValue(lane: Pick<CodexLane, 'limit'>): string {
+  return lane.limit === null ? UNLIMITED_CONCURRENCY : String(lane.limit);
+}
+
+/** Choices of the Codex CLI selector: the presets, plus a number from config.json outside them. */
+export function codexConcurrencyOptions(lane: Pick<CodexLane, 'limit'>): { value: string; label: string }[] {
+  const current = codexConcurrencyValue(lane);
+  const values = CODEX_CONCURRENCY_PRESETS.includes(current) ? [...CODEX_CONCURRENCY_PRESETS] : insertNumber(CODEX_CONCURRENCY_PRESETS, current);
+  return values.map((value) => ({ value, label: concurrencyOptionLabel(value) }));
 }
 
 /** The Antigravity CLI setting as the header selector shows it (D99): the runner's mode when it has one (D100), else the limit. */

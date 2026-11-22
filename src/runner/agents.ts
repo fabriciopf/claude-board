@@ -1,17 +1,21 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { DEFAULT_CONFIG, protectedBranchList, type Config } from '../config.js';
+import { claudeHomeDir, DEFAULT_CONFIG, protectedBranchList, type Config } from '../config.js';
 import { CARD_HEADER, EXECUTION_HEADER } from '../mcp/http.js';
 import { packageRoot } from './package-root.js';
+import { enabledPluginsFor, readPluginInventory, type PluginInventory } from './plugins.js';
+import { resolvePluginRules } from '../shared/plugins.js';
 import { protectedBranchPattern } from './push-guard.js';
-import { agentLabel, isAgentId, modelFitsAgent, type AgentId, type Card } from '../shared/domain.js';
+import { agentLabel, codexEffort, isAgentId, modelFitsAgent, type AgentId, type App, type Card } from '../shared/domain.js';
 import { boardEnvVars, CLI_NAME, MCP_NAME } from '../shared/brand.js';
+import { mcpArgs } from '../shared/connectors.js';
+import { boardAliases, readUserMcpServers } from './user-mcp.js';
 
 /**
  * How a run starts in each command-line agent (D92, D93). The runner decides what the run is (card,
  * prompts, session, folder); the agent decides how that becomes a command line, environment and
- * files. Both write Claude Code's stream-json on stdout: Claude Code itself, and the Board's ACP
- * client for Antigravity CLI (`bin/agy-acp.mjs`), which translates.
+ * files. All write Claude Code's stream-json on stdout: Claude Code itself, the Board's ACP client for
+ * Antigravity CLI (`bin/agy-acp.mjs`) and its client for Codex CLI (`bin/codex-exec.mjs`, D125), which translate.
  */
 
 export interface LaunchInput {
@@ -31,6 +35,14 @@ export interface LaunchInput {
   sessionId: string;
   sessionName: string | null;
   addDirs: string[];
+  /** The card's project, for its plugin rules (D128); null when the card has none. */
+  app?: Pick<App, 'plugins'> | null;
+  /** Installed plugins; read from `claudeHome` when absent (tests pass their own). */
+  pluginInventory?: PluginInventory;
+  /** Connectors the run turns on, already resolved (card, then project, then settings; D124). */
+  connectors?: string[];
+  /** The user's `~/.claude.json`; tests point it elsewhere. */
+  claudeJsonFile?: string;
 }
 
 export interface Launch {
@@ -60,7 +72,7 @@ export function resolveAgent(card: Pick<Card, 'agent'>, config: Pick<Config, 'de
 
 /** The model a run of this agent uses: the card's when it fits the agent, else the agent's default. */
 export function resolveModel(card: Pick<Card, 'model'>, config: Config, agent: AgentId): string | null {
-  const fallback = agent === 'antigravity' ? config.antigravityModel : config.defaultModel;
+  const fallback = agent === 'antigravity' ? config.antigravityModel : agent === 'codex' ? config.codexModel : config.defaultModel;
   const own = card.model && modelFitsAgent(card.model, agent) ? card.model : null;
   return own || fallback || null;
 }
@@ -136,9 +148,20 @@ export function pushDenyPatterns(policy: Config['prPolicy'], protectedBranches: 
 
 // ---------- Claude Code ----------
 
+/**
+ * The `enabledPlugins` of a Claude Code run (D128): the settings' rules, then the project's, then the
+ * card's. Empty when no layer names a plugin, and then the run gets no `--settings` at all.
+ */
+export function runEnabledPlugins(input: Pick<LaunchInput, 'config' | 'card' | 'app' | 'pluginInventory'>): Record<string, boolean> {
+  const rules = resolvePluginRules([input.config.runPlugins, input.app?.plugins, input.card.plugins]);
+  if (!rules.size) return {};
+  return enabledPluginsFor(rules, input.pluginInventory ?? readPluginInventory(claudeHomeDir(input.config)));
+}
+
 function claudeLaunch(input: LaunchInput): Launch {
   const { config, card, runDir, boardUrl, executionId } = input;
   const mcpFile = path.join(runDir, 'mcp.json');
+  const boardMcpUrl = `${boardUrl}/mcp`;
   fs.writeFileSync(
     mcpFile,
     JSON.stringify(
@@ -146,7 +169,7 @@ function claudeLaunch(input: LaunchInput): Launch {
         mcpServers: {
           [MCP_NAME]: {
             type: 'http',
-            url: `${boardUrl}/mcp`,
+            url: boardMcpUrl,
             headers: { [CARD_HEADER]: String(card.id), [EXECUTION_HEADER]: String(executionId) },
           },
         },
@@ -155,6 +178,23 @@ function claudeLaunch(input: LaunchInput): Launch {
       2,
     ),
   );
+  // Only the Board's server, unless the card turns connectors on (D124).
+  const connectors = input.connectors ?? [];
+  const mcp = mcpArgs({
+    mcpFile,
+    boardMcpUrl,
+    connectors,
+    boardAliases: connectors.length ? boardAliases(readUserMcpServers(input.claudeJsonFile), boardUrl) : [],
+    settingsFile: path.join(runDir, 'mcp-settings.json'),
+  });
+  // Plugins of this run only (D128), merged by Claude Code over the user's settings.json key by key.
+  // Claude Code reads one --settings file, so when the connectors already pass one (D124) the plugins go
+  // into it; otherwise they get their own file.
+  const enabledPlugins = runEnabledPlugins(input);
+  const hasPlugins = Object.keys(enabledPlugins).length > 0;
+  if (mcp.settings) {
+    fs.writeFileSync(path.join(runDir, 'mcp-settings.json'), JSON.stringify(hasPlugins ? { ...mcp.settings, enabledPlugins } : mcp.settings, null, 2));
+  }
   const maxTurns = card.maxTurns ?? config.defaultMaxTurns;
   const args = [
     ...config.claudeArgsPrefix,
@@ -164,13 +204,17 @@ function claudeLaunch(input: LaunchInput): Launch {
     '--verbose',
     '--append-system-prompt',
     input.systemPrompt,
-    '--mcp-config',
-    mcpFile,
+    ...mcp.args,
     '--allowedTools',
     `mcp__${MCP_NAME}`,
     '--permission-prompts',
     'none',
   ];
+  if (hasPlugins && !mcp.settings) {
+    const settingsFile = path.join(runDir, 'settings.json');
+    fs.writeFileSync(settingsFile, JSON.stringify({ enabledPlugins }, null, 2));
+    args.push('--settings', settingsFile);
+  }
   if (card.dangerousAllowed) args.push('--dangerously-skip-permissions');
   else {
     // No mode on the card or in the Board config: Claude Code uses the user's own settings.json, as in VS Code.
@@ -280,6 +324,99 @@ function antigravityLaunch(input: LaunchInput): Launch {
   };
 }
 
+// ---------- Codex CLI ----------
+
+/** What the Codex client (`bin/codex-exec.mjs`) reads: how to start codex, the prompt and the push rules. */
+export interface CodexRunConfig {
+  bin: string;
+  /** `codex exec …` for a new session; the client adds `resume <id>` itself for its refusal nudges. */
+  args: string[];
+  /** The same options before `resume`, for a nudge into the session codex opened. */
+  resumeArgs: string[];
+  cwd: string;
+  prompt: string;
+  resumeId: string | null;
+  model: string | null;
+  maxTurns: number;
+  /** Regular expressions of the shell commands that stop the run (`pushDenyPatterns`). */
+  denyPatterns: string[];
+}
+
+/** A TOML value for codex's `-c key=value` (JSON strings are valid TOML basic strings). */
+function toml(value: string | boolean | string[] | Record<string, string>): string {
+  if (typeof value === 'boolean') return String(value);
+  if (typeof value === 'string') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map((v) => JSON.stringify(v)).join(', ')}]`;
+  return `{ ${Object.entries(value).map(([k, v]) => `${JSON.stringify(k)} = ${JSON.stringify(v)}`).join(', ')} }`;
+}
+
+/**
+ * The options of one Codex run (D125), all as `-c` overrides of codex's config.toml so that a new
+ * session and `exec resume` take the same ones: model, effort, sandbox, and the Board's MCP server over
+ * streamable HTTP with the card and run headers. The user's own config.toml still loads (profile,
+ * login, other MCP servers), as Claude Code keeps the user's settings.json.
+ */
+export function codexOptions(input: Pick<LaunchInput, 'config' | 'card' | 'executionId' | 'boardUrl' | 'addDirs'>): { options: string[]; model: string | null; effort: string | null } {
+  const { config, card, executionId, boardUrl } = input;
+  const model = resolveModel(card, config, 'codex');
+  const effort = codexEffort(card.effort || config.defaultEffort || null);
+  // A plan-mode card reads and plans without writing; a card cleared for anything leaves the sandbox.
+  const sandbox = card.dangerousAllowed ? 'danger-full-access' : card.permissionMode === 'plan' ? 'read-only' : 'workspace-write';
+  const set: [string, Parameters<typeof toml>[0]][] = [];
+  if (model) set.push(['model', model]);
+  if (effort) set.push(['model_reasoning_effort', effort]);
+  // exec never asks: what the sandbox forbids fails, and the model sees the error.
+  set.push(['approval_policy', 'never'], ['sandbox_mode', sandbox]);
+  if (sandbox === 'workspace-write') {
+    set.push(['sandbox_workspace_write.network_access', config.codexNetworkAccess]);
+    if (input.addDirs.length) set.push(['sandbox_workspace_write.writable_roots', input.addDirs]);
+  }
+  set.push(
+    [`mcp_servers.${MCP_NAME}.url`, `${boardUrl}/mcp`],
+    [`mcp_servers.${MCP_NAME}.http_headers`, { [CARD_HEADER]: String(card.id), [EXECUTION_HEADER]: String(executionId) }],
+  );
+  return { options: set.flatMap(([k, v]) => ['-c', `${k}=${toml(v)}`]), model, effort };
+}
+
+/**
+ * Codex CLI (D125) runs as `codex exec --json`, driven by a small client of the Board that reads its
+ * JSONL events and writes Claude Code's stream-json. Codex has no flag to append to its system prompt
+ * nor a per-run list of forbidden commands: the Board's rules go at the top of the prompt, and the
+ * client stops the run when a forbidden push starts (the worktree's pre-push hook, D96, is the lock
+ * that does not race). Codex picks its own session id (`thread_id`); the client reports it.
+ */
+function codexLaunch(input: LaunchInput): Launch {
+  const { config, card, runDir } = input;
+  const { options, model, effort } = codexOptions(input);
+  const exec = [...config.codexArgsPrefix, 'exec', '--json', '--skip-git-repo-check', ...options];
+  const run: CodexRunConfig = {
+    bin: config.codexBin,
+    // The prompt comes on stdin ("-").
+    args: input.resumeId ? [...exec, 'resume', input.resumeId, '-'] : [...exec, '-'],
+    resumeArgs: exec,
+    cwd: input.cwd,
+    prompt: withBoardRules(input.systemPrompt, input.userPrompt),
+    resumeId: input.resumeId,
+    model,
+    maxTurns: card.maxTurns ?? config.defaultMaxTurns ?? 0,
+    denyPatterns: pushDenyPatterns(config.prPolicy, protectedBranchList(config.protectedBranches)),
+  };
+  const runFile = path.join(runDir, 'codex-run.json');
+  fs.writeFileSync(runFile, JSON.stringify(run, null, 2));
+  return {
+    agent: 'codex',
+    bin: process.execPath,
+    args: [path.join(packageRoot(), 'bin', 'codex-exec.mjs'), runFile],
+    env: {},
+    unsetEnv: ['CLAUDECODE', 'CLAUDE_CODE_ENTRYPOINT'],
+    stdin: '',
+    model,
+    effort,
+    presetSession: false,
+  };
+}
+
 export function buildLaunch(agent: AgentId, input: LaunchInput): Launch {
+  if (agent === 'codex') return codexLaunch(input);
   return agent === 'antigravity' ? antigravityLaunch(input) : claudeLaunch(input);
 }

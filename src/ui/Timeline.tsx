@@ -5,6 +5,7 @@ import { OwnerAvatar } from './OwnerAvatar';
 import { api, fmtDate } from './api';
 import { executionStatusLabel, locale, statusLabel, t, type MessageKey } from './i18n';
 import { renderMarkdown } from './markdown';
+import { executionTokens } from './token-badge';
 
 type Author = 'user' | 'claude' | 'system';
 const author = (a: Author) => t(`card.author.${a}`);
@@ -162,7 +163,7 @@ const promptKindLabel = (kind: string) =>
 
 function ExecutionBlock({ exec }: { exec: Execution }) {
   const [open, setOpen] = useState(exec.status !== 'success');
-  const tokens = exec.tokensIn + exec.tokensOut;
+  const tokens = executionTokens(exec);
   return (
     <div className="exec">
       <div className="exec-head" onClick={() => setOpen(!open)} role="button" aria-expanded={open}>
@@ -170,7 +171,17 @@ function ExecutionBlock({ exec }: { exec: Execution }) {
         <strong>{t('card.exec.title', { id: exec.id })}</strong>
         <span className={'exec-status ' + exec.status}>{executionStatusLabel(exec.status)}</span>
         <span className="muted small">{fmtDate(exec.startedAt)}</span>
-        <span className="muted small">{t('card.exec.stats', { turns: exec.turns, tokens: tokens.toLocaleString(locale()) })}</span>
+        <span className="muted small">
+          {t('card.exec.turns', { turns: exec.turns })} ·{' '}
+          <span className="exec-tokens" title={tokens.title}>
+            {tokens.text}
+          </span>
+        </span>
+        {tokens.usage && (
+          <span className="muted small exec-usage" title={tokens.usageTitle ?? undefined}>
+            {tokens.usage}
+          </span>
+        )}
         {(exec.model || exec.effort || (exec.agent && exec.agent !== 'claude')) && (
           <span className="muted small" title={t('card.exec.modelEffort')}>
             {/* The agent is named only when it is not Claude Code, the default of every run before D92. */}
@@ -178,6 +189,12 @@ function ExecutionBlock({ exec }: { exec: Execution }) {
           </span>
         )}
         {exec.promptKind && exec.promptKind !== 'first' && <span className="pill">{promptKindLabel(exec.promptKind)}</span>}
+        {/* A run that took the card back in a new session with the handoff package (D129). */}
+        {exec.sessionMode === 'handoff' && (
+          <span className="pill" title={t('card.resumeModeHint')}>
+            {t('card.resumeHandoff')}
+          </span>
+        )}
       </div>
       {open && (
         <div className="exec-body">

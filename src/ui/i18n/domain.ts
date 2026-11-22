@@ -70,7 +70,7 @@ export const domain = defineMessages(
       'desc.waiting_third_party':
         'Depends on another person, a deploy or an access; the reason is recorded on the card. A card the agent split into tasks waits here until you approve all of them.',
       'desc.review':
-        "The agent finished and delivered a summary. Check it and approve, or ask for changes, which go back to the agent in the same session. A comment from you also sends the card back to the agent's queue.",
+        "The agent finished and delivered a summary. Check it and approve, or ask for changes, which go back to the agent in a new session with a summary of what was done (or in the same session, if the card or the settings ask for it). A comment from you also sends the card back to the agent's queue.",
       'desc.done': "Work you approved. Only you move a card here. A comment from you sends the card back to the agent's queue.",
 
       'exec.running': 'running',
@@ -111,7 +111,7 @@ export const domain = defineMessages(
       'desc.waiting_third_party':
         'Depende de otra persona, de un deploy o de un acceso; el motivo queda registrado en la tarjeta. Una tarjeta que el agente dividió en tareas espera aquí hasta que apruebes todas.',
       'desc.review':
-        'El agente terminó y entregó un resumen. Revísalo y apruébalo, o pide ajustes, que vuelven al agente en la misma sesión. Un comentario tuyo también devuelve la tarjeta a la cola del agente.',
+        'El agente terminó y entregó un resumen. Revísalo y apruébalo, o pide ajustes, que vuelven al agente en una sesión nueva con el resumen de lo hecho (o en la misma sesión, si la tarjeta o la configuración lo piden). Un comentario tuyo también devuelve la tarjeta a la cola del agente.',
       'desc.done': 'Trabajo que aprobaste. Solo tú mueves una tarjeta aquí. Un comentario tuyo devuelve la tarjeta a la cola del agente.',
 
       'exec.running': 'en curso',

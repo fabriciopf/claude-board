@@ -4,6 +4,7 @@ import { imageRefs } from '../shared/images.js';
 import { readList } from '../service/split.js';
 import { STATUS_LABELS, STATUS_SHORT_LABELS, type App, type CardDetail, type CardRef, type Label, type Repository } from '../shared/domain.js';
 import { MCP_NAME, PRODUCT_NAME } from '../shared/brand.js';
+import { handoffSection, type HandoffInfo } from './handoff.js';
 
 export type PromptKind = 'first' | 'reply' | 'adjust' | 'comment' | 'retry' | 'requeue' | 'moved' | 'midrun';
 
@@ -61,6 +62,12 @@ export interface PromptInput {
    * comments from then on go into the prompt. Unset = new session, every comment goes.
    */
   commentsSince?: string | null;
+  /**
+   * Set when the run opens a new session in place of resuming one (D129): the handoff package. The
+   * comments since the previous run (commentsSince) still come apart as the new ones (D94); the older
+   * ones come too, because the new session never saw them.
+   */
+  handoff?: HandoffInfo | null;
 }
 
 /** Comments of the card that go into the prompt (D94): all of them in a new session, only the user's new ones in a resumed one. */
@@ -164,9 +171,18 @@ function cardContext(input: PromptInput): string {
   const repositoryLine = repositoryNames ? `\n- Repositórios: ${repositoryNames}` : '';
   const checklist = detail.checklist.length ? detail.checklist.map((i) => `- [${i.done ? 'x' : ' '}] ${i.text}`).join('\n') : '(vazio)';
   const links = card.links.length ? card.links.map((l) => `- ${l.kind}: ${l.title ? `${l.title} — ` : ''}${l.value}`).join('\n') : '(nenhum)';
-  const comments = promptComments(detail.comments, commentsSince)
-    .map((c) => `- [${c.author === 'claude' ? 'Agente' : 'Usuário'}${c.kind !== 'comment' ? `, ${c.kind}` : ''}] ${c.bodyMd.replace(/\s+/g, ' ').slice(0, 600)}`)
-    .join('\n');
+  const line = (c: CardDetail['comments'][number]) =>
+    `- [${c.author === 'claude' ? 'Agente' : 'Usuário'}${c.kind !== 'comment' ? `, ${c.kind}` : ''}] ${c.bodyMd.replace(/\s+/g, ' ').slice(0, 600)}`;
+  const fresh = promptComments(detail.comments, commentsSince);
+  const comments = fresh.map(line).join('\n');
+  // A handoff session never saw the older comments: they come after the new ones, apart (D129).
+  const older = input.handoff && commentsSince ? promptComments(detail.comments, null).filter((c) => !fresh.includes(c)) : [];
+  const commentsHeading = !commentsSince
+    ? '### Comentários'
+    : input.handoff
+      ? '### Comentários do usuário desde a execução anterior'
+      : '### Comentários do usuário desde a execução anterior\n\nOs comentários mais antigos e os seus já estão nesta sessão.';
+  const olderSection = older.length ? `\n\n### Comentários anteriores (seus e do usuário)\n\n${older.map(line).join('\n')}` : '';
   return `## Card #${card.id}: ${card.title}
 
 - Lista: ${STATUS_LABELS[card.status]}${labelNames ? ` · Labels: ${labelNames}` : ''}${appLine}${repositoryLine}
@@ -185,14 +201,31 @@ ${checklist}
 
 ${links}
 
-${commentsSince ? '### Comentários do usuário desde a execução anterior\n\nOs comentários mais antigos e os seus já estão nesta sessão.' : '### Comentários'}
+${commentsHeading}
 
-${comments || '(nenhum)'}`;
+${comments || '(nenhum)'}${olderSection}`;
+}
+
+/** What the user asked, as the opening of a handoff session (D129). */
+function handoffAsk(kind: PromptKind, nextPrompt: string | null, cardId: number): string {
+  switch (kind) {
+    case 'adjust':
+      return `O usuário revisou a entrega e pediu ajustes:\n\n${nextPrompt ?? ''}\n\nFaça os ajustes e entregue de novo com card_submit_for_review.`;
+    case 'comment':
+      return `O usuário comentou no card depois da entrega:\n\n${nextPrompt ?? ''}\n\nAtenda ao comentário e entregue de novo com card_submit_for_review. Se o comentário só pedir informação, responda no card com card_comment antes de entregar.`;
+    case 'midrun':
+      return `Enquanto a execução anterior deste card rodava, o usuário comentou no card, e o comentário não chegou a ela antes do fim:\n\n${nextPrompt ?? ''}\n\nAtenda ao comentário. Se ele mudar o trabalho, faça o que ele pede e entregue de novo com card_submit_for_review; se só pedir informação, responda com card_comment e entregue de novo.`;
+    default:
+      return `O usuário colocou o card #${cardId} de volta na fila. O card pode ter mudado; continue a partir do estado atual.`;
+  }
 }
 
 /** The user turn sent on stdin. */
 export function buildUserPrompt(kind: PromptKind, input: PromptInput, nextPrompt: string | null): string {
   const card = input.detail.card;
+  if (input.handoff) {
+    return `Continue o card #${card.id} numa sessão nova.\n\n${handoffAsk(kind, nextPrompt, card.id)}\n\n${handoffSection(input.handoff, input.branch)}\n\n${cardContext(input)}`;
+  }
   switch (kind) {
     case 'first':
       return `Execute o card #${card.id}.\n\n${input.split ? `${splitSection(input.split)}\n\n` : ''}${cardContext(input)}`;

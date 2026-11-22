@@ -5,7 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { saveConfig } from '../src/config.js';
 import { Publisher } from '../src/publish/publisher.js';
 import { explainFetchError, githubCommitsUrl, normalizeRemoteUrl, SelfUpdater } from '../src/publish/self-update.js';
-import { makeContext, tempDir } from './helpers.js';
+import { copyFixture } from './git-fixture.js';
+import { makeContext } from './helpers.js';
 
 // Card #183 (D89): the Board updates itself from the remote it was cloned from.
 
@@ -90,25 +91,32 @@ async function applyNow(): Promise<void> {
   await updater.whenIdle();
 }
 
-beforeEach(() => {
-  root = tempDir('cb-self-update-');
-  remote = path.join(root, 'remote.git');
-  git(root, 'init', '-q', '--bare', '-b', 'main', remote);
-  dev = path.join(root, 'dev');
-  git(root, 'clone', '-q', '-c', 'core.autocrlf=false', remote, dev);
-  identity(dev);
-  git(dev, 'checkout', '-q', '-b', 'main');
-  write(dev, {
+/** The remote, the maintainer's checkout and the install; built once per file and copied for each test (card #228). */
+function buildRepos(dir: string): void {
+  const bare = path.join(dir, 'remote.git');
+  git(dir, 'init', '-q', '--bare', '-b', 'main', bare);
+  const maintainer = path.join(dir, 'dev');
+  git(dir, 'clone', '-q', '-c', 'core.autocrlf=false', bare, maintainer);
+  identity(maintainer);
+  git(maintainer, 'checkout', '-q', '-b', 'main');
+  write(maintainer, {
     '.gitignore': 'node_modules/\ndist/\n',
     'src/server.ts': 'export const port = 4317;\n',
     'src/ui/App.tsx': 'export const title = "v1";\n',
   });
-  git(dev, 'add', '-A');
-  git(dev, 'commit', '-q', '-m', 'init');
-  git(dev, 'push', '-q', '-u', 'origin', 'main');
+  git(maintainer, 'add', '-A');
+  git(maintainer, 'commit', '-q', '-m', 'init');
+  git(maintainer, 'push', '-q', '-u', 'origin', 'main');
+  const install = path.join(dir, 'claude-board');
+  git(dir, 'clone', '-q', '-c', 'core.autocrlf=false', bare, install);
+  identity(install);
+}
+
+beforeEach(() => {
+  root = copyFixture('self-update', 'cb-self-update-', buildRepos);
+  remote = path.join(root, 'remote.git');
+  dev = path.join(root, 'dev');
   board = path.join(root, 'claude-board');
-  git(root, 'clone', '-q', '-c', 'core.autocrlf=false', remote, board);
-  identity(board);
   ctx = makeContext({ selfRepoPath: board, publishBranch: 'main' });
   restart = vi.fn();
   publisher = new Publisher(ctx, { commands, restart, pollMs: 20 });
@@ -411,7 +419,7 @@ describe('automatic mode only applies commits it can trust (card #225)', () => {
     updater = newUpdater({ firstCheckMs: 1, checkEveryMs: 30 });
     ctx.selfUpdate = updater;
     updater.schedule();
-    await vi.waitFor(() => expect(updater.state().untrusted).toBeTruthy(), { timeout: 5000, interval: 20 });
+    await vi.waitFor(() => expect(updater.state().untrusted).toBeTruthy(), { timeout: 30000, interval: 20 });
     await new Promise((r) => setTimeout(r, 200));
     expect(updater.isBusy()).toBe(false);
     expect(head()).toBe(before);
@@ -435,6 +443,49 @@ describe('automatic mode only applies commits it can trust (card #225)', () => {
     auto();
     const s = await updater.check();
     expect(s.untrusted).toContain(unsigned.slice(0, 7));
+    expect(updater.isBusy()).toBe(false);
+    expect(head()).toBe(before);
+  });
+
+  /** The public copy's flow (D66): a signed commit on a branch, merged on GitHub by a merge commit nobody here can verify. */
+  function githubMerge(files: Record<string, string>, extra?: Record<string, string>): string {
+    git(dev, 'checkout', '-q', '-b', `cb/${Date.now()}`);
+    write(dev, files);
+    git(dev, 'add', '-A');
+    git(dev, 'commit', '-q', '-m', 'feat: card assinado');
+    const head = git(dev, 'rev-parse', 'HEAD');
+    let tree = git(dev, 'rev-parse', `${head}^{tree}`);
+    if (extra) {
+      // An "evil merge": the merge commit itself carries code that no signed commit has.
+      write(dev, extra);
+      git(dev, 'add', '-A');
+      tree = git(dev, 'write-tree');
+      git(dev, 'reset', '-q', '--hard');
+    }
+    git(dev, 'checkout', '-q', 'main');
+    const merge = git(dev, '-c', 'commit.gpgsign=false', '-c', 'user.name=GitHub', '-c', 'user.email=noreply@github.com', 'commit-tree', tree, '-p', 'main', '-p', head, '-m', 'Merge pull request #1');
+    git(dev, 'reset', '-q', '--hard', merge);
+    git(dev, 'push', '-q', 'origin', 'main');
+    return merge;
+  }
+
+  it.skipIf(!hasSshKeygen)('applies a GitHub merge commit that only merges signed commits', async () => {
+    signWith(dev, 'maintainer', true);
+    auto();
+    const merge = githubMerge({ 'src/ui/App.tsx': 'export const title = "via PR";\n' });
+    const s = await updater.check();
+    expect(s.untrusted).toBeNull();
+    await updater.whenIdle();
+    expect(head()).toBe(merge);
+  });
+
+  it.skipIf(!hasSshKeygen)('refuses a merge commit that carries code of its own', async () => {
+    signWith(dev, 'maintainer', true);
+    auto();
+    const before = head();
+    const merge = githubMerge({ 'src/ui/App.tsx': 'export const title = "via PR";\n' }, { 'src/evil.ts': 'export const x = 1;\n' });
+    const s = await updater.check();
+    expect(s.untrusted).toContain(merge.slice(0, 7));
     expect(updater.isBusy()).toBe(false);
     expect(head()).toBe(before);
   });

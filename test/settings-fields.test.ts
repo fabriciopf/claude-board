@@ -13,8 +13,13 @@ describe('settings tabs', () => {
         'claudeBin',
         'claudeHome',
         'classificationModel',
+        'codexBin',
+        'codexConcurrency',
+        'codexModel',
+        'codexNetworkAccess',
         'defaultAgent',
         'defaultBaseBranch',
+        'defaultConnectors',
         'defaultEffort',
         'defaultModel',
         'defaultPermissionMode',
@@ -29,9 +34,16 @@ describe('settings tabs', () => {
         'mirrorRepoPath',
         'prPolicy',
         'protectedBranches',
+        'resumeMode',
+        // Plugins of the runs (D128, card #231).
+        'runPlugins',
         'selfUpdate',
         'selfUpdateAuthors',
         'selfUpdateSource',
+        'tokenWeightCacheRead',
+        'tokenWeightCacheWrite',
+        'tokenWeightInput',
+        'tokenWeightOutput',
         'transcriptRetentionDays',
         'userProfile',
         'workspaceDir',
@@ -58,9 +70,10 @@ describe('settings tabs', () => {
     const tabOf = (key: string) => FIELDS.find((f) => f.key === key)?.tab;
     expect(tabOf('defaultAgent')).toBe('runs');
     const runs = FIELDS.filter((f) => f.tab === 'runs').map((f) => f.key);
-    // The two concurrency limits come first, Claude Code then Antigravity CLI (D99).
-    expect(runs.slice(0, 3)).toEqual(['maxConcurrency', 'antigravityConcurrency', 'defaultAgent']);
+    // The concurrency limits come first, Claude Code, Antigravity CLI (D99) and Codex CLI (D125).
+    expect(runs.slice(0, 4)).toEqual(['maxConcurrency', 'antigravityConcurrency', 'codexConcurrency', 'defaultAgent']);
     for (const key of ['antigravityModel', 'antigravityBin']) expect(tabOf(key)).toBe('antigravity');
+    for (const key of ['codexModel', 'codexBin', 'codexNetworkAccess']) expect(tabOf(key)).toBe('codex');
   });
 });
 

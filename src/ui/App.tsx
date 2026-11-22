@@ -21,7 +21,7 @@ import { SORT_STORE_KEYS, parseSort, type CardSort } from './card-sort';
 import { PublishBanner, publishLevel, publishVisible } from './PublishBanner';
 import type { Notice } from './notices';
 import { antigravityConcurrencyValue, antigravityTitle, concurrencyTitle, concurrencyValue, showRunnerPill } from './runner-label';
-import { AntigravityConcurrencySelect, ConcurrencySelect } from './ConcurrencySelect';
+import { AntigravityConcurrencySelect, CodexConcurrencySelect, ConcurrencySelect } from './ConcurrencySelect';
 import { UsageChip } from './UsageChip';
 import { AgentMark } from './AgentIcon';
 import { AgendaBanner, AgendaChip, useNow } from './AgendaChip';
@@ -407,7 +407,7 @@ export function App() {
                   Only while something runs (card #209). */}
               {showRunnerPill(runner) && (
                 <span className="counter runner-usage">
-                  {runner.antigravity?.shown && runner.concurrency ? (
+                  {(runner.antigravity?.shown || runner.codex?.shown) && runner.concurrency ? (
                     // Each agent against its own limit (D99), its mark before its count (card #198 review):
                     // "[Claude] 1 de 3 (auto) · [Antigravity] 2 de 2". The mark carries the name; no spinner and no
                     // "rodando" before the count (card #208).
@@ -416,11 +416,19 @@ export function App() {
                         <AgentMark agent="claude" /> <strong>{runner.claudeRunning ?? 0}</strong>
                         <ConcurrencySelect concurrency={runner.concurrency} onChanged={() => void load()} notify={notify} />
                       </span>
-                      <span className="runner-part runner-part-agent" title={antigravityTitle(runner.antigravity)}>
-                        <AgentMark agent="antigravity" /> <strong>{runner.antigravity.running}</strong>
-                        <AntigravityConcurrencySelect lane={runner.antigravity} onChanged={() => void load()} notify={notify} />
-                        {runner.antigravity.quota && <span className="runner-quota">{t('settings.conc.quotaShort')}</span>}
-                      </span>
+                      {runner.antigravity?.shown && (
+                        <span className="runner-part runner-part-agent" title={antigravityTitle(runner.antigravity)}>
+                          <AgentMark agent="antigravity" /> <strong>{runner.antigravity.running}</strong>
+                          <AntigravityConcurrencySelect lane={runner.antigravity} onChanged={() => void load()} notify={notify} />
+                          {runner.antigravity.quota && <span className="runner-quota">{t('settings.conc.quotaShort')}</span>}
+                        </span>
+                      )}
+                      {runner.codex?.shown && (
+                        <span className="runner-part runner-part-agent" title={t('settings.conc.titleCodex')}>
+                          <AgentMark agent="codex" /> <strong>{runner.codex.running}</strong>
+                          <CodexConcurrencySelect lane={runner.codex} onChanged={() => void load()} notify={notify} />
+                        </span>
+                      )}
                     </>
                   ) : (
                     <span className="runner-part" title={concurrencyTitle(runner.concurrency)}>

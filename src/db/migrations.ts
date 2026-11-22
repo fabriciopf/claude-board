@@ -359,4 +359,43 @@ ALTER TABLE executions ADD COLUMN agent TEXT;
 UPDATE cards SET agent = 'antigravity' WHERE agent = 'gemini';
 `,
   },
+  {
+    // MCP connectors per card and per project (D124), as a JSON list; null = inherit.
+    version: 17,
+    sql: `
+ALTER TABLE cards ADD COLUMN connectors_json TEXT;
+ALTER TABLE apps ADD COLUMN connectors_json TEXT;
+`,
+  },
+  {
+    // The four token parts of each run and the plan usage read at its start and end (D126). tokens_in
+    // keeps the old sum; runs from before this migration keep NULL parts and show as "não detalhado".
+    version: 18,
+    sql: `
+ALTER TABLE executions ADD COLUMN tokens_input INTEGER;
+ALTER TABLE executions ADD COLUMN tokens_cache_write INTEGER;
+ALTER TABLE executions ADD COLUMN tokens_cache_read INTEGER;
+ALTER TABLE executions ADD COLUMN usage_start_json TEXT;
+ALTER TABLE executions ADD COLUMN usage_end_json TEXT;
+ALTER TABLE executions ADD COLUMN usage_shared INTEGER;
+`,
+  },
+  {
+    // Plugins of the runs per project and per card (D128): rules like `-vercel +ignite` over the
+    // settings' runPlugins. '' on a project and null on a card change nothing.
+    version: 19,
+    sql: `
+ALTER TABLE apps ADD COLUMN plugins TEXT NOT NULL DEFAULT '';
+ALTER TABLE cards ADD COLUMN plugins TEXT;
+`,
+  },
+  {
+    // How a card goes back to the agent after a delivery (D129): null = the settings decide. Each run
+    // records whether it started a session, resumed one or opened a new one with the handoff package.
+    version: 20,
+    sql: `
+ALTER TABLE cards ADD COLUMN resume_mode TEXT;
+ALTER TABLE executions ADD COLUMN session_mode TEXT;
+`,
+  },
 ];

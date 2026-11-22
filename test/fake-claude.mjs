@@ -42,7 +42,11 @@ if (get('--output-format') === 'json') {
 
 const resume = get('--resume');
 const sessionId = resume ?? get('--session-id') ?? randomUUID();
-const scenario = /\[fake:([a-z_]+)\]/.exec(prompt)?.[1] ?? (resume ? 'success' : 'no_report');
+// A handoff session (D129) gets the card description again: like a resume, only the request before
+// the package picks the scenario, and none means "success".
+const handoffAt = prompt.indexOf('## Pacote de handoff');
+const asked = handoffAt >= 0 ? prompt.slice(0, handoffAt) : prompt;
+const scenario = /\[fake:([a-z_]+)\]/.exec(asked)?.[1] ?? (resume || handoffAt >= 0 ? 'success' : 'no_report');
 
 if (process.env.FAKE_CLAUDE_LOG) {
   fs.appendFileSync(

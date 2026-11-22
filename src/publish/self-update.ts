@@ -69,17 +69,30 @@ interface Source {
 const GOOD_SIGNATURE = ['G'];
 
 /**
+ * A merge of two parents whose tree is exactly what git merges on its own: it brings no code beyond its
+ * parents, which are checked as commits of the range. This is what GitHub's "Create a merge commit"
+ * makes when the public copy's PR is merged (D66); GitHub signs it with its own key, which only says
+ * that someone with access to the repository merged it, so the signature is not what lets it through.
+ */
+function isCleanMerge(repo: string, parents: string[], sha: string): boolean {
+  if (parents.length !== 2) return false;
+  const merged = git(repo, ['merge-tree', '--write-tree', parents[0], parents[1]]);
+  const tree = git(repo, ['rev-parse', `${sha}^{tree}`]);
+  return merged.ok && tree.ok && merged.out.split('\n')[0] === tree.out;
+}
+
+/**
  * Why the commits in `range` cannot be applied without the user, or null when each one is signed with
- * a key git verifies or was authored by one of `authors` (card #225).
+ * a key git verifies, was authored by one of `authors`, or is a clean merge of its parents (card #225).
  */
 export function untrustedReason(repo: string, range: string, authors: string[]): string | null {
-  const log = git(repo, ['log', '--format=%H%x1f%G?%x1f%ae%x1f%s', range]);
+  const log = git(repo, ['log', '--format=%H%x1f%G?%x1f%ae%x1f%s%x1f%P', range]);
   if (!log.ok) return `não consegui conferir as assinaturas de ${range}: ${log.out}`;
   const bad = log.out
     .split('\n')
     .filter(Boolean)
     .map((line) => line.split('\x1f'))
-    .filter(([, sig, email]) => !GOOD_SIGNATURE.includes(sig) && !authors.includes((email ?? '').toLowerCase()));
+    .filter(([sha, sig, email, , parents]) => !GOOD_SIGNATURE.includes(sig) && !authors.includes((email ?? '').toLowerCase()) && !isCleanMerge(repo, (parents ?? '').split(' ').filter(Boolean), sha));
   if (!bad.length) return null;
   const [sha, , email, subject] = bad[0];
   const more = bad.length > 1 ? ` e mais ${bad.length - 1} commit(s)` : '';

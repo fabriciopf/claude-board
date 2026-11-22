@@ -1,8 +1,10 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { AUTO_CONCURRENCY, DEFAULT_ANTIGRAVITY_CONCURRENCY, SELF_UPDATE_MODES, UNLIMITED_CONCURRENCY, DEFAULT_RUN_EFFORT, DEFAULT_RUN_MODEL, MAX_CONCURRENCY, isAgentId, isEffortLevel, isValidModelId, type AgentConcurrencySetting, type AgentId, type ConcurrencySetting, type SelfUpdateMode } from './shared/domain.js';
+import { AUTO_CONCURRENCY, DEFAULT_TOKEN_WEIGHTS, type TokenWeights, DEFAULT_ANTIGRAVITY_CONCURRENCY, SELF_UPDATE_MODES, UNLIMITED_CONCURRENCY, DEFAULT_RUN_EFFORT, DEFAULT_RUN_MODEL, MAX_CONCURRENCY, isAgentId, isEffortLevel, isResumeMode, isValidModelId, type AgentConcurrencySetting, type AgentId, type ConcurrencySetting, type ResumeMode, type SelfUpdateMode } from './shared/domain.js';
 import { boardEnv, HOME_DIR_NAME, LEGACY_HOME_DIR_NAME } from './shared/brand.js';
+import { normalizePluginRules } from './shared/plugins.js';
+import { parseConnectorList } from './shared/connectors.js';
 
 export interface Config {
   port: number;
@@ -18,6 +20,20 @@ export interface Config {
   antigravityArgsPrefix: string[];
   /** Model of every Antigravity run whose card does not choose one; '' = Antigravity CLI's own default. */
   antigravityModel: string;
+  /** Codex CLI executable (D125). */
+  codexBin: string;
+  /** Extra arguments placed before every Codex CLI argument (used by the fake codex in tests). */
+  codexArgsPrefix: string[];
+  /** Model of every Codex run whose card does not choose one; '' = Codex CLI's own default. */
+  codexModel: string;
+  /**
+   * Whether the commands of a Codex run reach the network inside its workspace-write sandbox (D125).
+   * Off, `git push`, `gh` and `npm install` fail there; on, the push lock is the worktree hook plus
+   * the Board's client, which stops the run when a forbidden push starts.
+   */
+  codexNetworkAccess: boolean;
+  /** Codex CLI runs at the same time, apart from the other agents (D125): 0 to MAX_CONCURRENCY or 'unlimited'. */
+  codexConcurrency: number | typeof UNLIMITED_CONCURRENCY;
   claudeHome: string;
   /** VS Code workspace root: runs start here to load the same CLAUDE.md, skills, settings and memory. */
   workspaceDir: string | null;
@@ -40,7 +56,17 @@ export interface Config {
   /** Effort of every run whose card does not choose one; '' = Claude Code's own default. */
   defaultEffort: string;
   transcriptRetentionDays: number;
+  /** Weights of the "tokens equivalentes" (D126): the price of each token part relative to plain input. */
+  tokenWeightInput: number;
+  tokenWeightCacheWrite: number;
+  tokenWeightCacheRead: number;
+  tokenWeightOutput: number;
   userProfile: string;
+  /**
+   * How a card goes back to the agent after a delivery (D129), for every card that does not choose:
+   * 'handoff' = new session with a handoff package in the prompt, 'resume' = the previous session (--resume).
+   */
+  resumeMode: ResumeMode;
   /** First run of a card whose description is a list: Claude decides whether to split it into parallel tasks. */
   autoSplit: boolean;
   /** A delivered card of the Board's own repo (branch cb/*) goes to the publish queue (D42). */
@@ -80,6 +106,13 @@ export interface Config {
    * applies on its own when it has a good signature from a trusted key (%G? = G) or its author is here; otherwise 'auto' acts as 'notify'.
    */
   selfUpdateAuthors: string;
+  /**
+   * Plugin rules of every Claude Code run (D128), e.g. `-vercel -ignite`; a project and a card add their
+   * own on top. '' = the user's settings.json decides alone.
+   */
+  runPlugins: string;
+  /** MCP connectors of every run whose card and project do not choose (D124), comma-separated; '' = only the Board's server. */
+  defaultConnectors: string;
 }
 
 export const DEFAULT_CONFIG: Config = {
@@ -91,6 +124,11 @@ export const DEFAULT_CONFIG: Config = {
   antigravityBin: 'agy',
   antigravityArgsPrefix: [],
   antigravityModel: '',
+  codexBin: 'codex',
+  codexArgsPrefix: [],
+  codexModel: '',
+  codexNetworkAccess: true,
+  codexConcurrency: 2,
   claudeHome: '~/.claude',
   workspaceDir: null,
   heartbeatSeconds: 30,
@@ -108,7 +146,12 @@ export const DEFAULT_CONFIG: Config = {
   defaultModel: DEFAULT_RUN_MODEL,
   defaultEffort: DEFAULT_RUN_EFFORT,
   transcriptRetentionDays: 90,
+  tokenWeightInput: DEFAULT_TOKEN_WEIGHTS.input,
+  tokenWeightCacheWrite: DEFAULT_TOKEN_WEIGHTS.cacheWrite,
+  tokenWeightCacheRead: DEFAULT_TOKEN_WEIGHTS.cacheRead,
+  tokenWeightOutput: DEFAULT_TOKEN_WEIGHTS.output,
   userProfile: '',
+  resumeMode: 'handoff',
   autoSplit: true,
   autoPublish: false,
   selfRepoPath: null,
@@ -127,6 +170,8 @@ export const DEFAULT_CONFIG: Config = {
   selfUpdate: 'notify',
   selfUpdateSource: '',
   selfUpdateAuthors: '',
+  runPlugins: '',
+  defaultConnectors: '',
 };
 
 /** The author e-mails of selfUpdateAuthors as a lowercase list. */
@@ -221,7 +266,16 @@ const NUMBER_KEYS: (keyof Config)[] = [
   'defaultMaxTurns',
   'transcriptRetentionDays',
   'agendaRefreshMinutes',
+  'tokenWeightInput',
+  'tokenWeightCacheWrite',
+  'tokenWeightCacheRead',
+  'tokenWeightOutput',
 ];
+
+/** The weights of the "tokens equivalentes" in the config (D126). */
+export function tokenWeightsOf(c: Pick<Config, 'tokenWeightInput' | 'tokenWeightCacheWrite' | 'tokenWeightCacheRead' | 'tokenWeightOutput'>): TokenWeights {
+  return { input: c.tokenWeightInput, cacheWrite: c.tokenWeightCacheWrite, cacheRead: c.tokenWeightCacheRead, output: c.tokenWeightOutput };
+}
 
 /** Validates a partial update coming from the settings screen and persists it. */
 export function saveConfig(current: Config, patch: Partial<Config>): Config {
@@ -240,15 +294,20 @@ export function saveConfig(current: Config, patch: Partial<Config>): Config {
   }
   next.maxConcurrency = parseConcurrency(next.maxConcurrency);
   next.antigravityConcurrency = parseAgentConcurrency(next.antigravityConcurrency);
+  next.codexConcurrency = parseCodexConcurrency(next.codexConcurrency);
   if (!['none', 'push_branch', 'open_pr'].includes(next.prPolicy)) throw new Error('prPolicy inválida');
   next.defaultModel = String(next.defaultModel ?? '').trim();
   if (next.defaultModel && !isValidModelId(next.defaultModel)) throw new Error(`Modelo inválido: ${next.defaultModel}`);
   next.defaultEffort = String(next.defaultEffort ?? '').trim();
   if (next.defaultEffort && !isEffortLevel(next.defaultEffort)) throw new Error('Effort: use low, medium, high, xhigh ou max.');
-  if (!isAgentId(next.defaultAgent)) throw new Error('Agente padrão: use claude ou antigravity.');
+  if (!isResumeMode(next.resumeMode)) throw new Error('Modo de retomada: use handoff ou resume.');
+  if (!isAgentId(next.defaultAgent)) throw new Error('Agente padrão: use claude, antigravity ou codex.');
   next.antigravityBin = String(next.antigravityBin ?? '').trim() || DEFAULT_CONFIG.antigravityBin;
   next.antigravityModel = String(next.antigravityModel ?? '').trim();
   if (next.antigravityModel && !isValidModelId(next.antigravityModel)) throw new Error(`Modelo do Antigravity inválido: ${next.antigravityModel}`);
+  next.codexBin = String(next.codexBin ?? '').trim() || DEFAULT_CONFIG.codexBin;
+  next.codexModel = String(next.codexModel ?? '').trim();
+  if (next.codexModel && !isValidModelId(next.codexModel)) throw new Error(`Modelo do Codex inválido: ${next.codexModel}`);
   if (!['', 'window', 'background'].includes(next.publishRestartMode)) throw new Error('publishRestartMode: use "", "window" ou "background".');
   next.publishBranch = String(next.publishBranch ?? '').trim() || DEFAULT_CONFIG.publishBranch;
   next.runnerEntrypoint = String(next.runnerEntrypoint ?? '').trim();
@@ -263,6 +322,8 @@ export function saveConfig(current: Config, patch: Partial<Config>): Config {
   next.selfUpdateAuthors = authorList(next.selfUpdateAuthors).join(', ');
   if (authorList(next.selfUpdateAuthors).some((a) => !/^[^\s@,]+@[^\s@,]+$/.test(a))) throw new Error('selfUpdateAuthors: use e-mails separados por vírgula.');
   next.protectedBranches = protectedBranchList(next.protectedBranches).join(', ');
+  next.runPlugins = normalizePluginRules(next.runPlugins);
+  next.defaultConnectors = parseConnectorList(next.defaultConnectors).join(', ');
   next.jiraBaseUrl = String(next.jiraBaseUrl ?? '').trim().replace(/\/+$/, '');
   if (next.jiraBaseUrl && !/^https?:\/\//.test(next.jiraBaseUrl)) throw new Error('jiraBaseUrl: use uma URL http(s), como https://empresa.atlassian.net.');
   if (!next.selfRepoPath) next.selfRepoPath = null;
@@ -282,6 +343,19 @@ export function parseConcurrency(value: unknown): ConcurrencySetting {
   const n = typeof value === 'string' && value.trim() ? Number(value) : value;
   if (typeof n !== 'number' || !Number.isInteger(n) || n < 0 || n > MAX_CONCURRENCY) {
     throw new Error(`Execuções simultâneas: use "automático", "∞" ou um número inteiro de 0 a ${MAX_CONCURRENCY}.`);
+  }
+  return n;
+}
+
+/**
+ * The Codex CLI limit (D125): 'unlimited' or a whole number from 0 to MAX_CONCURRENCY. Codex reports
+ * no quota the Board can read, so there is no automatic mode: 'auto' is refused.
+ */
+export function parseCodexConcurrency(value: unknown): number | typeof UNLIMITED_CONCURRENCY {
+  if (value === UNLIMITED_CONCURRENCY || value === '∞') return UNLIMITED_CONCURRENCY;
+  const n = typeof value === 'string' && value.trim() ? Number(value) : value;
+  if (typeof n !== 'number' || !Number.isInteger(n) || n < 0 || n > MAX_CONCURRENCY) {
+    throw new Error(`Execuções simultâneas do Codex CLI: use "∞" ou um número inteiro de 0 a ${MAX_CONCURRENCY}.`);
   }
   return n;
 }

@@ -116,7 +116,10 @@ describe('comments written while a run is in progress (D104)', () => {
     const last = d.executions.at(-1)!;
     expect(last.promptKind).toBe('midrun');
     const prompt = lines().filter((l) => l.prompt !== undefined).at(-1)!;
-    expect(prompt.args).toContain('--resume');
+    // The run had delivered: the comment goes to a new session with the handoff package (D129).
+    expect(prompt.args).not.toContain('--resume');
+    expect(prompt.prompt).toContain('## Pacote de handoff');
+    expect(prompt.prompt).toContain('Relatório pronto.');
     expect(prompt.prompt).toContain('Faltou o total no rodapé.');
     expect(d.card.status).toBe('review');
     // The comment is not handed over a second time in the new run.

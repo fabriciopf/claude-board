@@ -366,7 +366,10 @@ export class Mirror {
       ...(behindBase ? ['', `Also merges ${base} (${baseSha.out.slice(0, 7)}), resolved to the Board's tree.`] : []),
     ].join('\n');
     const parents = behindBase ? ['-p', parent, '-p', baseSha.out] : ['-p', parent];
-    const commit = await this.must('Criar o commit', 'git', ['commit-tree', tree, ...parents, '-m', message], mirror, env);
+    // commit-tree ignores commit.gpgsign (measured): sign explicitly when the mirror checkout asks for it,
+    // so installs in 'auto' can verify the update (card #225).
+    const sign = git(mirror, ['config', '--bool', '--get', 'commit.gpgsign']).out === 'true' ? ['-S'] : [];
+    const commit = await this.must('Criar o commit', 'git', ['commit-tree', ...sign, tree, ...parents, '-m', message], mirror, env);
     const sha = commit.trim().split('\n').pop() as string;
     await this.must('Push', 'git', ['push', '--quiet', 'origin', `${sha}:refs/heads/${branch}`], mirror, env);
     service.recordEvent(cardId, 'mirrored', { branch, commit: sha, source: sourceSha }, 'system');

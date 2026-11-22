@@ -34,30 +34,35 @@ describe('tokens on the card cover', () => {
         { agent: 'claude', input: 3_000_000, output: 50_000, runs: 2 },
         { agent: 'antigravity', input: 500_000, output: 5_000, runs: 1 },
       ],
+      // Rows written without the parts (before migration 18): kept apart, never split (D126).
+      detail: null,
+      undetailed: { input: 3_500_000, output: 55_000, runs: 3 },
     });
   });
 
-  it('the badge shows the total in compact form and the details in the tooltip', () => {
-    setLang('pt-BR');
-    const one = tokenBadge({ input: 4_180_001, output: 33_551, runs: 1, byAgent: [{ agent: 'claude', input: 4_180_001, output: 33_551, runs: 1 }] });
+  it("the badge of a card with only old runs shows the raw total, marked as not itemized (D105, D126)", () => {
+    setLang("pt-BR");
+    const one = tokenBadge({ input: 4_180_001, output: 33_551, runs: 1, byAgent: [{ agent: "claude", input: 4_180_001, output: 33_551, runs: 1 }], detail: null, undetailed: { input: 4_180_001, output: 33_551, runs: 1 } });
     expect(one!.text).toBe(`4,2${NBSP}mi tokens`);
-    expect(one!.title).toBe('Tokens das execuções deste card: 4.213.552 (entrada 4.180.001, com o cache; saída 33.551), em 1 execução.');
+    expect(one!.title).toBe("Não detalhado: 4.213.552 em 1 execução de antes da separação por tipo (entrada 4.180.001, com o cache; saída 33.551).");
     const two = tokenBadge({
       input: 3_500_000,
       output: 55_000,
       runs: 3,
       byAgent: [
-        { agent: 'claude', input: 3_000_000, output: 50_000, runs: 2 },
-        { agent: 'antigravity', input: 500_000, output: 5_000, runs: 1 },
+        { agent: "claude", input: 3_000_000, output: 50_000, runs: 2 },
+        { agent: "antigravity", input: 500_000, output: 5_000, runs: 1 },
       ],
+      detail: null,
+      undetailed: { input: 3_500_000, output: 55_000, runs: 3 },
     });
     expect(two!.title.split('\n')).toEqual([
-      'Tokens das execuções deste card: 3.555.000 (entrada 3.500.000, com o cache; saída 55.000), em 3 execuções.',
-      'Claude Code: 3.050.000 em 2 execuções',
-      'Antigravity CLI: 505.000 em 1 execução',
+      "Não detalhado: 3.555.000 em 3 execuções de antes da separação por tipo (entrada 3.500.000, com o cache; saída 55.000).",
+      "Claude Code: 3.050.000 em 2 execuções",
+      "Antigravity CLI: 505.000 em 1 execução",
     ]);
     expect(tokenBadge(null)).toBeNull();
-    expect(tokenBadge({ input: 0, output: 0, runs: 2, byAgent: [] })).toBeNull();
+    expect(tokenBadge({ input: 0, output: 0, runs: 2, byAgent: [], detail: null, undetailed: null })).toBeNull();
   });
 
   it('the compact number follows the screen language', () => {
@@ -65,7 +70,7 @@ describe('tokens on the card cover', () => {
     expect(compactTokens(830, 'pt-BR')).toBe('830');
     expect(compactTokens(4_213_552, 'en')).toBe('4.2M');
     setLang('en');
-    expect(tokenBadge({ input: 52_000, output: 300, runs: 1, byAgent: [] })!.text).toBe('52.3K tokens');
+    expect(tokenBadge({ input: 52_000, output: 300, runs: 1, byAgent: [], detail: null, undetailed: { input: 52_000, output: 300, runs: 1 } })!.text).toBe('52.3K tokens');
   });
 
   it('the cover draws the badge, and the board reloads while runs report progress', () => {

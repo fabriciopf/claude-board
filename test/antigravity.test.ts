@@ -47,7 +47,7 @@ describe('agent and model choice', () => {
 
   it('settings validate the agent and turn a saved "gemini" default into Antigravity', () => {
     const ctx = makeContext();
-    expect(() => saveConfig(ctx.config, { defaultAgent: 'gemini' as never })).toThrow(/claude ou antigravity/);
+    expect(() => saveConfig(ctx.config, { defaultAgent: 'gemini' as never })).toThrow(/claude, antigravity ou codex/);
     const saved = saveConfig(ctx.config, { defaultAgent: 'antigravity', antigravityModel: ' gemini-4-neon-high ' });
     expect(saved).toMatchObject({ defaultAgent: 'antigravity', antigravityModel: 'gemini-4-neon-high' });
     fs.writeFileSync(paths.config(), JSON.stringify({ defaultAgent: 'gemini', geminiBin: 'gemini', geminiApprovalMode: 'yolo' }));
@@ -224,6 +224,8 @@ describe('runner with the fake agy (ACP)', () => {
     const card = queue('Ida e volta', 'Faça. [fake:success]', { agent: 'antigravity' });
     await runOnce();
     const session = ctx.service.getCard(card.id).claudeSessionId;
+    // Loading the session is what this test checks: the card asks for --resume, not the handoff (D129).
+    ctx.service.updateCard(card.id, { resumeMode: 'resume' }, 'user');
 
     // A comment on a delivered card sends it back to the agent (D39).
     ctx.service.addUserComment(card.id, 'Ajuste o título. [fake:success]');

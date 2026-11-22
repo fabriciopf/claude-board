@@ -131,7 +131,7 @@ export function createMcpServer(ctx: AppContext, session: McpSession): McpServer
     if (!session.executionId || session.cardId !== cardId) return null;
     const row = ctx.db.prepare('SELECT * FROM executions WHERE id = ?').get(session.executionId) as Record<string, unknown> | undefined;
     if (!row || row.status !== 'running') return null;
-    return rowToExecution(row);
+    return rowToExecution(row, ctx.service.tokenWeights);
   };
 
   /**
@@ -283,7 +283,14 @@ export function createMcpServer(ctx: AppContext, session: McpSession): McpServer
         priority: z.number().int().min(1).max(4).optional(),
         model: z.string().nullable().optional().describe('Modelo das execuções deste card (ex.: claude-opus-5-5, claude-sonnet-5-5, claude-haiku-5-5); vazio ou null = o padrão da configuração'),
         effort: z.enum(EFFORT_ENUM).nullable().optional().describe('Effort das execuções deste card; null = o padrão da configuração'),
-        agent: z.enum(['claude', 'antigravity']).nullable().optional().describe('Agente que executa o card: claude (Claude Code) ou antigravity (Antigravity CLI, do Google); null = o padrão da configuração'),
+        agent: z.enum(['claude', 'antigravity', 'codex']).nullable().optional().describe('Agente que executa o card: claude (Claude Code), antigravity (Antigravity CLI, do Google) ou codex (Codex CLI, da OpenAI); null = o padrão da configuração'),
+        connectors: z
+          .array(z.string())
+          .nullable()
+          .optional()
+          .describe(
+            'Servidores MCP das execuções deste card, além do Board: atlassian (Jira), slack, notion, figma, google-drive, gmail, google-calendar, amplitude, miro, claude-docs, context7, ou o nome de um servidor do ~/.claude.json (ex.: chrome-devtools). Omitido ou null = o do projeto, senão o padrão da configuração',
+          ),
       },
     },
     (args) =>
@@ -304,6 +311,7 @@ export function createMcpServer(ctx: AppContext, session: McpSession): McpServer
             model: args.model,
             effort: args.effort,
             agent: args.agent,
+            connectors: args.connectors,
           },
           'claude',
           'mcp',
@@ -333,7 +341,7 @@ export function createMcpServer(ctx: AppContext, session: McpSession): McpServer
           .describe('Substitui a lista de repositórios relacionados (nomes cadastrados, ex.: ["hdb", "sms"]); [] limpa'),
         model: z.string().nullable().optional().describe('Modelo das execuções deste card (ex.: claude-opus-5-5, claude-sonnet-5-5, claude-haiku-5-5); vazio ou null = o padrão da configuração'),
         effort: z.enum(EFFORT_ENUM).nullable().optional().describe('Effort das execuções deste card; null = o padrão da configuração'),
-        agent: z.enum(['claude', 'antigravity']).nullable().optional().describe('Agente que executa o card: claude (Claude Code) ou antigravity (Antigravity CLI, do Google); null = o padrão da configuração'),
+        agent: z.enum(['claude', 'antigravity', 'codex']).nullable().optional().describe('Agente que executa o card: claude (Claude Code), antigravity (Antigravity CLI, do Google) ou codex (Codex CLI, da OpenAI); null = o padrão da configuração'),
       },
     },
     (args) =>

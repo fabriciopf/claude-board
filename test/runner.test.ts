@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { isAlive } from '../src/runner/process.js';
 import { Runner } from '../src/runner/runner.js';
@@ -66,6 +66,21 @@ afterAll(async () => {
   await app.close();
 });
 
+/** Stops every run still going, all at once (killing a process tree on Windows takes seconds each). */
+async function stopAll(cardIds: number[]): Promise<void> {
+  runner.setPaused(true);
+  await Promise.all(cardIds.map((id) => runner.stop(id)));
+  await runner.drain();
+  runner.setPaused(false);
+}
+
+// A test that times out on a loaded machine used to leave its runs holding the slots, and the next
+// test failed with "expected +0 to be 3" (card #228). Whatever a test leaves running is stopped here.
+afterEach(async () => {
+  const left = ctx.db.prepare("SELECT DISTINCT card_id FROM executions WHERE status = 'running'").all() as { card_id: number }[];
+  if (left.length) await stopAll(left.map((r) => r.card_id));
+}, 120000);
+
 beforeEach(() => {
   ctx.config.maxConcurrency = 1;
   ctx.config.runTimeoutMinutes = 0;
@@ -83,6 +98,9 @@ describe('runner with the fake claude', () => {
     const x = d.executions[0];
     expect(x.status).toBe('success');
     expect(x).not.toHaveProperty('costUsd');
+    // D126: the run records the four token parts (the fake reports no cache) and their weighted total.
+    expect(x.tokenParts).toEqual({ input: 300, cacheWrite: 0, cacheRead: 0, output: 60 });
+    expect(x.tokensEquivalent).toBe(300 * 1 + 60 * 5);
     expect(x.summaryMd).toMatch(/README\.md/);
     expect(d.comments.some((c) => c.kind === 'run_summary' && /README/.test(c.bodyMd))).toBe(true);
     expect(d.checklist.map((i) => [i.text, i.done, i.createdBy])).toEqual([
@@ -168,6 +186,78 @@ describe('runner with the fake claude', () => {
     expect(arg(resumed, '--resume')).toBe(ctx.service.getCard(card.id).claudeSessionId);
     expect(resumed.prompt).toContain('depois da falha');
     expect(resumed.prompt).not.toMatch(/antes \d/);
+  });
+
+  describe('taking a delivered card back (D129)', () => {
+    async function delivered(extra: Record<string, unknown> = {}) {
+      const card = queue('Documento de instalação', 'Escreva o README. [fake:success]', extra);
+      ctx.service.addUserComment(card.id, 'comentário antigo do usuário');
+      await runOnce();
+      expect(ctx.service.getCard(card.id).status).toBe('review');
+      return { card, firstSession: ctx.service.getCard(card.id).claudeSessionId! };
+    }
+
+    it('an adjustment opens a new session with the handoff package, not --resume', async () => {
+      const { card, firstSession } = await delivered();
+      ctx.service.requestAdjustments(card.id, 'Acrescente a seção de desinstalação.');
+      await runOnce();
+
+      const call = calls().at(-1)!;
+      expect(call.args).not.toContain('--resume');
+      expect(arg(call, '--session-id')).not.toBe(firstSession);
+      expect(call.prompt).toMatch(/^Continue o card #\d+ numa sessão nova\./);
+      expect(call.prompt).toContain('Acrescente a seção de desinstalação.');
+      expect(call.prompt).toContain('## Pacote de handoff');
+      // The last summary delivered, the description and the checklist of the card.
+      expect(call.prompt).toContain('Escrevi o documento em README.md. Confira a seção de instalação.');
+      expect(call.prompt).toContain('Escreva o README.');
+      expect(call.prompt).toContain('- [x] Ler o card');
+      // The new session never saw the older comments: they come apart from the new ones (D94).
+      expect(call.prompt).toContain('### Comentários anteriores');
+      expect(call.prompt).toContain('comentário antigo do usuário');
+      expect(call.prompt).toContain('Documento em andamento.');
+
+      const d = ctx.service.getCardDetail(card.id);
+      expect(d.card.status).toBe('review');
+      expect(d.executions.at(-1)).toMatchObject({ promptKind: 'adjust', sessionMode: 'handoff' });
+      expect(d.executions[0].sessionMode).toBe('new');
+      expect(d.card.claudeSessionId).toBe(arg(call, '--session-id'));
+    });
+
+    it('a card set to "resume" keeps --resume', async () => {
+      const { card, firstSession } = await delivered({});
+      ctx.service.updateCard(card.id, { resumeMode: 'resume' }, 'user');
+      ctx.service.requestAdjustments(card.id, 'Mais um ajuste.');
+      await runOnce();
+      const call = calls().at(-1)!;
+      expect(arg(call, '--resume')).toBe(firstSession);
+      expect(call.prompt).not.toContain('Pacote de handoff');
+      expect(execs(card.id).at(-1)!.sessionMode).toBe('resume');
+    });
+
+    it('the settings set to "resume" keep --resume; a card set to "handoff" still hands off', async () => {
+      ctx.config.resumeMode = 'resume';
+      try {
+        const a = await delivered();
+        ctx.service.requestAdjustments(a.card.id, 'Ajuste A.');
+        await runOnce();
+        expect(arg(calls().at(-1)!, '--resume')).toBe(a.firstSession);
+
+        const b = await delivered();
+        ctx.service.updateCard(b.card.id, { resumeMode: 'handoff' }, 'user');
+        ctx.service.requestAdjustments(b.card.id, 'Ajuste B.');
+        await runOnce();
+        expect(calls().at(-1)!.args).not.toContain('--resume');
+        expect(calls().at(-1)!.prompt).toContain('Pacote de handoff');
+      } finally {
+        ctx.config.resumeMode = 'handoff';
+      }
+    });
+
+    it('an invalid mode on the card is refused', () => {
+      const card = ctx.service.createCard({ title: 'Modo inválido' }, 'user', 'manual');
+      expect(() => ctx.service.updateCard(card.id, { resumeMode: 'compact' as never }, 'user')).toThrow(/handoff ou resume/);
+    });
   });
 
   it('(d) "Parar" kills the whole process tree and parks the card', async () => {
@@ -390,10 +480,7 @@ describe('runner with the fake claude', () => {
     expect(runner.tick()).toBe(5);
     expect(status()).toEqual(Array(5).fill('running'));
 
-    runner.setPaused(true);
-    for (const c of cards) await runner.stop(c.id);
-    await runner.drain();
-    runner.setPaused(false);
+    await stopAll(cards.map((c) => c.id));
     ctx.config.maxConcurrency = 1;
   });
 
@@ -418,10 +505,7 @@ describe('runner with the fake claude', () => {
     while (ctx.service.getCard(cards[3].id).status !== 'review' && Date.now() < deadline) await new Promise((r) => setTimeout(r, 100));
     expect(status()).toEqual(['waiting_user', 'running', 'running', 'review']);
 
-    runner.setPaused(true);
-    for (const c of cards.slice(1, 3)) await runner.stop(c.id);
-    await runner.drain();
-    runner.setPaused(false);
+    await stopAll(cards.slice(1, 3).map((c) => c.id));
     expect(status()).toEqual(['waiting_user', 'waiting_user', 'waiting_user', 'review']);
   });
 });

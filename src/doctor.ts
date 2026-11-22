@@ -61,6 +61,17 @@ export async function runDoctor(config: Config, opts: { checkPort?: boolean } = 
       : `não achei "${config.antigravityBin}" (só faz falta para cards com o agente Antigravity CLI; no Windows instale com irm https://antigravity.google/cli/install.ps1 | iex e entre uma vez no agy)`,
   });
 
+  // Codex CLI (D125): same rule, required only when it is the default agent.
+  const codex = run(config.codexBin, [...config.codexArgsPrefix, '--version']);
+  checks.push({
+    name: 'Codex CLI no PATH',
+    ok: codex.ok,
+    required: config.defaultAgent === 'codex',
+    detail: codex.ok
+      ? `${config.codexBin}: ${codex.out.split('\n')[0]}`
+      : `não achei "${config.codexBin}" (só faz falta para cards com o agente Codex CLI; instale com npm i -g @openai/codex e rode "codex login" uma vez)`,
+  });
+
   const home = claudeHomeDir(config);
   const projects = path.join(home, 'projects');
   const history = path.join(home, 'history.jsonl');
