@@ -1,5 +1,6 @@
-import { isInside } from '../config.js';
+import { claudeHomeDir, isInside } from '../config.js';
 import type { AppContext } from '../context.js';
+import { safeTranscriptPath } from './transcript-path.js';
 import { nowIso } from '../db/index.js';
 import { STATUS_LABELS, type Card } from '../shared/domain.js';
 import { LEGACY_MCP_NAME, MCP_NAME, PRODUCT_NAME } from '../shared/brand.js';
@@ -64,6 +65,8 @@ export function handleHook(ctx: AppContext, event: string, input: HookInput): { 
   }
 
   if (sessionId) {
+    // The body is not trusted: a path outside <claudeHome>/projects is dropped, not stored or read.
+    const transcriptPath = safeTranscriptPath(claudeHomeDir(ctx.config), input.transcript_path);
     ctx.db
       .prepare(
         `INSERT INTO imported_sessions (claude_session_id, project_path, transcript_path, last_event_at, decision)
@@ -73,9 +76,9 @@ export function handleHook(ctx: AppContext, event: string, input: HookInput): { 
            transcript_path = COALESCE(excluded.transcript_path, imported_sessions.transcript_path),
            project_path = COALESCE(imported_sessions.project_path, excluded.project_path)`,
       )
-      .run(sessionId, cwd ?? null, input.transcript_path ?? null, nowIso());
-    if ((event === 'SessionEnd' || event === 'Stop') && input.transcript_path) {
-      ctx.importer?.scheduleScan(input.transcript_path);
+      .run(sessionId, cwd ?? null, transcriptPath, nowIso());
+    if ((event === 'SessionEnd' || event === 'Stop') && transcriptPath) {
+      ctx.importer?.scheduleScan(transcriptPath);
     }
   }
   return { linkedCardId: null };

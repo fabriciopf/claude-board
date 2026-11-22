@@ -193,8 +193,11 @@ function Column(props: {
       if (!title) return;
       if (await props.onQuickAdd(title)) setDraft('');
     });
+  // A shown column with no card shrinks to its header: title and count, nothing to share the width for (card #227).
+  // It widens again while the quick-add box or the description is open, which need the room.
+  const empty = props.ids.length === 0 && !props.quickAdd && !showInfo;
   return (
-    <section className={'column' + (props.isOver ? ' drop-target' : '')} aria-label={label}>
+    <section className={'column' + (empty ? ' empty' : '') + (props.isOver ? ' drop-target' : '')} aria-label={label}>
       <div className="column-head">
         {title}
         <button

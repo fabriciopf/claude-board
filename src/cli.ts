@@ -2,6 +2,7 @@ import { loadConfig, paths } from './config.js';
 import { openDb } from './db/index.js';
 import { formatDoctor, runDoctor } from './doctor.js';
 import { buildApp } from './server/app.js';
+import { checkBind } from './server/bind-guard.js';
 import { EventBus } from './server/bus.js';
 import { BoardService } from './service/board.js';
 import type { AppContext } from './context.js';
@@ -23,7 +24,8 @@ const HELP = `${PRODUCT_NAME} — quadro de tarefas que um agente de código exe
 
 Uso: ${CLI_NAME} <comando> [opções]   (o antigo "${LEGACY_CLI_NAME}" continua funcionando)
 
-  start [--port N] [--host H] [--allow-remote]   sobe API, interface, runner e MCP
+  start [--port N] [--host H] [--insecure-lan]   sobe API, interface, runner e MCP
+                                                 (fora do 127.0.0.1 exige --insecure-lan: a API não tem autenticação)
   doctor                                         verifica o que falta na máquina
   mcp [--url http://127.0.0.1:4317]              servidor MCP por stdio (repassa ao Board)
   hooks install | uninstall | status             hooks do Claude Code (com backup do settings.json)
@@ -94,13 +96,15 @@ async function importCommand(args: string[]): Promise<void> {
 }
 
 async function start(args: string[]): Promise<void> {
+  // The bind check runs before the database opens: a refused start leaves nothing behind (card #223).
+  const config = loadConfig();
+  const host = flag(args, '--host') ?? config.host;
+  const bind = checkBind(host, args);
+  if (!bind.allowed) throw new Error(bind.error);
+  const isLoopback = bind.loopback;
+  if (!bind.loopback) console.warn(bind.warning);
   const ctx = createContext();
   const port = Number(flag(args, '--port') ?? ctx.config.port);
-  const host = flag(args, '--host') ?? ctx.config.host;
-  const isLoopback = host === '127.0.0.1' || host === 'localhost' || host === '::1';
-  if (!isLoopback && !args.includes('--allow-remote')) {
-    throw new Error(`Recusando escutar em ${host}: o Board não tem autenticação. Use --allow-remote se souber o que está fazendo.`);
-  }
   ctx.config = { ...ctx.config, port, host };
   ctx.startArgs = ['start', ...args];
   const runner = new Runner(ctx);
