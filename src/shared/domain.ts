@@ -140,7 +140,8 @@ export const CONCURRENCY_PRESETS: string[] = [AUTO_CONCURRENCY, '0', '1', '2', '
  */
 export type AgentConcurrencySetting = number | typeof AUTO_CONCURRENCY | typeof UNLIMITED_CONCURRENCY;
 export const ANTIGRAVITY_CONCURRENCY_PRESETS: string[] = [AUTO_CONCURRENCY, '0', '1', '2', '4', '8', UNLIMITED_CONCURRENCY];
-export const DEFAULT_ANTIGRAVITY_CONCURRENCY = 2;
+/** Automatic by default since the review of card #198 (it used to be 2). */
+export const DEFAULT_ANTIGRAVITY_CONCURRENCY: AgentConcurrencySetting = AUTO_CONCURRENCY;
 
 /** Quota left of one Antigravity model, as agy's `swarm{action:"models"}` reports it (D100). */
 export interface AgyModelQuota {

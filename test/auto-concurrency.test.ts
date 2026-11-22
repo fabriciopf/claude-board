@@ -494,14 +494,14 @@ describe('two agents: the automatic pace is Claude Code only, Antigravity CLI ha
     }
   });
 
-  it('the Antigravity limit is 2 by default, a whole number, ∞ or automatic (D100)', () => {
-    expect(DEFAULT_CONFIG.antigravityConcurrency).toBe(2);
+  it('the Antigravity limit is automatic by default (review of card #198), a whole number or ∞ (D100)', () => {
+    expect(DEFAULT_CONFIG.antigravityConcurrency).toBe('auto');
     const home = tempDir();
     const before = process.env.CLAUDE_BOARD_HOME;
     process.env.CLAUDE_BOARD_HOME = home;
     try {
       const base = loadConfig();
-      expect(base.antigravityConcurrency).toBe(2);
+      expect(base.antigravityConcurrency).toBe('auto');
       expect(saveConfig(base, { antigravityConcurrency: '4' as never }).antigravityConcurrency).toBe(4);
       expect(saveConfig(base, { antigravityConcurrency: 0 }).antigravityConcurrency).toBe(0);
       expect(saveConfig(base, { antigravityConcurrency: '∞' as never }).antigravityConcurrency).toBe('unlimited');

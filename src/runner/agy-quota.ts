@@ -27,8 +27,8 @@ export const QUOTA_PROBE_PROMPT =
   '/swarm Não crie workers e não faça nenhuma tarefa. Chame só a ferramenta swarm com action "models" e depois responda apenas: ok';
 /** Two readings are never closer than this, whatever asks for them. */
 export const QUOTA_MIN_INTERVAL_MINUTES = 20;
-/** With Antigravity in use, a reading older than this is renewed. */
-export const QUOTA_STALE_MINUTES = 60;
+/** With Antigravity in use, a reading older than this is renewed (20 min since the review of card #198; it was 60). */
+export const QUOTA_STALE_MINUTES = 20;
 export const QUOTA_PROBE_TIMEOUT_MS = 180000;
 /** Readings are far apart, so the burn rate looks back this far (the Claude one looks back 30 minutes). */
 export const AGY_RATE_LOOKBACK_MINUTES = 360;
