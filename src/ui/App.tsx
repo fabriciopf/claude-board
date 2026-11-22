@@ -373,9 +373,13 @@ export function App() {
             title={t('app.brand.title')}
             aria-current={view === 'board' ? 'page' : undefined}
           >
-            {/* The reference image of card #201 on a transparent background (assets/deus-ex-machina.png), drawn
-                as a mask in the text color: navy on the light theme, near-white on the dark one, like the favicon. */}
-            <span className="brand-mark" aria-hidden="true" />
+            {/* Same drawing as the favicon in index.html, so the header and the browser tab match: three orange
+                columns, like a Trello board (restored by card #214 after the card #201 figure). */}
+            <svg className="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
+              <rect x="2" y="4" width="8" height="24" rx="2" fill="#d97757" />
+              <rect x="12" y="4" width="8" height="16" rx="2" fill="#d97757" opacity=".7" />
+              <rect x="22" y="4" width="8" height="10" rx="2" fill="#d97757" opacity=".45" />
+            </svg>
             <span className="brand-name">{PRODUCT_NAME}</span>
           </button>
         </div>
