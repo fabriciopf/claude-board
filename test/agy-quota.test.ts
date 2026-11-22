@@ -156,6 +156,9 @@ describe('AgyQuotaTracker: reads sparingly and only what agy prints (D100)', () 
     };
     const tracker = new AgyQuotaTracker(ctx.service, ctx.bus, () => ctx.config, tempDir(), (r) => seen.push(r), run);
     expect(tracker.isStale()).toBe(true);
+    // Both intervals are 20 minutes, as asked in the review of card #198 (the renewal used to be 60).
+    expect(QUOTA_MIN_INTERVAL_MINUTES).toBe(20);
+    expect(QUOTA_STALE_MINUTES).toBe(20);
     const t0 = Date.now();
     const r = await tracker.refresh(t0);
     expect(r?.models['gemini-3.8-flash-low'].remaining).toBe(0.43);
