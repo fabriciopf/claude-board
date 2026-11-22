@@ -148,7 +148,7 @@ function cardContext(input: PromptInput): string {
   const checklist = detail.checklist.length ? detail.checklist.map((i) => `- [${i.done ? 'x' : ' '}] ${i.text}`).join('\n') : '(vazio)';
   const links = card.links.length ? card.links.map((l) => `- ${l.kind}: ${l.title ? `${l.title} — ` : ''}${l.value}`).join('\n') : '(nenhum)';
   const comments = promptComments(detail.comments, commentsSince)
-    .map((c) => `- [${c.author === 'claude' ? 'Claude' : 'Usuário'}${c.kind !== 'comment' ? `, ${c.kind}` : ''}] ${c.bodyMd.replace(/\s+/g, ' ').slice(0, 600)}`)
+    .map((c) => `- [${c.author === 'claude' ? 'Agente' : 'Usuário'}${c.kind !== 'comment' ? `, ${c.kind}` : ''}] ${c.bodyMd.replace(/\s+/g, ' ').slice(0, 600)}`)
     .join('\n');
   return `## Card #${card.id}: ${card.title}
 

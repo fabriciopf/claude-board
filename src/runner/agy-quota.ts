@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import type { Config } from '../config.js';
 import type { EventBus } from '../server/bus.js';
 import type { BoardService } from '../service/board.js';
-import { MAX_CONCURRENCY, type AgyModelQuota, type AgyQuotaReading, type ConcurrencyInfo } from '../shared/domain.js';
+import { MAX_CONCURRENCY, type AgyModelQuota, type AgyQuotaReading, type AgyUsageWindow, type ConcurrencyInfo } from '../shared/domain.js';
 import { HORIZON_MINUTES, LEAD, MIN_RUNS, SAFE_CAP, START_RUNS, shareUntilReset, type BurnRate, type RunTiming, DEFAULT_RUN_MINUTES } from './auto-concurrency.js';
 
 /**
@@ -119,6 +119,13 @@ export function quotaFor(reading: AgyQuotaReading, model: string | null): { mode
  */
 export function windowMinutes(resetsAt: number, now: number): number {
   return (resetsAt * 1000 - now) / MIN > FIVE_HOUR_MINUTES + 10 ? WEEK_MINUTES : FIVE_HOUR_MINUTES;
+}
+
+/** The quota that limits the runs as one window, for the usage ticker of the header (card #198 review). */
+export function limitingWindow(reading: AgyQuotaReading | null, model: string | null, now: number): AgyUsageWindow | null {
+  const q = reading ? quotaFor(reading, model) : null;
+  if (!q) return null;
+  return { model: q.model, utilization: 1 - q.quota.remaining, resetsAt: q.quota.resetsAt, weekly: windowMinutes(q.quota.resetsAt, now) === WEEK_MINUTES };
 }
 
 // ---------- the decision ----------

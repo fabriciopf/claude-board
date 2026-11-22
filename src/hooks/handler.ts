@@ -43,7 +43,7 @@ function contextFor(ctx: AppContext, card: Card): string {
     `Esta pasta pertence ao card #${card.id} do ${PRODUCT_NAME}: "${card.title}" (lista: ${STATUS_LABELS[card.status]}).`,
     desc ? `Descrição: ${desc.slice(0, 600)}${desc.length > 600 ? '…' : ''}` : '',
     d.checklist.length ? `Checklist: ${done}/${d.checklist.length} feitos.` : '',
-    lastClaude ? `Último registro do Claude: ${lastClaude.bodyMd.replace(/\s+/g, ' ').slice(0, 400)}` : '',
+    lastClaude ? `Último registro do agente: ${lastClaude.bodyMd.replace(/\s+/g, ' ').slice(0, 400)}` : '',
     card.branch ? `Branch do card: ${card.branch}.` : '',
     `Se o MCP "${MCP_NAME}" (ou o antigo "${LEGACY_MCP_NAME}") estiver registrado, use card_comment e card_submit_for_review para manter o card em dia.`,
   ]

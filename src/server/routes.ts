@@ -416,5 +416,5 @@ export async function registerApi(app: FastifyInstance, ctx: AppContext): Promis
 /** The Antigravity CLI side as the runner decides it now (D100), when the runner is active here. */
 function agyRuntime(ctx: AppContext): AgentLaneRuntime | undefined {
   if (!ctx.runner?.antigravityConcurrency) return undefined;
-  return { concurrency: ctx.runner.antigravityConcurrency(), usage: ctx.runner.antigravityUsage?.() ?? null };
+  return { concurrency: ctx.runner.antigravityConcurrency(), usage: ctx.runner.antigravityUsage?.() ?? null, window: ctx.runner.antigravityWindow?.() ?? null };
 }

@@ -47,7 +47,7 @@ export const board = defineMessages(
 
     // Owner avatar (OwnerAvatar.tsx)
     'owner.user': 'você',
-    'owner.claude': 'Claude',
+    'owner.claude': 'Agente',
     'owner.label': 'Dono: {name}',
 
     // Filter bar (FilterBar.tsx)
@@ -59,7 +59,7 @@ export const board = defineMessages(
     'filters.repository': 'Repositório',
     'filters.owner': 'Dono',
     'filters.ownerUser': 'Você',
-    'filters.ownerClaude': 'Claude',
+    'filters.ownerClaude': 'Agente',
     'filters.due': 'Prazo',
     'filters.overdue': 'Vencidos',
     'filters.week': 'Próximos 7 dias',
@@ -97,7 +97,7 @@ export const board = defineMessages(
     'today.viewName': 'Minhas pendências',
     'today.tabLabel': 'Pendências',
     'today.heading': '{name} · {shown} de {total}',
-    'today.question': 'O Claude fez uma pergunta',
+    'today.question': 'O agente fez uma pergunta',
     'today.stopped': 'A execução parou e precisa de você',
     'today.review': 'Pronto para revisar',
     'today.overdue': 'Prazo vencido ({date})',
@@ -112,7 +112,7 @@ export const board = defineMessages(
     'today.updated': 'atualizado {date}',
     'today.priorityTitle': 'Prioridade',
     'today.noMatch': 'Nenhuma pendência bate com a busca e os filtros.',
-    'today.empty': 'Nada precisa de você agora. O Claude segue com a fila.',
+    'today.empty': 'Nada precisa de você agora. O agente segue com a fila.',
   },
   {
     en: {
@@ -156,7 +156,7 @@ export const board = defineMessages(
       'tile.suggests': 'suggests: {status}',
 
       'owner.user': 'you',
-      'owner.claude': 'Claude',
+      'owner.claude': 'Agent',
       'owner.label': 'Owner: {name}',
 
       'filters.sortManualTitle': 'With this sort, dragging a card only changes its column; the order inside it is the sort order.',
@@ -167,7 +167,7 @@ export const board = defineMessages(
       'filters.repository': 'Repository',
       'filters.owner': 'Owner',
       'filters.ownerUser': 'You',
-      'filters.ownerClaude': 'Claude',
+      'filters.ownerClaude': 'Agent',
       'filters.due': 'Due date',
       'filters.overdue': 'Overdue',
       'filters.week': 'Next 7 days',
@@ -202,7 +202,7 @@ export const board = defineMessages(
       'today.viewName': 'My to-dos',
       'today.tabLabel': 'To-dos',
       'today.heading': '{name} · {shown} of {total}',
-      'today.question': 'Claude asked a question',
+      'today.question': 'The agent asked a question',
       'today.stopped': 'The run stopped and needs you',
       'today.review': 'Ready for review',
       'today.overdue': 'Overdue ({date})',
@@ -217,7 +217,7 @@ export const board = defineMessages(
       'today.updated': 'updated {date}',
       'today.priorityTitle': 'Priority',
       'today.noMatch': 'No to-do matches the search and filters.',
-      'today.empty': 'Nothing needs you right now. Claude is working through the queue.',
+      'today.empty': 'Nothing needs you right now. The agent is working through the queue.',
     },
     es: {
       'column.countTitle': '{shown} de {total} tarjetas con la búsqueda y los filtros actuales',
@@ -260,7 +260,7 @@ export const board = defineMessages(
       'tile.suggests': 'sugiere: {status}',
 
       'owner.user': 'tú',
-      'owner.claude': 'Claude',
+      'owner.claude': 'Agente',
       'owner.label': 'Dueño: {name}',
 
       'filters.sortManualTitle': 'Con este orden, arrastrar una tarjeta solo cambia la columna; el orden dentro de ella es el del ordenamiento.',
@@ -271,7 +271,7 @@ export const board = defineMessages(
       'filters.repository': 'Repositorio',
       'filters.owner': 'Dueño',
       'filters.ownerUser': 'Tú',
-      'filters.ownerClaude': 'Claude',
+      'filters.ownerClaude': 'Agente',
       'filters.due': 'Plazo',
       'filters.overdue': 'Vencidas',
       'filters.week': 'Próximos 7 días',
@@ -306,7 +306,7 @@ export const board = defineMessages(
       'today.viewName': 'Mis pendientes',
       'today.tabLabel': 'Pendientes',
       'today.heading': '{name} · {shown} de {total}',
-      'today.question': 'Claude hizo una pregunta',
+      'today.question': 'El agente hizo una pregunta',
       'today.stopped': 'La ejecución se detuvo y te necesita',
       'today.review': 'Lista para revisar',
       'today.overdue': 'Plazo vencido ({date})',
@@ -321,7 +321,7 @@ export const board = defineMessages(
       'today.updated': 'actualizada {date}',
       'today.priorityTitle': 'Prioridad',
       'today.noMatch': 'Ningún pendiente coincide con la búsqueda y los filtros.',
-      'today.empty': 'Nada te necesita ahora. Claude sigue con la cola.',
+      'today.empty': 'Nada te necesita ahora. El agente sigue con la cola.',
     },
   },
 );
