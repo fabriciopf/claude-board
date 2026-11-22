@@ -88,6 +88,9 @@ function eventText(e: BoardEvent): string | null {
       return null; // shown by the execution block
     case 'execution_finished':
       return null;
+    case 'comments_delivered':
+      // Only the comments the agent read in the middle of a run (D104); the prompt and the requeue say it on their own.
+      return p.via === 'mcp' ? t('card.event.commentsDelivered', { count: Number(p.count) || 1 }) : null;
     case 'execution_reattached':
       return t('card.event.reattached');
     case 'session_linked':
@@ -153,7 +156,7 @@ function Transcript({ executionId }: { executionId: number }) {
   );
 }
 
-const PROMPT_KINDS = ['reply', 'adjust', 'retry', 'requeue', 'moved'] as const;
+const PROMPT_KINDS = ['reply', 'adjust', 'retry', 'requeue', 'moved', 'midrun'] as const;
 const promptKindLabel = (kind: string) =>
   (PROMPT_KINDS as readonly string[]).includes(kind) ? t(`card.prompt.${kind}` as MessageKey) : kind;
 

@@ -5,7 +5,24 @@ import { readList } from '../service/split.js';
 import { STATUS_LABELS, STATUS_SHORT_LABELS, type App, type CardDetail, type CardRef, type Label, type Repository } from '../shared/domain.js';
 import { MCP_NAME, PRODUCT_NAME } from '../shared/brand.js';
 
-export type PromptKind = 'first' | 'reply' | 'adjust' | 'comment' | 'retry' | 'requeue' | 'moved';
+export type PromptKind = 'first' | 'reply' | 'adjust' | 'comment' | 'retry' | 'requeue' | 'moved' | 'midrun';
+
+/** Longest user comment handed to the agent whole; longer ones are cut (the card keeps the full text). */
+const COMMENT_MAX = 4000;
+
+/**
+ * The user's comments written while a run was in progress (D104), as handed to the agent: in a reply
+ * of the Board's MCP tools, or as the prompt of the run that takes the card back to the queue.
+ */
+export function formatUserComments(comments: { bodyMd: string; createdAt: string }[]): string {
+  return comments
+    .map((c) => {
+      const body = c.bodyMd.trim();
+      const text = body.length > COMMENT_MAX ? `${body.slice(0, COMMENT_MAX)}… (cortado; o texto inteiro está no card)` : body;
+      return `[Usuário, ${c.createdAt}]\n${text}`;
+    })
+    .join('\n\n');
+}
 
 /** Branches a run never pushes to, whatever the policy, as prose. Mirrors the patterns in runner.ts. */
 function protectedProse(config: Config): string {
@@ -109,7 +126,7 @@ ${config.userProfile.trim() ? `Perfil do usuário: ${config.userProfile.trim()}
 
 ` : ''}## Regras
 
-1. Reporte o andamento pelo MCP: card_comment para progresso relevante (não para cada passo), card_checklist_add e card_checklist_check para quebrar a tarefa em passos. card_get mostra o card atualizado.
+1. Reporte o andamento pelo MCP: card_comment para progresso relevante (não para cada passo), card_checklist_add e card_checklist_check para quebrar a tarefa em passos. card_get mostra o card atualizado. Comentários que o usuário escrever no card durante a execução chegam anexados à resposta da próxima ferramenta do "${MCP_NAME}" que você chamar: atenda a eles antes de seguir.
 2. Se faltar uma decisão ou informação que só o usuário tem, chame card_ask_user com a pergunta (e opções, quando couber) e ENCERRE a execução logo em seguida. Não invente a resposta e não fique esperando.
 3. Se a tarefa depender de outra pessoa, de deploy ou de acesso, chame card_wait_third_party com o motivo e encerre.
 4. Ao terminar, chame card_submit_for_review com um resumo: o que foi feito, onde está (arquivos, branch, links) e o que o usuário precisa conferir. Nunca mova o card para "Concluída": só o usuário aprova.
@@ -189,6 +206,8 @@ export function buildUserPrompt(kind: PromptKind, input: PromptInput, nextPrompt
       return `${nextPrompt ?? 'Continue a tarefa de onde parou.'}\n\nEstado atual do card:\n\n${cardContext(input)}`;
     case 'moved':
       return `Continue o card #${card.id} numa sessão nova. As execuções anteriores rodaram noutra pasta, sem o workspace; agora você tem o CLAUDE.md, as skills e o código do workspace. Os comentários abaixo trazem o que já foi feito e perguntado.${nextPrompt ? `\n\nÚltima mensagem do usuário:\n\n${nextPrompt}` : ''}\n\n${cardContext(input)}`;
+    case 'midrun':
+      return `Enquanto a execução anterior deste card rodava, o usuário comentou no card, e o comentário não chegou a você antes do fim:\n\n${nextPrompt ?? ''}\n\nAtenda ao comentário. Se ele mudar o trabalho, faça o que ele pede e entregue de novo com card_submit_for_review; se só pedir informação, responda com card_comment e entregue de novo. Se a execução anterior terminou com uma pergunta (card_ask_user) e o comentário não a responde, pergunte de novo.`;
     case 'requeue':
       return `O usuário colocou o card de volta na fila. O card pode ter mudado; continue a partir do estado atual:\n\n${cardContext(input)}`;
   }

@@ -10,6 +10,7 @@ import { AUTO_CONCURRENCY, UNLIMITED_CONCURRENCY, EFFORT_LEVELS, STATUS_LABELS, 
 
 const EFFORT_ENUM = EFFORT_LEVELS as [EffortLevel, ...EffortLevel[]];
 import { VERSION } from '../version.js';
+import { formatUserComments } from '../runner/prompt.js';
 import { MCP_NAME, PRODUCT_NAME } from '../shared/brand.js';
 
 /** Who is calling: an execution started by the runner, or an interactive session. */
@@ -25,7 +26,7 @@ const ok = (data: unknown): ToolResult => ({
 });
 const fail = (message: string): ToolResult => ({ content: [{ type: 'text', text: message }], isError: true });
 
-async function guard(fn: () => ToolResult | Promise<ToolResult>): Promise<ToolResult> {
+async function guardBase(fn: () => ToolResult | Promise<ToolResult>): Promise<ToolResult> {
   try {
     return await fn();
   } catch (err) {
@@ -95,6 +96,46 @@ export function createMcpServer(ctx: AppContext, session: McpSession): McpServer
     const row = ctx.db.prepare('SELECT * FROM executions WHERE id = ?').get(session.executionId) as Record<string, unknown> | undefined;
     if (!row || row.status !== 'running') return null;
     return rowToExecution(row);
+  };
+
+  /**
+   * The user's comments this run has not seen yet (D104), marked as seen: an execution of the runner
+   * gets them in the reply of whatever Board tool it calls next. Null when there is none, or when
+   * the session is not a running execution of the runner.
+   */
+  const takeInbox = (): string | null => {
+    if (!session.executionId || !session.cardId || !ownExecution(session.cardId)) return null;
+    const pending = s.undeliveredComments(session.executionId);
+    if (!pending.length) return null;
+    s.markCommentsDelivered(session.cardId, session.executionId, pending[pending.length - 1].id, 'mcp', pending.length);
+    return formatUserComments(pending);
+  };
+
+  /** Every tool reply carries the comments the user wrote during the run (D104). */
+  const guard = async (fn: () => ToolResult | Promise<ToolResult>): Promise<ToolResult> => {
+    const result = await guardBase(fn);
+    const inbox = takeInbox();
+    if (!inbox) return result;
+    return {
+      ...result,
+      content: [
+        ...result.content,
+        { type: 'text', text: `O usuário comentou no card durante esta execução (comentário novo, que você ainda não tinha visto):\n\n${inbox}\n\nAtenda ao comentário antes de seguir; se ele mudar o que você está fazendo, ajuste o trabalho.` },
+      ],
+    };
+  };
+
+  /**
+   * Ending tools (deliver, ask, third party, split) refuse once when the user commented during the
+   * run and the agent has not seen it (D104): it reads the comment and calls again. Null = go on.
+   */
+  const inboxBeforeEnding = (cardId: number, tool: string): ToolResult | null => {
+    if (cardId !== session.cardId) return null;
+    const inbox = takeInbox();
+    if (!inbox) return null;
+    return fail(
+      `${tool} não foi registrado: o usuário comentou no card durante esta execução e você ainda não tinha visto.\n\n${inbox}\n\nAtenda ao comentário e depois chame ${tool} de novo.`,
+    );
   };
 
   /**
@@ -393,6 +434,8 @@ export function createMcpServer(ctx: AppContext, session: McpSession): McpServer
     (args) =>
       guard(() => {
         const id = resolveCardId(args.id);
+        const unread = inboxBeforeEnding(id, 'card_ask_user');
+        if (unread) return unread;
         const exec = ownExecution(id);
         s.addComment(id, { author: 'claude', bodyMd: args.question, kind: 'question', executionId: exec?.id ?? null, options: args.options ?? null });
         return ok(finishWith(id, 'question', { question: args.question }));
@@ -408,6 +451,8 @@ export function createMcpServer(ctx: AppContext, session: McpSession): McpServer
     (args) =>
       guard(() => {
         const id = resolveCardId(args.id);
+        const unread = inboxBeforeEnding(id, 'card_wait_third_party');
+        if (unread) return unread;
         s.addComment(id, { author: 'claude', bodyMd: `Aguardando terceiro: ${args.reason}`, kind: 'comment', executionId: ownExecution(id)?.id ?? null });
         return ok(finishWith(id, 'third_party', { reason: args.reason }));
       }),
@@ -444,6 +489,8 @@ export function createMcpServer(ctx: AppContext, session: McpSession): McpServer
         if (session.executionId && id !== session.cardId) {
           throw new RuleError('not_own_card', 'Uma execução só divide o próprio card.', 403);
         }
+        const unread = inboxBeforeEnding(id, 'card_split');
+        if (unread) return unread;
         const { children } = s.splitCard(id, { tasks: args.tasks, context: args.context }, 'claude');
         const list = children.map((c) => `- #${c.id} ${c.title}`).join('\n');
         const setting = ctx.config.maxConcurrency;
@@ -563,6 +610,8 @@ export function createMcpServer(ctx: AppContext, session: McpSession): McpServer
     (args) =>
       guard(() => {
         const id = resolveCardId(args.id);
+        const unread = inboxBeforeEnding(id, 'card_submit_for_review');
+        if (unread) return unread;
         const exec = ownExecution(id);
         s.addComment(id, { author: 'claude', bodyMd: args.summary, kind: 'run_summary', executionId: exec?.id ?? null });
         if (exec) ctx.db.prepare('UPDATE executions SET summary_md = ? WHERE id = ?').run(args.summary, exec.id);

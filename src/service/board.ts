@@ -1087,7 +1087,9 @@ export class BoardService {
   /**
    * A comment the user writes from the UI. On a card in "Em revisão" or "Concluída" it also
    * sends the card back to Claude's queue, with the comment as the next prompt of the same
-   * session (D39). On any other status it is just a comment.
+   * session (D39). On any other status it is just a comment. While a run is in progress, the agent
+   * gets it in its next call to the Board's MCP tools, or the card goes back to the queue with it
+   * when the run ends without having seen it (D104).
    */
   addUserComment(id: number, text: string): { comment: Comment; card: Card } {
     const comment = this.addComment(id, { author: 'user', bodyMd: text, kind: 'comment' });
@@ -1096,6 +1098,48 @@ export class BoardService {
     this.setNextPrompt(id, text.trim(), 'comment');
     this.recordEvent(id, 'reopened_by_comment', { from: card.status }, 'user');
     return { comment, card: this.moveCard(id, { status: 'ready', reason: 'comentário do usuário' }, 'user') };
+  }
+
+  // ---------- comments written while a run is in progress (D104) ----------
+
+  /**
+   * Records that the agent of `executionId` has seen the card's comments up to `upToId`: in the
+   * prompt (`via: 'prompt'`), in a reply of the Board's MCP tools (`'mcp'`), or in the prompt of the
+   * run that takes the card back to the queue (`'requeue'`).
+   */
+  markCommentsDelivered(cardId: number, executionId: number, upToId: number, via: 'prompt' | 'mcp' | 'requeue', count = 0): void {
+    this.recordEvent(cardId, 'comments_delivered', { executionId, upTo: upToId, via, count }, via === 'mcp' ? 'claude' : 'system');
+  }
+
+  /** Highest comment id of the card, 0 when there is none. */
+  lastCommentId(cardId: number): number {
+    const r = this.db.prepare('SELECT MAX(id) AS id FROM comments WHERE card_id = ?').get(cardId) as Row | undefined;
+    return Number(r?.id ?? 0);
+  }
+
+  /**
+   * The user's comments the agent of a run has not seen yet: written after the comments that went
+   * into its prompt and after the last ones handed to it by the MCP tools. Empty until the prompt is
+   * built (what comes before it goes into the prompt itself).
+   */
+  undeliveredComments(executionId: number): Comment[] {
+    const exec = this.db.prepare('SELECT card_id FROM executions WHERE id = ?').get(executionId) as Row | undefined;
+    if (!exec) return [];
+    const marks = this.db
+      .prepare("SELECT payload_json FROM events WHERE card_id = ? AND type = 'comments_delivered' ORDER BY id DESC")
+      .all(exec.card_id) as Row[];
+    let upTo: number | null = null;
+    for (const m of marks) {
+      const p = JSON.parse(m.payload_json || '{}') as { executionId?: number; upTo?: number };
+      if (p.executionId === executionId) {
+        upTo = Number(p.upTo ?? 0);
+        break;
+      }
+    }
+    if (upTo === null) return [];
+    return (
+      this.db.prepare("SELECT * FROM comments WHERE card_id = ? AND author = 'user' AND id > ? ORDER BY id").all(exec.card_id, upTo) as Row[]
+    ).map(rowToComment);
   }
 
   approve(id: number): Card {

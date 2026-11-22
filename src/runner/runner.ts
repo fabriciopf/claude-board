@@ -4,13 +4,13 @@ import path from 'node:path';
 import { paths } from '../config.js';
 import type { AppContext, RunnerControl } from '../context.js';
 import { nowIso } from '../db/index.js';
-import { AUTO_CONCURRENCY, UNLIMITED_CONCURRENCY, runLane, type AgentId, type AgentQuotaNote, type Card, type ConcurrencyInfo, type ExecutionStatus, type Status } from '../shared/domain.js';
+import { AUTO_CONCURRENCY, STATUS_LABELS, UNLIMITED_CONCURRENCY, runLane, type AgentId, type AgentQuotaNote, type Card, type ConcurrencyInfo, type ExecutionStatus, type Status } from '../shared/domain.js';
 import { agentName, buildLaunch, isQuotaError, resolveAgent, type Launch } from './agents.js';
 import { AGY_RATE_LOOKBACK_MINUTES, AgyQuotaTracker, decideAgyAuto, limitingWindow, quotaFor } from './agy-quota.js';
 import { BurnMeter, decideAuto, typicalRunMinutes, type RunTiming } from './auto-concurrency.js';
 import { antigravityInUse } from '../service/runner-state.js';
 import { isAlive, killTree, processStartTimes, spawnDetached } from './process.js';
-import { buildSystemPrompt, buildUserPrompt, splitCandidate, type PromptKind } from './prompt.js';
+import { buildSystemPrompt, buildUserPrompt, formatUserComments, splitCandidate, type PromptKind } from './prompt.js';
 import { applyEvent, emptyState, parseLine, type StreamState } from './stream.js';
 import { FileTail, readTail } from './tail.js';
 import { ensureWorkdir } from './worktree.js';
@@ -437,6 +437,8 @@ export class Runner implements RunnerControl {
     db.prepare('UPDATE executions SET cwd = ?, agent = ? WHERE id = ?').run(workdir.cwd, agent, run.executionId);
 
     const detail = service.getCardDetail(card.id);
+    // What the prompt carries; comments written from now on reach the run by the MCP tools (D104).
+    service.markCommentsDelivered(card.id, run.executionId, detail.comments.reduce((max, c) => Math.max(max, c.id), 0), 'prompt');
     const promptInput = {
       config,
       detail,
@@ -619,8 +621,27 @@ export class Runner implements RunnerControl {
         bodyMd: `${summary}\n\n_${Who} não reportou o fim explicitamente (não chamou card_submit_for_review); este é o texto final da execução._`,
       });
     }
+    // A comment the user wrote during the run and the agent never saw sends the card back to the
+    // queue, with the comment as the next prompt of the same session (D104). A stopped, failed or
+    // split run keeps its target: "Tentar de novo" already carries the user's new comments (D94).
+    let reason = `execução ${status}`;
+    if (status !== 'cancelled' && status !== 'error' && status !== 'timeout' && outcome !== 'split') {
+      const unseen = service.undeliveredComments(run.executionId);
+      if (unseen.length) {
+        service.markCommentsDelivered(run.cardId, run.executionId, unseen[unseen.length - 1].id, 'requeue', unseen.length);
+        service.setNextPrompt(run.cardId, formatUserComments(unseen), 'midrun');
+        service.addComment(run.cardId, {
+          author: 'system',
+          kind: 'comment',
+          executionId: run.executionId,
+          bodyMd: `${unseen.length === 1 ? 'Um comentário seu, escrito' : `${unseen.length} comentários seus, escritos`} durante a execução, não chegou a${who} antes do fim. O card voltou para "${STATUS_LABELS.ready}" e a próxima execução começa por ${unseen.length === 1 ? 'ele' : 'eles'}.`,
+        });
+        target = 'ready';
+        reason = 'comentário durante a execução';
+      }
+    }
     service.recordEvent(run.cardId, 'execution_finished', { executionId: run.executionId, status }, 'system');
-    service.moveCard(run.cardId, { status: target, reason: `execução ${status}` }, 'system');
+    service.moveCard(run.cardId, { status: target, reason }, 'system');
     bus.publish({ type: 'execution.finished', cardId: run.cardId, executionId: run.executionId, data: { status } });
     bus.publish({ type: 'runner.changed' });
     // Delivered: a card of the Board's own repo enters the publish queue (D42).
