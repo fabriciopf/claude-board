@@ -26,7 +26,7 @@ export function AgentAvatar({ agent, running }: { agent: string; running: boolea
 }
 
 /**
- * The agent's small mark in the runner pill (card #198 review): before "rodando x de y" and before each
+ * The agent's small mark in the runner pill (card #198 review): before the run count and before each
  * usage line, so the pill says whose runs and whose plan without spelling the name. The name is the label.
  */
 export function AgentMark({ agent }: { agent: string }) {

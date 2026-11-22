@@ -390,11 +390,11 @@ export function App() {
               <span className="counter runner-usage">
                 {runner.antigravity?.shown && runner.concurrency ? (
                   // Each agent against its own limit (D99), its mark before its count (card #198 review):
-                  // "[Claude] rodando 1 de 3 (auto) · [Antigravity] 2 de 2". The mark carries the name.
+                  // "[Claude] 1 de 3 (auto) · [Antigravity] 2 de 2". The mark carries the name; no spinner and no
+                  // "rodando" before the count (card #208).
                   <>
                     <span className="runner-part" title={concurrencyTitle(runner.concurrency)}>
-                      {runner.running > 0 && <span className="spinner" />}
-                      <AgentMark agent="claude" /> {t('app.runner.running')} <strong>{runner.claudeRunning ?? 0}</strong>
+                      <AgentMark agent="claude" /> <strong>{runner.claudeRunning ?? 0}</strong>
                       <ConcurrencySelect concurrency={runner.concurrency} onChanged={() => void load()} notify={notify} />
                     </span>
                     <span className="runner-part runner-part-agent" title={antigravityTitle(runner.antigravity)}>
@@ -405,8 +405,7 @@ export function App() {
                   </>
                 ) : (
                   <span className="runner-part" title={concurrencyTitle(runner.concurrency)}>
-                    {runner.running > 0 && <span className="spinner" />}
-                    <AgentMark agent="claude" /> {t('app.runner.running')} <strong>{runner.running}</strong>
+                    <AgentMark agent="claude" /> <strong>{runner.running}</strong>
                     {runner.concurrency && <ConcurrencySelect concurrency={runner.concurrency} onChanged={() => void load()} notify={notify} />}
                   </span>
                 )}

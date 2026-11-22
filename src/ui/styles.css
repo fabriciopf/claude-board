@@ -501,7 +501,7 @@ pre {
   flex: none;
 }
 
-/* The runner pill shrinks too, down to "rodando x de y | 5 horas: n% ▬": only the "reset em …" note gives way, with an ellipsis. */
+/* The runner pill shrinks too, down to "x de y | 5 horas: n% ▬": only the "reset em …" note gives way, with an ellipsis. */
 .counters > .runner-usage {
   flex: 0 1 auto;
   min-width: var(--usage-min);
@@ -596,7 +596,7 @@ pre {
   cursor: default;
 }
 
-/* "rodando x de y" and the plan usage share one pill (D83); each half keeps its own tooltip. */
+/* "x de y" and the plan usage share one pill (D83); each half keeps its own tooltip. */
 .counter.runner-usage {
   gap: 8px;
 }
@@ -614,7 +614,7 @@ pre {
 }
 
 /* Counter split by agent (D99), each agent's mark before its count and before each usage line
-   (card #198 review): "[Claude] rodando 1 de 3 (auto) · [Antigravity] 2 de 2". */
+   (card #198 review): "[Claude] 1 de 3 (auto) · [Antigravity] 2 de 2". */
 .agent-mark {
   display: inline-flex;
   align-items: center;
@@ -687,15 +687,16 @@ pre {
 }
 
 /* The warning colors only the progress bar; the text keeps the pill's color (comment on card #174). */
-.usage-row.attention .usage-bar > span {
+.usage-row.attention .usage-bar > .usage-fill {
   background: var(--warn);
 }
 
-.usage-row.danger .usage-bar > span {
+.usage-row.danger .usage-bar > .usage-fill {
   background: var(--danger);
 }
 
 .usage-bar {
+  position: relative;
   display: inline-block;
   width: 48px;
   height: 6px;
@@ -704,17 +705,28 @@ pre {
   overflow: hidden;
 }
 
-.usage-bar > span {
+/* Time gone by since the last reset (card #206): a white tick, outlined so it shows on the light theme too. */
+.usage-bar > .usage-elapsed {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: #fff;
+  box-shadow: 0 0 0 0.5px rgb(0 0 0 / 0.35);
+}
+
+.usage-bar > .usage-fill {
   display: block;
   height: 100%;
   background: var(--ok);
 }
 
-.counter.attention .usage-bar > span {
+.counter.attention .usage-bar > .usage-fill {
   background: var(--warn);
 }
 
-.counter.danger .usage-bar > span {
+.counter.danger .usage-bar > .usage-fill {
   background: var(--danger);
 }
 

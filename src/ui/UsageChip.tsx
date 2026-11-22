@@ -18,7 +18,8 @@ function Row({ row }: { row: UsageRow }) {
       {row.label}: <strong>{row.value}</strong>
       {row.pct !== null && (
         <span className="usage-bar" aria-hidden="true">
-          <span style={{ width: `${row.pct}%` }} />
+          <span className="usage-fill" style={{ width: `${row.pct}%` }} />
+          {row.elapsed !== null && <span className="usage-elapsed" style={{ left: `${row.elapsed}%` }} />}
         </span>
       )}
       <span className={row.pct === null ? 'muted small' : undefined}>{row.note}</span>

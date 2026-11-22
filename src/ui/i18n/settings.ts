@@ -21,7 +21,7 @@ export const settings = defineMessages(
     // Fields (label "f." and hint "h.")
     'f.maxConcurrency': 'Execuções simultâneas',
     'h.maxConcurrency':
-      'quantos cards da fila "Pronta" o Claude Code executa ao mesmo tempo (o Antigravity CLI tem limite próprio, logo abaixo); também vale para as tarefas de um card dividido. Automático: o Board abre quantas couberem para o uso da sessão de 5h acompanhar o tempo da janela, sem estourar o limite. 0: nada novo sai da fila. ∞: todo card da fila começa na hora. Também dá para trocar no contador "rodando" do cabeçalho',
+      'quantos cards da fila "Pronta" o Claude Code executa ao mesmo tempo (o Antigravity CLI tem limite próprio, logo abaixo); também vale para as tarefas de um card dividido. Automático: o Board abre quantas couberem para o uso da sessão de 5h acompanhar o tempo da janela, sem estourar o limite. 0: nada novo sai da fila. ∞: todo card da fila começa na hora. Também dá para trocar no contador de execuções do cabeçalho',
     'opt.auto': 'Automático',
     'opt.unlimited': '∞ (sem limite)',
     'opt.zero': '0 (fila parada)',
@@ -211,7 +211,7 @@ export const settings = defineMessages(
 
       'f.maxConcurrency': 'Simultaneous runs',
       'h.maxConcurrency':
-        'how many cards of the "Ready" queue Claude Code runs at the same time (Antigravity CLI has its own limit, right below); also applies to the tasks of a split card. Automatic: the Board opens as many as fit so the 5-hour session usage keeps pace with the window, without going over the limit. 0: nothing new leaves the queue. ∞: every card in the queue starts right away. You can also change it in the "running" counter in the header',
+        'how many cards of the "Ready" queue Claude Code runs at the same time (Antigravity CLI has its own limit, right below); also applies to the tasks of a split card. Automatic: the Board opens as many as fit so the 5-hour session usage keeps pace with the window, without going over the limit. 0: nothing new leaves the queue. ∞: every card in the queue starts right away. You can also change it in the runs counter in the header',
       'opt.auto': 'Automatic',
       'opt.unlimited': '∞ (no limit)',
       'opt.zero': '0 (queue stopped)',
@@ -395,7 +395,7 @@ export const settings = defineMessages(
 
       'f.maxConcurrency': 'Ejecuciones simultáneas',
       'h.maxConcurrency':
-        'cuántas tarjetas de la cola "Lista" ejecuta Claude Code al mismo tiempo (Antigravity CLI tiene su propio límite, justo debajo); también vale para las tareas de una tarjeta dividida. Automático: el Board abre las que quepan para que el uso de la sesión de 5 h acompañe el tiempo de la ventana, sin pasar el límite. 0: nada nuevo sale de la cola. ∞: toda tarjeta de la cola empieza en el acto. También puedes cambiarlo en el contador "en curso" del encabezado',
+        'cuántas tarjetas de la cola "Lista" ejecuta Claude Code al mismo tiempo (Antigravity CLI tiene su propio límite, justo debajo); también vale para las tareas de una tarjeta dividida. Automático: el Board abre las que quepan para que el uso de la sesión de 5 h acompañe el tiempo de la ventana, sin pasar el límite. 0: nada nuevo sale de la cola. ∞: toda tarjeta de la cola empieza en el acto. También puedes cambiarlo en el contador de ejecuciones del encabezado',
       'opt.auto': 'Automático',
       'opt.unlimited': '∞ (sin límite)',
       'opt.zero': '0 (cola detenida)',

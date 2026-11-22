@@ -21,12 +21,11 @@ export const app = defineMessages(
     'notification.enable': 'Ativar notificações',
 
     'banner.paused': 'O runner está pausado: nada sai da fila "{ready}" até você retomar.',
-    'banner.zero': 'Execuções simultâneas em 0: nada sai da fila "{ready}" ({count}) até você escolher outro valor no contador "rodando".',
+    'banner.zero': 'Execuções simultâneas em 0: nada sai da fila "{ready}" ({count}) até você escolher outro valor no contador de execuções do cabeçalho.',
     'banner.auto': 'Modo automático segurando a fila "{ready}" ({count}): {reason}.',
 
     'runner.resumed': 'Runner retomado',
     'runner.paused': 'Runner pausado',
-    'runner.running': 'rodando',
     'runner.resume': 'Retomar runner',
     'runner.pause': 'Pausar runner',
     'runner.pausedTitle': 'Runner pausado. Clique para retomar a fila.',
@@ -77,7 +76,7 @@ export const app = defineMessages(
       'Ao terminar, o agente entrega o resumo em "{review}". Aprove, peça ajustes ou comente: comentário e ajustes devolvem o card ao agente.',
     'help.step.done': 'Só você move um card para "{done}".',
     'help.tip.info': 'O "i" no topo de cada coluna explica para que ela serve.',
-    'help.tip.running': 'O contador "rodando" mostra as execuções em curso e deixa escolher quantas rodam ao mesmo tempo.',
+    'help.tip.running': 'O contador de execuções do cabeçalho mostra as execuções em curso e deixa escolher quantas rodam ao mesmo tempo.',
     'help.tip.menu': 'O menu ☰ leva a Automações, Importação, Arquivados e Configurações.',
     'help.tip.language': 'O globo no cabeçalho troca o idioma da tela: português, inglês ou espanhol.',
 
@@ -189,12 +188,11 @@ export const app = defineMessages(
       'notification.enable': 'Enable notifications',
 
       'banner.paused': 'The runner is paused: nothing leaves the "{ready}" queue until you resume it.',
-      'banner.zero': 'Concurrent runs set to 0: nothing leaves the "{ready}" queue ({count}) until you pick another value in the "running" counter.',
+      'banner.zero': 'Concurrent runs set to 0: nothing leaves the "{ready}" queue ({count}) until you pick another value in the runs counter in the header.',
       'banner.auto': 'Automatic mode is holding the "{ready}" queue ({count}): {reason}.',
 
       'runner.resumed': 'Runner resumed',
       'runner.paused': 'Runner paused',
-      'runner.running': 'running',
       'runner.resume': 'Resume runner',
       'runner.pause': 'Pause runner',
       'runner.pausedTitle': 'Runner paused. Click to resume the queue.',
@@ -245,7 +243,7 @@ export const app = defineMessages(
         'When it is done, the agent delivers the summary in "{review}". Approve, ask for changes or comment: comments and changes send the card back to the agent.',
       'help.step.done': 'Only you move a card to "{done}".',
       'help.tip.info': 'The "i" at the top of each column explains what it is for.',
-      'help.tip.running': 'The "running" counter shows the runs under way and lets you choose how many run at the same time.',
+      'help.tip.running': 'The runs counter in the header shows the runs under way and lets you choose how many run at the same time.',
       'help.tip.menu': 'The ☰ menu leads to Automations, Import, Archived and Settings.',
       'help.tip.language': 'The globe in the header changes the screen language: Portuguese, English or Spanish.',
 
@@ -356,12 +354,11 @@ export const app = defineMessages(
       'notification.enable': 'Activar notificaciones',
 
       'banner.paused': 'El runner está en pausa: nada sale de la cola "{ready}" hasta que lo reanudes.',
-      'banner.zero': 'Ejecuciones simultáneas en 0: nada sale de la cola "{ready}" ({count}) hasta que elijas otro valor en el contador "en curso".',
+      'banner.zero': 'Ejecuciones simultáneas en 0: nada sale de la cola "{ready}" ({count}) hasta que elijas otro valor en el contador de ejecuciones del encabezado.',
       'banner.auto': 'El modo automático está reteniendo la cola "{ready}" ({count}): {reason}.',
 
       'runner.resumed': 'Runner reanudado',
       'runner.paused': 'Runner en pausa',
-      'runner.running': 'en curso',
       'runner.resume': 'Reanudar runner',
       'runner.pause': 'Pausar runner',
       'runner.pausedTitle': 'Runner en pausa. Haz clic para reanudar la cola.',
@@ -412,7 +409,7 @@ export const app = defineMessages(
         'Al terminar, el agente entrega el resumen en "{review}". Aprueba, pide ajustes o comenta: los comentarios y ajustes devuelven la tarjeta al agente.',
       'help.step.done': 'Solo tú mueves una tarjeta a "{done}".',
       'help.tip.info': 'La "i" en la parte superior de cada columna explica para qué sirve.',
-      'help.tip.running': 'El contador "en curso" muestra las ejecuciones activas y permite elegir cuántas corren a la vez.',
+      'help.tip.running': 'El contador de ejecuciones del encabezado muestra las ejecuciones activas y permite elegir cuántas corren a la vez.',
       'help.tip.menu': 'El menú ☰ lleva a Automatizaciones, Importación, Archivadas y Configuración.',
       'help.tip.language': 'El globo del encabezado cambia el idioma de la pantalla: portugués, inglés o español.',
 

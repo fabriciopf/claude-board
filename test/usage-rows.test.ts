@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { duration, usageRows, usageTitle, type UsageAgents } from '../src/ui/usage-rows.js';
+import { duration, elapsedPct, usageRows, usageTitle, type UsageAgents } from '../src/ui/usage-rows.js';
 import type { UsageSnapshot } from '../src/shared/domain.js';
 
 const NOW = Date.parse('2026-11-21T15:00:00Z');
@@ -32,12 +32,12 @@ describe('usage ticker of the runner pill (D83)', () => {
     const past = snap(0.9, 0.3);
     past.fiveHour!.resetsAt = sec(NOW - 10 * 60000);
     const [five] = usageRows(past, NOW);
-    expect(five).toMatchObject({ label: '5 horas', value: 'renovada', pct: null, tone: '' });
+    expect(five).toMatchObject({ label: '5 horas', value: 'renovada', pct: null, elapsed: null, tone: '' });
     expect(five.note).toMatch(/^às /);
   });
 
   it('without a reading there is a single still line', () => {
-    expect(usageRows(null, NOW)).toEqual([{ key: 'fiveHour', agent: 'claude', label: '5 horas', value: '—', pct: null, note: 'sem leitura ainda', tone: '' }]);
+    expect(usageRows(null, NOW)).toEqual([{ key: 'fiveHour', agent: 'claude', label: '5 horas', value: '—', pct: null, elapsed: null, note: 'sem leitura ainda', tone: '' }]);
     expect(usageRows(snap(0.4, null), NOW).map((r) => r.label)).toEqual(['5 horas']);
     expect(usageRows(snap(null, 0.4), NOW).map((r) => r.label)).toEqual(['Semana']);
   });
@@ -75,10 +75,10 @@ describe('usage ticker of the runner pill (D83)', () => {
     it('a five-hour Antigravity window, one without a reading, and the tooltip of both agents', () => {
       const five = agents(0, 1);
       five.antigravity!.window = { ...agyWindow, weekly: false, resetsAt: sec(NOW + 90 * 60000) };
-      expect(usageRows(null, NOW, five)[0]).toMatchObject({ agent: 'antigravity', label: '5 horas', value: '57%', note: 'reset em 1h30' });
+      expect(usageRows(null, NOW, five)[0]).toMatchObject({ agent: 'antigravity', label: '5 horas', value: '57%', elapsed: 70, note: 'reset em 1h30' });
       const none = agents(0, 1);
       none.antigravity!.window = null;
-      expect(usageRows(null, NOW, none)).toEqual([{ key: 'antigravity', agent: 'antigravity', label: 'Cota', value: '—', pct: null, note: 'sem leitura ainda', tone: '' }]);
+      expect(usageRows(null, NOW, none)).toEqual([{ key: 'antigravity', agent: 'antigravity', label: 'Cota', value: '—', pct: null, elapsed: null, note: 'sem leitura ainda', tone: '' }]);
       const both = usageTitle(snap(0.38, 0.12), NOW, agents(1, 1));
       expect(both).toMatch(/5 horas: 38%/);
       expect(both).toMatch(/Antigravity CLI: 57% da cota do Google usada \(gemini-3\.8-flash-low\)/);
@@ -97,8 +97,40 @@ describe('usage warning colors only the bar (comment on card #174)', () => {
   it('styles.css paints the bar of a line at 80% or 95%, never its text', async () => {
     const fs = await import('node:fs');
     const css = fs.readFileSync(new URL('../src/ui/styles.css', import.meta.url), 'utf8');
-    expect(css).toMatch(/\.usage-row\.danger \.usage-bar > span \{\s*background: var\(--danger\);/);
-    expect(css).toMatch(/\.usage-row\.attention \.usage-bar > span \{\s*background: var\(--warn\);/);
+    expect(css).toContain('.usage-row.danger .usage-bar > .usage-fill {\n  background: var(--danger);');
+    expect(css).toContain('.usage-row.attention .usage-bar > .usage-fill {\n  background: var(--warn);');
     expect(css).not.toMatch(/\.usage-row\.(danger|attention)\s*\{/);
+  });
+});
+
+describe('white tick for the time gone by since the reset (card #206)', () => {
+  it('places the tick at the share of the window already elapsed', () => {
+    // 5h window resetting in 1h12: 3h48 of 5h gone = 76%. Week resetting in 3d05h: 91h of 168h = 54.2%.
+    const rows = usageRows(snap(0.38, 0.12), NOW);
+    expect(rows.map((r) => r.elapsed)).toEqual([76, 54.2]);
+  });
+
+  it('clamps to the bar and follows each window length', () => {
+    expect(elapsedPct(false, sec(NOW + 5 * 3600000), NOW)).toBe(0);
+    expect(elapsedPct(false, sec(NOW + 10 * 3600000), NOW)).toBe(0);
+    expect(elapsedPct(false, sec(NOW + 150 * 60000), NOW)).toBe(50);
+    expect(elapsedPct(true, sec(NOW + 84 * 3600000), NOW)).toBe(50);
+    expect(elapsedPct(true, sec(NOW + 60000), NOW)).toBe(100);
+  });
+
+  it('styles.css draws it white, and the warning colors never reach it', async () => {
+    const fs = await import('node:fs');
+    const css = fs.readFileSync(new URL('../src/ui/styles.css', import.meta.url), 'utf8');
+    const tick = css.slice(css.indexOf('.usage-bar > .usage-elapsed {'));
+    expect(tick.slice(0, tick.indexOf('}'))).toContain('background: #fff;');
+    expect(css).toContain('.usage-bar {\n  position: relative;');
+    // A bare "> span" rule would paint the tick with the fill colors.
+    expect(css).not.toContain('.usage-bar > span');
+  });
+
+  it('UsageChip renders the tick inside the bar', async () => {
+    const fs = await import('node:fs');
+    const tsx = fs.readFileSync(new URL('../src/ui/UsageChip.tsx', import.meta.url), 'utf8');
+    expect(tsx).toContain('<span className="usage-elapsed" style={{ left: `${row.elapsed}%` }} />');
   });
 });
