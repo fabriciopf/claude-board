@@ -2668,6 +2668,15 @@ html[data-busy] body::before {
   display: flex;
   gap: 8px;
   align-items: center;
+  min-width: 0;
+}
+
+/* Cards and step on one line; a long card title gives way first (card #205). */
+.publish-banner-summary {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .publish-banner-toggle {

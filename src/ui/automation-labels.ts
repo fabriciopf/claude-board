@@ -11,7 +11,7 @@ export function fireReasonLabel(reason: FireReason | string): string {
 const pad = (n: number) => String(n).padStart(2, '0');
 const sorted = (s: Set<number>) => [...s].sort((a, b) => a - b);
 
-function joinList(items: string[]): string {
+export function joinList(items: string[]): string {
   if (items.length <= 1) return items[0] ?? '';
   return `${items.slice(0, -1).join(', ')} ${t('automations.list.and')} ${items[items.length - 1]}`;
 }
