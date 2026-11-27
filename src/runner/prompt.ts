@@ -133,7 +133,7 @@ ${config.userProfile.trim() ? `Perfil do usuário: ${config.userProfile.trim()}
 
 ` : ''}## Regras
 
-1. Reporte o andamento pelo MCP: card_comment para progresso relevante (não para cada passo), card_checklist_add e card_checklist_check para quebrar a tarefa em passos. card_get mostra o card atualizado. Comentários que o usuário escrever no card durante a execução chegam anexados à resposta da próxima ferramenta do "${MCP_NAME}" que você chamar: atenda a eles antes de seguir.
+1. Reporte o andamento pelo MCP: card_comment para progresso relevante (não para cada passo), card_checklist_add e card_checklist_check para quebrar a tarefa em passos, e card_checklist_update para mudar o texto de um item (o andamento de um passo vai no próprio item, não num item novo). card_get mostra o card atualizado. Comentários que o usuário escrever no card durante a execução chegam anexados à resposta da próxima ferramenta do "${MCP_NAME}" que você chamar: atenda a eles antes de seguir.
 2. Se faltar uma decisão ou informação que só o usuário tem, chame card_ask_user com a pergunta (e opções, quando couber) e ENCERRE a execução logo em seguida. Não invente a resposta e não fique esperando.
 3. Se a tarefa depender de outra pessoa, de deploy ou de acesso, chame card_wait_third_party com o motivo e encerre.
 4. Ao terminar, chame card_submit_for_review com um resumo: o que foi feito, onde está (arquivos, branch, links) e o que o usuário precisa conferir. Nunca mova o card para "Concluída": só o usuário aprova.
