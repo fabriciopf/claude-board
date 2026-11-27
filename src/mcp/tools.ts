@@ -463,6 +463,29 @@ export function createMcpServer(ctx: AppContext, session: McpSession): McpServer
   );
 
   server.registerTool(
+    'card_checklist_update',
+    {
+      description:
+        'Troca o texto de um item do checklist (pelo id ou pelo texto atual), sem criar item novo. Serve para registrar o andamento no próprio item (ex.: "Rodar testes (12/40)"). Pode marcar ou desmarcar na mesma chamada.',
+      inputSchema: {
+        id: cardIdArg,
+        item: z.union([z.number().int(), z.string()]).describe('Id do item ou o texto atual dele'),
+        text: z.string().min(1).describe('Texto novo do item'),
+        done: z.boolean().optional().describe('Omitido: mantém como está'),
+      },
+    },
+    (args) =>
+      guard(() => {
+        const id = resolveCardId(args.id);
+        const item = s.findChecklistItem(id, args.item);
+        if (item.cardId !== id) throw new RuleError('not_found', `Item ${item.id} não existe no card ${id}.`, 404);
+        if (!args.text.trim()) throw new RuleError('invalid_checklist', 'Item vazio.', 400);
+        const updated = s.updateChecklistItem(item.id, { text: args.text, done: args.done }, 'claude');
+        return ok({ item: { id: updated.id, text: updated.text, done: updated.done } });
+      }),
+  );
+
+  server.registerTool(
     'card_link',
     {
       description: 'Anexa um link ao card: PR, chave do Jira, arquivo ou URL.',

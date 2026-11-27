@@ -46,6 +46,7 @@ describe('MCP over HTTP', () => {
         'card_ask_user',
         'card_checklist_add',
         'card_checklist_check',
+        'card_checklist_update',
         'card_comment',
         'card_create',
         'card_get',
@@ -112,6 +113,39 @@ describe('MCP over HTTP', () => {
       ['passo 2', false],
     ]);
     expect(ctx.service.lastQuestion(card.id)?.options).toEqual(['main', 'production']);
+    await c.close();
+  });
+
+  it('card_checklist_update edits an item text in place, by id or by current text (card #384)', async () => {
+    const card = ctx.service.createCard({ title: 'Checklist editável', owner: 'claude' }, 'user', 'manual');
+    const other = ctx.service.createCard({ title: 'Outro card', owner: 'claude' }, 'user', 'manual');
+    const foreign = ctx.service.addChecklistItem(other.id, 'item alheio', 'user');
+    const c = await client({ 'x-dexm-card': String(card.id) });
+    const added = JSON.parse(text(await c.callTool({ name: 'card_checklist_add', arguments: { items: ['Rodar testes', 'Publicar'] } }))).added;
+
+    const byId = await c.callTool({ name: 'card_checklist_update', arguments: { item: added[0].id, text: 'Rodar testes (12/40)' } });
+    expect(byId.isError).toBeFalsy();
+    expect(JSON.parse(text(byId)).item).toEqual({ id: added[0].id, text: 'Rodar testes (12/40)', done: false });
+
+    const byText = await c.callTool({ name: 'card_checklist_update', arguments: { item: 'rodar testes (12/40)', text: 'Rodar testes (40/40)', done: true } });
+    expect(byText.isError).toBeFalsy();
+
+    const d = ctx.service.getCardDetail(card.id);
+    expect(d.checklist.map((i) => [i.id, i.text, i.done])).toEqual([
+      [added[0].id, 'Rodar testes (40/40)', true],
+      [added[1].id, 'Publicar', false],
+    ]);
+
+    const blank = await c.callTool({ name: 'card_checklist_update', arguments: { item: added[1].id, text: '   ' } });
+    expect(blank.isError).toBe(true);
+    expect(text(blank)).toMatch(/invalid_checklist/);
+
+    const cross = await c.callTool({ name: 'card_checklist_update', arguments: { item: foreign.id, text: 'invadido' } });
+    expect(cross.isError).toBe(true);
+    expect(text(cross)).toMatch(/not_found/);
+    expect(ctx.service.getChecklistItem(foreign.id).text).toBe('item alheio');
+
+    expect(ctx.service.getCardDetail(card.id).checklist).toHaveLength(2);
     await c.close();
   });
 

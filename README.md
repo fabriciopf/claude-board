@@ -176,7 +176,7 @@ You can also turn each automation on and off, or run it now. An automation stays
 | `card_rename` | Give the task the session name (keeps the original request) |
 | `card_move` | Change list; never to "Done" |
 | `card_comment` | Progress comment |
-| `card_checklist_add`, `card_checklist_check` | Checklist |
+| `card_checklist_add`, `card_checklist_check`, `card_checklist_update` | Checklist (o `update` troca o texto de um item pelo id ou pelo texto atual) |
 | `card_link` | Attach a PR, Jira key, file or URL |
 | `card_ask_user` | Question: card goes to "Waiting for you" |
 | `card_wait_third_party` | Card goes to "Waiting for a third party" |
