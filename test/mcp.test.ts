@@ -215,62 +215,75 @@ describe('MCP over HTTP', () => {
     await inRun.close();
   });
 
-  describe('a run writes only to its own card (card #221)', () => {
+  describe('a run writes to any card (D115 revoked by card #259)', () => {
     const runFor = (cardId: number) => {
       const exec = ctx.db.prepare("INSERT INTO executions (card_id, started_at, status) VALUES (?, ?, 'running')").run(cardId, new Date().toISOString());
       return client({ 'x-dexm-card': String(cardId), 'x-dexm-execution': String(exec.lastInsertRowid) });
     };
 
-    it('card_update on card B from the run of card A is refused; on A it passes', async () => {
+    it('card_update on card B from the run of card A passes, and so does on A', async () => {
       const a = ctx.service.createCard({ title: 'Card A', owner: 'claude' }, 'user', 'manual');
       const b = ctx.service.createCard({ title: 'Card B', owner: 'claude' }, 'user', 'manual');
       const c = await runFor(a.id);
-      const refused = await c.callTool({ name: 'card_update', arguments: { id: b.id, title: 'Invadido' } });
-      expect(refused.isError).toBe(true);
-      expect(text(refused)).toMatch(/not_own_card/);
-      expect(ctx.service.getCard(b.id).title).toBe('Card B');
-      const passed = await c.callTool({ name: 'card_update', arguments: { id: a.id, title: 'A editado' } });
-      expect(passed.isError).toBeFalsy();
+      const onB = await c.callTool({ name: 'card_update', arguments: { id: b.id, title: 'B editado' } });
+      expect(onB.isError).toBeFalsy();
+      expect(ctx.service.getCard(b.id).title).toBe('B editado');
+      const onA = await c.callTool({ name: 'card_update', arguments: { id: a.id, title: 'A editado' } });
+      expect(onA.isError).toBeFalsy();
       expect(ctx.service.getCard(a.id).title).toBe('A editado');
       await c.close();
     });
 
-    it('refuses every write tool on another card, and keeps reads and card_create free', async () => {
+    it('every write tool reaches another card; only card_split stays limited to the own card (D34)', async () => {
       const a = ctx.service.createCard({ title: 'Dono', owner: 'claude' }, 'user', 'manual');
-      const b = ctx.service.createCard({ title: 'Alheio 221', owner: 'claude' }, 'user', 'manual');
+      const b = ctx.service.createCard({ title: 'Alheio 259', owner: 'claude' }, 'user', 'manual');
       ctx.service.addChecklistItem(b.id, 'item de B', 'user');
       const c = await runFor(a.id);
       const calls: [string, Record<string, unknown>][] = [
-        ['card_update', { title: 'x' }],
-        ['card_rename', { name: 'x' }],
-        ['card_move', { status: 'ready' }],
-        ['card_comment', { text: 'x' }],
-        ['card_checklist_add', { items: ['x'] }],
+        ['card_update', { description: 'descrição pela execução de A' }],
+        ['card_comment', { text: 'comentário de A' }],
+        ['card_checklist_add', { items: ['novo item'] }],
         ['card_checklist_check', { item: 'item de B' }],
         ['card_link', { kind: 'url', value: 'https://example.com' }],
-        ['card_ask_user', { question: 'x' }],
-        ['card_wait_third_party', { reason: 'x' }],
-        ['card_submit_for_review', { summary: 'x' }],
-        ['card_split', { tasks: [{ title: 'a', description: 'a' }, { title: 'b', description: 'b' }] }],
+        ['card_rename', { name: 'Renomeado por A' }],
       ];
       for (const [name, args] of calls) {
         const r = await c.callTool({ name, arguments: { id: b.id, ...args } });
-        expect(r.isError, name).toBe(true);
-        expect(text(r), name).toMatch(/not_own_card/);
+        expect(r.isError, `${name}: ${text(r)}`).toBeFalsy();
+        expect(text(r), name).not.toMatch(/not_own_card/);
       }
       const d = ctx.service.getCardDetail(b.id);
-      expect(d.card).toMatchObject({ title: 'Alheio 221', status: 'backlog', links: [] });
-      expect(d.comments).toEqual([]);
-      expect(d.checklist.map((i) => [i.text, i.done])).toEqual([['item de B', false]]);
-      expect(d.subtasks).toEqual([]);
+      expect(d.card.descriptionMd).toBe('descrição pela execução de A');
+      expect(d.card.links.map((l) => l.value)).toEqual(['https://example.com']);
+      expect(d.comments.map((x) => x.bodyMd)).toContain('comentário de A');
+      expect(d.checklist.map((i) => [i.text, i.done])).toEqual([['item de B', true], ['novo item', false]]);
 
-      expect((await c.callTool({ name: 'card_get', arguments: { id: b.id } })).isError).toBeFalsy();
-      expect((await c.callTool({ name: 'board_list_cards', arguments: { text: 'Alheio 221' } })).isError).toBeFalsy();
-      expect((await c.callTool({ name: 'card_create', arguments: { title: 'Novo pela execução' } })).isError).toBeFalsy();
+      const split = await c.callTool({
+        name: 'card_split',
+        arguments: { id: b.id, tasks: [{ title: 'a', description: 'a' }, { title: 'b', description: 'b' }] },
+      });
+      expect(text(split)).toMatch(/Uma execução só divide o próprio card/);
+      expect(ctx.service.getCardDetail(b.id).subtasks).toEqual([]);
       await c.close();
     });
 
-    it('lets the run write to the tasks of its own split, not the other way round', async () => {
+    it('the run moves and hands over another card', async () => {
+      const a = ctx.service.createCard({ title: 'Dono', owner: 'claude' }, 'user', 'manual');
+      const b = ctx.service.createCard({ title: 'Alheio fluxo', owner: 'claude' }, 'user', 'manual');
+      const c = await runFor(a.id);
+      for (const [name, args] of [
+        ['card_move', { status: 'ready' }],
+        ['card_ask_user', { question: 'x' }],
+        ['card_wait_third_party', { reason: 'x' }],
+        ['card_submit_for_review', { summary: 'x' }],
+      ] as [string, Record<string, unknown>][]) {
+        const r = await c.callTool({ name, arguments: { id: b.id, ...args } });
+        expect(text(r), name).not.toMatch(/not_own_card/);
+      }
+      await c.close();
+    });
+
+    it('the run writes to the tasks of its own split, and a task writes to its parent', async () => {
       const a = ctx.service.createCard({ title: 'Mãe', owner: 'claude' }, 'user', 'manual');
       const { children } = ctx.service.splitCard(a.id, { tasks: [{ title: 'T1', description: 'd' }, { title: 'T2', description: 'd' }] }, 'claude');
       const c = await runFor(a.id);
@@ -280,7 +293,8 @@ describe('MCP over HTTP', () => {
       await c.close();
       const t = await runFor(children[1].id);
       const up = await t.callTool({ name: 'card_comment', arguments: { id: a.id, text: 'da tarefa para a mãe' } });
-      expect(text(up)).toMatch(/not_own_card/);
+      expect(up.isError).toBeFalsy();
+      expect(ctx.service.getCardDetail(a.id).comments.map((x) => x.bodyMd)).toContain('da tarefa para a mãe');
       await t.close();
     });
 

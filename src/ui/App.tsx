@@ -7,6 +7,7 @@ import { api, useServerEvents, type BoardData } from './api';
 import { Board, navigationGrid, readCollapsed } from './Board';
 import { CardModal } from './CardModal';
 import { chimeFor, electRingerTab, playChime, ring, unlockOnFirstGesture } from './chime';
+import { COLUMN_TOAST_LINGER_MS, COLUMN_TOAST_MS, cardHref, cardIdFromHash, columnToastFor } from './column-toast';
 import { MonitorIcon, MoonIcon, PauseIcon, PlayIcon, SoundOffIcon, SoundOnIcon, SunIcon } from './HeaderIcons';
 import { AutomationsView } from './AutomationsView';
 import { ImportView } from './ImportView';
@@ -16,12 +17,13 @@ import { FILTERS_STORE_KEY, countByStatus, filterCards, hasActiveFilter, parseFi
 import { FilterBar } from './FilterBar';
 import { MODAL_SETTLE_MS, nextInColumn } from './next-card';
 import { SettingsView } from './SettingsView';
-import { TodayView, pendingTabLabel, pendingViewName, showPendingTab, todayItems } from './TodayView';
+import { TodayView, pendingBadgeText, pendingTabLabel, pendingViewName, showPendingTab, todayItems } from './TodayView';
 import { SORT_STORE_KEYS, parseSort, type CardSort } from './card-sort';
 import { PublishBanner, publishLevel, publishVisible } from './PublishBanner';
 import type { Notice } from './notices';
 import { antigravityConcurrencyValue, antigravityTitle, concurrencyTitle, concurrencyValue, showRunnerPill } from './runner-label';
 import { AntigravityConcurrencySelect, CodexConcurrencySelect, ConcurrencySelect } from './ConcurrencySelect';
+import { UnseenChip } from './UnseenChip';
 import { UsageChip } from './UsageChip';
 import { AgentMark } from './AgentIcon';
 import { AgendaBanner, AgendaChip, useNow } from './AgendaChip';
@@ -70,9 +72,12 @@ export function App() {
   const [quickAdd, setQuickAdd] = useState<Status | null>(null);
   // The header's help panel (card #181).
   const [helpOpen, setHelpOpen] = useState(false);
+  // The header's unread cards panel (card #350).
+  const [unseenOpen, setUnseenOpen] = useState(false);
   // Version put off with "Depois" on the strip of the update from the remote (D89).
   const [selfUpdateDismissed, setSelfUpdateDismissed] = useState<string | null>(readDismissed);
-  const [toast, setToast] = useState<{ msg: string; error: boolean } | null>(null);
+  // `card`: the toast names a card and links to it (card #335).
+  const [toast, setToast] = useState<{ msg: string; error: boolean; card?: { id: number; label: string } } | null>(null);
   const [theme, setTheme] = useState<Theme>(() => (readStore('cb:theme') as Theme) || 'system');
   const [sound, setSound] = useState<boolean>(() => readStore('cb:sound') !== 'off');
   const [filters, setFilters] = useState<BoardFilters>(() => parseFilters(readStore(FILTERS_STORE_KEY)));
@@ -89,6 +94,20 @@ export function App() {
     window.clearTimeout(toastTimer.current);
     toastTimer.current = window.setTimeout(() => setToast(null), error ? 6000 : 3000);
   }, []);
+
+  // A card the system moved into a list that needs the user, with a link that opens it (card #335).
+  const notifyCard = useCallback((msg: string, card: { id: number; label: string }) => {
+    setToast({ msg, error: false, card });
+    window.clearTimeout(toastTimer.current);
+    toastTimer.current = window.setTimeout(() => setToast(null), COLUMN_TOAST_MS);
+  }, []);
+
+  // While the pointer is over a toast with a link it stays up, so the click does not race the timer.
+  const holdToast = () => window.clearTimeout(toastTimer.current);
+  const releaseToast = () => {
+    window.clearTimeout(toastTimer.current);
+    toastTimer.current = window.setTimeout(() => setToast(null), COLUMN_TOAST_LINGER_MS);
+  };
 
   const load = useCallback(async () => {
     try {
@@ -108,6 +127,19 @@ export function App() {
   useEffect(() => {
     writeStore('cb:view', view);
   }, [view]);
+
+  // `#card=N` in the address opens that card (the toast's link, also in a new tab; card #335).
+  useEffect(() => {
+    const openFromHash = () => {
+      const id = cardIdFromHash(window.location.hash);
+      if (id === null) return;
+      setOpenId(id);
+      history.replaceState(null, '', window.location.pathname + window.location.search);
+    };
+    openFromHash();
+    window.addEventListener('hashchange', openFromHash);
+    return () => window.removeEventListener('hashchange', openFromHash);
+  }, []);
 
   // Items in "Minhas pendências"; null until the board loads.
   const pendingCount = data ? todayItems(data.cards).length : null;
@@ -186,6 +218,12 @@ export function App() {
         new Notification(body, { body: title, tag: `card-${msg.cardId}`, silent: soundRef.current });
       }
     }
+    const toastTo = columnToastFor(msg);
+    if (toastTo && typeof msg.cardId === 'number') {
+      const card = cardsRef.current.find((c) => c.id === msg.cardId);
+      const label = card ? `#${card.id} ${card.title}` : t('app.notification.card', { id: String(msg.cardId) });
+      notifyCard(t('app.toast.cardMoved', { list: statusLabel(toastTo) }), { id: msg.cardId, label });
+    }
     window.clearTimeout(reloadTimer.current);
     reloadTimer.current = window.setTimeout(() => void load(), 150);
   });
@@ -211,6 +249,10 @@ export function App() {
   // Column counters read "shown/total" while a search or filter is on (card #108).
   const totals = useMemo(() => (data && hasActiveFilter(filters) ? countByStatus(data.cards) : undefined), [data, filters]);
 
+  // Header badge: "6 de 67" while a search or filter hides part of the pending items (card #322).
+  const pendingBadge =
+    pendingCount === null ? '' : pendingBadgeText(todayItems(filtered).length, pendingCount, hasActiveFilter(filters));
+
   const move = useCallback(
     async (card: Card | CardSummary, status: Status, position?: number) => {
       // A move never changes the owner, not even into "Pronta para o Claude" (D86).
@@ -232,6 +274,7 @@ export function App() {
       const typing = !!target.closest('input, textarea, select, [contenteditable]');
       if (e.key === 'Escape') {
         if (helpOpen) setHelpOpen(false);
+        else if (unseenOpen) setUnseenOpen(false);
         else if (openId !== null) setOpenId(null);
         else if (typing) (target as HTMLElement).blur();
         else setQuickAdd(null);
@@ -279,7 +322,7 @@ export function App() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [openId, filtered, focusId, view, boardSort, helpOpen]);
+  }, [openId, filtered, focusId, view, boardSort, helpOpen, unseenOpen]);
 
   const runner = data?.runner;
   const readyCount = data ? data.cards.filter((c) => c.status === 'ready').length : 0;
@@ -390,12 +433,12 @@ export function App() {
             <button
               className={'tab' + (view === 'today' ? ' active' : '')}
               onClick={() => setView('today')}
-              aria-label={`${pendingTabLabel()}: ${pendingCount}`}
+              aria-label={`${pendingTabLabel()}: ${pendingBadge}`}
               title={pendingViewName()}
             >
               {pendingTabLabel()}
               <span className="tab-badge" aria-hidden="true">
-                {pendingCount}
+                {pendingBadge}
               </span>
             </button>
           </nav>
@@ -403,6 +446,8 @@ export function App() {
         {runner && (
           <>
             <div className="counters">
+              {/* Unread cards of the whole board, not of the filtered view (card #350); only with one or more. */}
+              {data && <UnseenChip cards={data.cards} apps={data.apps} open={unseenOpen} setOpen={setUnseenOpen} onOpen={setOpenId} />}
               {/* Runs and the 5-hour session in one pill: the automatic mode paces the first by the second (D83).
                   Only while something runs (card #209). */}
               {showRunnerPill(runner) && (
@@ -621,8 +666,29 @@ export function App() {
       )}
 
       {toast && (
-        <div className={'toast' + (toast.error ? ' error' : '')} role="status">
+        <div
+          className={'toast' + (toast.error ? ' error' : '') + (toast.card ? ' with-card' : '')}
+          role="status"
+          onMouseEnter={toast.card ? holdToast : undefined}
+          onMouseLeave={toast.card ? releaseToast : undefined}
+        >
           {toast.msg}
+          {toast.card && (
+            <a
+              className="toast-card"
+              href={cardHref(toast.card.id)}
+              onClick={(e) => {
+                // Ctrl/Cmd/Shift/middle click keep the browser's own behavior (new tab or window).
+                if (e.ctrlKey || e.metaKey || e.shiftKey || e.button !== 0) return;
+                e.preventDefault();
+                setOpenId(toast.card!.id);
+                window.clearTimeout(toastTimer.current);
+                setToast(null);
+              }}
+            >
+              {toast.card.label}
+            </a>
+          )}
         </div>
       )}
     </div>

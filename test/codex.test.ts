@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
-import { DEFAULT_CONFIG, saveConfig } from '../src/config.js';
+import { DEFAULT_CONFIG, loadConfig, paths, saveConfig } from '../src/config.js';
 import { codexOptions, resolveAgent, resolveModel } from '../src/runner/agents.js';
 import { Runner } from '../src/runner/runner.js';
 import { transcriptItems } from '../src/runner/stream.js';
@@ -50,6 +50,15 @@ describe('Codex CLI as an agent', () => {
     });
     expect(saveConfig(ctx.config, { codexConcurrency: '∞' as never }).codexConcurrency).toBe('unlimited');
     expect(() => saveConfig(ctx.config, { codexConcurrency: 'auto' as never })).toThrow(/Codex CLI/);
+    expect(saveConfig(ctx.config, { codexEffort: ' xhigh ' }).codexEffort).toBe('xhigh');
+    expect(() => saveConfig(ctx.config, { codexEffort: 'max' })).toThrow(/low, medium, high ou xhigh/);
+    // A config.json from before card #308: Codex keeps the effort it ran with (Claude Code's).
+    fs.writeFileSync(paths.config(), JSON.stringify({ defaultEffort: 'max' }));
+    expect(loadConfig().codexEffort).toBe('xhigh');
+    fs.writeFileSync(paths.config(), JSON.stringify({ defaultEffort: '' }));
+    expect(loadConfig().codexEffort).toBe('');
+    fs.writeFileSync(paths.config(), JSON.stringify({ defaultEffort: 'max', codexEffort: 'low' }));
+    expect(loadConfig().codexEffort).toBe('low');
     expect(() => saveConfig(ctx.config, { defaultAgent: 'gemini' as never })).toThrow(/claude, antigravity ou codex/);
   });
 
@@ -71,6 +80,10 @@ describe('Codex CLI as an agent', () => {
     expect(free).toContain('sandbox_mode="danger-full-access"');
     expect(free.some((o) => o.startsWith('sandbox_workspace_write'))).toBe(false);
     expect(codexOptions({ ...base, config: { ...DEFAULT_CONFIG, codexNetworkAccess: false } }).options).toContain('sandbox_workspace_write.network_access=false');
+    // A card without effort takes codexEffort (card #308), not Claude Code's defaultEffort.
+    const plain = { ...base, card: { ...card, effort: null } as Card };
+    expect(codexOptions({ ...plain, config: { ...DEFAULT_CONFIG, defaultEffort: 'low', codexEffort: 'medium' } }).effort).toBe('medium');
+    expect(codexOptions({ ...plain, config: { ...DEFAULT_CONFIG, defaultEffort: 'low', codexEffort: '' } }).effort).toBeNull();
   });
 });
 

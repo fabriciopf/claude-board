@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { CardSummary } from '../src/shared/domain';
-import { pendingTabLabel, showPendingTab, todayHeading, todayItems } from '../src/ui/TodayView';
+import { pendingBadgeText, pendingTabLabel, showPendingTab, todayHeading, todayItems } from '../src/ui/TodayView';
 
 describe('aba Pendências do cabeçalho (card #170)', () => {
   it('says just "Pendências"', () => expect(pendingTabLabel()).toBe('Pendências'));
@@ -40,4 +40,11 @@ describe('todayItems (aba Minhas pendências)', () => {
 describe('todayHeading (busca e filtros na aba Minhas pendências, card #148)', () => {
   it('is just the name without a search or filter', () => expect(todayHeading(5, undefined)).toBe('Minhas pendências'));
   it('says how many items the filters show', () => expect(todayHeading(2, 7)).toBe('Minhas pendências · 2 de 7'));
+});
+
+describe('pendingBadgeText (contador do header com busca e filtros, card #322)', () => {
+  it('is the total without a search or filter', () => expect(pendingBadgeText(67, 67, false)).toBe('67'));
+  it('reads "6 de 67" when the filters hide items', () => expect(pendingBadgeText(6, 67, true)).toBe('6 de 67'));
+  it('stays the total when the filters hide nothing', () => expect(pendingBadgeText(67, 67, true)).toBe('67'));
+  it('reads "0 de 67" when nothing pending matches', () => expect(pendingBadgeText(0, 67, true)).toBe('0 de 67'));
 });

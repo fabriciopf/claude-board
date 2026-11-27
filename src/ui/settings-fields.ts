@@ -1,4 +1,4 @@
-import { AGENTS, AGENT_LABELS, ANTIGRAVITY_CONCURRENCY_PRESETS, ANTIGRAVITY_MODEL_OPTIONS, CODEX_CONCURRENCY_PRESETS, CODEX_MODEL_OPTIONS, AUTO_CONCURRENCY, CONCURRENCY_PRESETS, SELF_UPDATE_MODES, EFFORT_LABELS, EFFORT_LEVELS, MODEL_OPTIONS, RESUME_MODES, UNLIMITED_CONCURRENCY } from '../shared/domain';
+import { AGENTS, AGENT_LABELS, ANTIGRAVITY_CONCURRENCY_PRESETS, ANTIGRAVITY_EFFORT_LEVELS, ANTIGRAVITY_MODEL_OPTIONS, CODEX_EFFORT_LEVELS, CODEX_CONCURRENCY_PRESETS, CODEX_MODEL_OPTIONS, AUTO_CONCURRENCY, CONCURRENCY_PRESETS, SELF_UPDATE_MODES, EFFORT_LABELS, EFFORT_LEVELS, MODEL_OPTIONS, RESUME_MODES, UNLIMITED_CONCURRENCY } from '../shared/domain';
 import { t, type MessageKey } from './i18n';
 
 export type Config = Record<string, any>;
@@ -94,8 +94,6 @@ export const FIELDS: Field[] = [
     hasHint: true,
   }),
   field({ key: 'autoSplit', tab: 'runs', type: 'boolean', hasHint: true }),
-  // MCP connectors of every run (D124); the card and the project can choose their own.
-  field({ key: 'defaultConnectors', tab: 'runs', type: 'text', hasHint: true }),
   field({ key: 'userProfile', tab: 'runs', type: 'textarea' }),
   // Plugins of every run (D128); a project and a card add their own rules on top.
   field({ key: 'runPlugins', tab: 'runs', type: 'text', hasHint: true }),
@@ -103,6 +101,7 @@ export const FIELDS: Field[] = [
   field({ key: 'prPolicy', tab: 'git', type: 'select', options: ['none', 'push_branch', 'open_pr'], hasHint: true }),
   field({ key: 'protectedBranches', tab: 'git', type: 'text', hasHint: true }),
   field({ key: 'jiraBaseUrl', tab: 'organization', type: 'text', hasHint: true }),
+  field({ key: 'jiraProjectKeys', tab: 'organization', type: 'text', hasHint: true }),
   field({ key: 'mirrorRepoPath', tab: 'git', type: 'text', hasHint: true }),
   field({ key: 'mirrorBaseBranch', tab: 'git', type: 'text', hasHint: true }),
   field({ key: 'mirrorExclude', tab: 'git', type: 'text', hasHint: true }),
@@ -158,6 +157,14 @@ export const FIELDS: Field[] = [
     optionLabels: () => ({ '': t('settings.opt.antigravityDefault'), ...Object.fromEntries(ANTIGRAVITY_MODEL_OPTIONS.map((m) => [m.id, m.label])) }),
     hasHint: true,
   }),
+  field({
+    key: 'antigravityEffort',
+    tab: 'antigravity',
+    type: 'select',
+    options: ['', ...ANTIGRAVITY_EFFORT_LEVELS],
+    optionLabels: () => ({ '': t('settings.opt.antigravityEffortDefault'), ...EFFORT_LABELS }),
+    hasHint: true,
+  }),
   field({ key: 'antigravityBin', tab: 'antigravity', type: 'text', hasHint: true }),
   // Codex CLI (D125): how Codex CLI runs.
   field({
@@ -166,6 +173,14 @@ export const FIELDS: Field[] = [
     type: 'select',
     options: ['', ...CODEX_MODEL_OPTIONS.map((m) => m.id)],
     optionLabels: () => ({ '': t('settings.opt.codexDefault'), ...Object.fromEntries(CODEX_MODEL_OPTIONS.map((m) => [m.id, m.label])) }),
+    hasHint: true,
+  }),
+  field({
+    key: 'codexEffort',
+    tab: 'codex',
+    type: 'select',
+    options: ['', ...CODEX_EFFORT_LEVELS],
+    optionLabels: () => ({ '': t('settings.opt.codexDefault'), ...EFFORT_LABELS }),
     hasHint: true,
   }),
   field({ key: 'codexBin', tab: 'codex', type: 'text', hasHint: true }),

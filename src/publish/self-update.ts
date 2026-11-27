@@ -10,7 +10,7 @@ import { authorList, expandHome } from '../config.js';
 import { canonicalDir, git, linkDir, repoRoot, runCommand, samePath, syncDir, type CmdResult } from './git.js';
 import { DEFAULT_COMMANDS, isScreenOnly, type Publisher, type PublishCommands } from './publisher.js';
 import { isBoardEnvKey } from '../shared/brand.js';
-import { countTestFiles, progressDetail, testProgress } from './test-progress.js';
+import { countTestFiles, failedTestFiles, progressDetail, testProgress } from './test-progress.js';
 
 /**
  * Update of the Board from the git remote it was cloned from (card #183, D89).
@@ -571,8 +571,8 @@ export class SelfUpdater implements SelfUpdateControl {
   }
 
   /** Share of finished test files in the step, as the publication shows it (card #213). */
-  private progress(cwd: string, label: string): (chunk: string) => void {
-    const total = countTestFiles(cwd);
+  private progress(cwd: string, label: string, files?: number): (chunk: string) => void {
+    const total = files ?? countTestFiles(cwd);
     return testProgress(total, (percent, done) => {
       this.detail = progressDetail(label, percent, done, total);
       this.changed();
@@ -584,11 +584,15 @@ export class SelfUpdater implements SelfUpdateControl {
     const label = 'Rodando os testes';
     this.setPhase('preparing', label);
     const [cmd, args] = this.commands.test;
-    if ((await this.run(cmd, args, cwd, env, this.progress(cwd, label))).ok) return;
-    const retryLabel = 'Repetindo os testes, um arquivo por vez';
+    const first = await this.run(cmd, args, cwd, env, this.progress(cwd, label));
+    if (first.ok) return;
+    // Card #342: repeat only the files that failed, as the publication does.
+    const failed = failedTestFiles(first.out);
+    const retryLabel = failed ? `Repetindo ${failed.length} arquivo(s) que falharam, um por vez` : 'Repetindo os testes, um arquivo por vez';
     this.setPhase('preparing', retryLabel);
-    const [retryCmd, retryArgs] = this.commands.testRetry;
-    const second = await this.run(retryCmd, retryArgs, cwd, env, this.progress(cwd, retryLabel));
+    const [retryCmd, baseRetryArgs] = this.commands.testRetry;
+    const retryArgs = failed ? [...baseRetryArgs, ...failed] : baseRetryArgs;
+    const second = await this.run(retryCmd, retryArgs, cwd, env, this.progress(cwd, retryLabel, failed?.length));
     if (!second.ok) throw new UpdateError(`Rodando os testes: \`${[retryCmd, ...retryArgs].join(' ')}\` falhou também na segunda rodada.${fence(second.out)}`);
   }
 }

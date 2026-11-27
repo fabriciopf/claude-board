@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { UsageSnapshot } from '../shared/domain';
 import { AgentMark } from './AgentIcon';
-import { USAGE_TICK_MS, usageRows, usageTitle, type UsageAgents, type UsageRow } from './usage-rows';
+import { USAGE_TICK_MS, usageRows, usageRowsNeedMark, usageTitle, type UsageAgents, type UsageRow } from './usage-rows';
 
 function reducedMotion(): boolean {
   try {
@@ -11,10 +11,10 @@ function reducedMotion(): boolean {
   }
 }
 
-function Row({ row }: { row: UsageRow }) {
+function Row({ row, mark }: { row: UsageRow; mark: boolean }) {
   return (
     <span className={'usage-row' + (row.tone ? ' ' + row.tone : '')}>
-      <AgentMark agent={row.agent} />
+      {mark && <AgentMark agent={row.agent} />}
       {row.label}: <strong>{row.value}</strong>
       {row.pct !== null && (
         <span className="usage-bar" aria-hidden="true">
@@ -31,8 +31,9 @@ function Row({ row }: { row: UsageRow }) {
  * Second half of the runner pill (D83): "5 horas: 38% ▬ reset em 1h12" and "Semana: 12% ▬ reset em 3d05h",
  * one at a time, scrolling up every 5 seconds. Every line sits in the same column, so the pill is as wide
  * as the widest line and nothing else in the header moves when the line changes. Hovering holds the line.
- * Since the card #198 review each line carries its agent's mark, and the lines are those of every agent
- * with a run going (`agents`, the runner state), or of the default agent when none is.
+ * Since the card #198 review the lines are those of every agent
+ * with a run going (`agents`, the runner state), or of the default agent when none is. A line carries its
+ * agent's mark only while the lines mix agents (card #352): otherwise the mark before "x de y" says it.
  */
 export function UsageChip({ usage, agents }: { usage: UsageSnapshot | null; agents?: UsageAgents | null }) {
   const [now, setNow] = useState(() => Date.now());
@@ -45,6 +46,7 @@ export function UsageChip({ usage, agents }: { usage: UsageSnapshot | null; agen
 
   const rows = usageRows(usage, now, agents);
   const n = rows.length;
+  const mark = usageRowsNeedMark(rows);
   const signature = rows.map((r) => r.key).join('|');
   useEffect(() => setTick({ step: 0, animate: false }), [signature]);
   useEffect(() => {
@@ -78,7 +80,7 @@ export function UsageChip({ usage, agents }: { usage: UsageSnapshot | null; agen
         >
           {track.map((r, i) => (
             <span key={r.key + '-' + i} className="usage-slot" aria-hidden={n > 1 && i === n ? true : undefined}>
-              <Row row={r} />
+              <Row row={r} mark={mark} />
             </span>
           ))}
         </span>

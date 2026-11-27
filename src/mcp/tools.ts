@@ -58,22 +58,6 @@ export function createMcpServer(ctx: AppContext, session: McpSession): McpServer
   };
 
   /**
-   * Card a write tool may touch (card #221): a session started for a card (header x-dexm-card) only
-   * writes to that card and to its split tasks. Reads and card_create stay free; an interactive
-   * session (no header) writes anywhere, as before.
-   */
-  const writableCardId = (id?: number): number => {
-    const cardId = resolveCardId(id);
-    if (!session.cardId || cardId === session.cardId) return cardId;
-    if (s.getCard(cardId).parentId === session.cardId) return cardId;
-    throw new RuleError(
-      'not_own_card',
-      `Esta sessão é do card #${session.cardId}: ela só altera o próprio card e as tarefas dele (card_split), não o card #${cardId}. Para outro assunto, crie um card com card_create ou comente no seu card.`,
-      403,
-    );
-  };
-
-  /**
    * repoPath sent by a card session (card #221): it says where the card's next run happens, so it
    * must be a folder of the workspace or of a registered project. Interactive sessions are not limited.
    */
@@ -101,6 +85,31 @@ export function createMcpServer(ctx: AppContext, session: McpSession): McpServer
       throw new RuleError('unknown_app', `Projeto "${app}" não existe. Projetos: ${names || '(nenhum cadastrado)'}`, 400);
     }
     return found.id;
+  };
+
+  /**
+   * Label change asked through card_update (card #339): `labels` replaces the set; `addLabels` and
+   * `removeLabels` adjust the current one. Removals are checked first, so a typo there neither
+   * creates the labels being added nor touches the card. Returns undefined when nothing was asked.
+   */
+  const resolveLabelChange = (
+    current: number[],
+    replace?: string[],
+    add?: string[],
+    remove?: string[],
+  ): number[] | undefined => {
+    if (replace) return [...new Set(s.resolveLabels(replace))];
+    if (!add && !remove) return undefined;
+    const known = s.listLabels();
+    const removeIds = (remove ?? []).map((name) => {
+      const found = known.find((l) => l.name.toLowerCase() === name.trim().toLowerCase());
+      if (!found) {
+        throw new RuleError('unknown_label', `Label "${name}" não existe. Labels: ${known.map((l) => l.name).join(', ') || '(nenhuma)'}`, 400);
+      }
+      return found.id;
+    });
+    const addIds = add ? s.resolveLabels(add) : [];
+    return [...new Set([...current, ...addIds])].filter((id) => !removeIds.includes(id));
   };
 
   const compact = (c: Card) => {
@@ -284,13 +293,6 @@ export function createMcpServer(ctx: AppContext, session: McpSession): McpServer
         model: z.string().nullable().optional().describe('Modelo das execuções deste card (ex.: claude-opus-5-5, claude-sonnet-5-5, claude-haiku-5-5); vazio ou null = o padrão da configuração'),
         effort: z.enum(EFFORT_ENUM).nullable().optional().describe('Effort das execuções deste card; null = o padrão da configuração'),
         agent: z.enum(['claude', 'antigravity', 'codex']).nullable().optional().describe('Agente que executa o card: claude (Claude Code), antigravity (Antigravity CLI, do Google) ou codex (Codex CLI, da OpenAI); null = o padrão da configuração'),
-        connectors: z
-          .array(z.string())
-          .nullable()
-          .optional()
-          .describe(
-            'Servidores MCP das execuções deste card, além do Board: atlassian (Jira), slack, notion, figma, google-drive, gmail, google-calendar, amplitude, miro, claude-docs, context7, ou o nome de um servidor do ~/.claude.json (ex.: chrome-devtools). Omitido ou null = o do projeto, senão o padrão da configuração',
-          ),
       },
     },
     (args) =>
@@ -311,7 +313,6 @@ export function createMcpServer(ctx: AppContext, session: McpSession): McpServer
             model: args.model,
             effort: args.effort,
             agent: args.agent,
-            connectors: args.connectors,
           },
           'claude',
           'mcp',
@@ -326,7 +327,8 @@ export function createMcpServer(ctx: AppContext, session: McpSession): McpServer
   server.registerTool(
     'card_update',
     {
-      description: 'Edita título, descrição, prioridade, prazo, projeto, pasta do repositório (repoPath), repositórios relacionados, modelo, effort ou agente de um card. O dono não: só o usuário o troca, à mão.',
+      description:
+        'Edita título, descrição, prioridade, prazo, projeto, pasta do repositório (repoPath), repositórios relacionados, labels, modelo, effort ou agente de um card. O dono não: só o usuário o troca, à mão.',
       inputSchema: {
         id: cardIdArg,
         title: z.string().optional(),
@@ -339,6 +341,15 @@ export function createMcpServer(ctx: AppContext, session: McpSession): McpServer
           .array(z.string())
           .optional()
           .describe('Substitui a lista de repositórios relacionados (nomes cadastrados, ex.: ["hdb", "sms"]); [] limpa'),
+        labels: z
+          .array(z.string())
+          .optional()
+          .describe('Substitui as labels do card (nomes; label que não existe é criada); [] tira todas'),
+        addLabels: z.array(z.string()).optional().describe('Labels a acrescentar, mantendo as que o card já tem (label que não existe é criada)'),
+        removeLabels: z
+          .array(z.string())
+          .optional()
+          .describe('Labels a tirar do card, pelo nome (maiúsculas não importam); nome que não é label cadastrada dá erro e não muda nada'),
         model: z.string().nullable().optional().describe('Modelo das execuções deste card (ex.: claude-opus-5-5, claude-sonnet-5-5, claude-haiku-5-5); vazio ou null = o padrão da configuração'),
         effort: z.enum(EFFORT_ENUM).nullable().optional().describe('Effort das execuções deste card; null = o padrão da configuração'),
         agent: z.enum(['claude', 'antigravity', 'codex']).nullable().optional().describe('Agente que executa o card: claude (Claude Code), antigravity (Antigravity CLI, do Google) ou codex (Codex CLI, da OpenAI); null = o padrão da configuração'),
@@ -346,9 +357,13 @@ export function createMcpServer(ctx: AppContext, session: McpSession): McpServer
     },
     (args) =>
       guard(() => {
-        const cardId = writableCardId(args.id);
+        const cardId = resolveCardId(args.id);
+        if (args.labels && (args.addLabels || args.removeLabels)) {
+          throw new RuleError('labels_conflict', 'Use "labels" (substitui) ou "addLabels"/"removeLabels" (ajuste), não os dois.', 400);
+        }
         // Resolved before any write, so an unknown name leaves the card untouched.
         const repositoryIds = args.repositories ? s.resolveRepositories(args.repositories) : undefined;
+        const labelIds = resolveLabelChange(s.getCard(cardId).labelIds, args.labels, args.addLabels, args.removeLabels);
         let card = s.updateCard(
           cardId,
           {
@@ -365,6 +380,7 @@ export function createMcpServer(ctx: AppContext, session: McpSession): McpServer
           'claude',
         );
         if (repositoryIds) card = s.setRepositories(cardId, repositoryIds, 'claude');
+        if (labelIds) card = s.setLabels(cardId, labelIds, 'claude');
         return ok({ updated: compact(card) });
       }),
   );
@@ -378,7 +394,7 @@ export function createMcpServer(ctx: AppContext, session: McpSession): McpServer
     },
     (args) =>
       guard(() => {
-        const card = s.renameForSession(writableCardId(args.id), args.name, 'claude');
+        const card = s.renameForSession(resolveCardId(args.id), args.name, 'claude');
         return ok({ renamed: compact(card), originalTitle: card.originalTitle });
       }),
   );
@@ -392,7 +408,7 @@ export function createMcpServer(ctx: AppContext, session: McpSession): McpServer
     },
     (args) =>
       guard(() => {
-        const id = writableCardId(args.id);
+        const id = resolveCardId(args.id);
         const card = s.moveCard(id, { status: args.status, reason: args.reason }, 'claude');
         if (card.status === 'ready') ctx.runner?.nudge();
         return ok({ moved: compact(card) });
@@ -407,7 +423,7 @@ export function createMcpServer(ctx: AppContext, session: McpSession): McpServer
     },
     (args) =>
       guard(() => {
-        const id = writableCardId(args.id);
+        const id = resolveCardId(args.id);
         s.addComment(id, { author: 'claude', bodyMd: args.text, kind: 'comment', executionId: ownExecution(id)?.id ?? null });
         return ok('Comentário registrado.');
       }),
@@ -421,7 +437,7 @@ export function createMcpServer(ctx: AppContext, session: McpSession): McpServer
     },
     (args) =>
       guard(() => {
-        const id = writableCardId(args.id);
+        const id = resolveCardId(args.id);
         const added = args.items.map((text) => s.addChecklistItem(id, text, 'claude'));
         return ok({ added: added.map((i) => ({ id: i.id, text: i.text })) });
       }),
@@ -439,7 +455,7 @@ export function createMcpServer(ctx: AppContext, session: McpSession): McpServer
     },
     (args) =>
       guard(() => {
-        const id = writableCardId(args.id);
+        const id = resolveCardId(args.id);
         const item = s.findChecklistItem(id, args.item);
         const updated = s.updateChecklistItem(item.id, { done: args.done ?? true }, 'claude');
         return ok({ item: { id: updated.id, text: updated.text, done: updated.done } });
@@ -459,7 +475,7 @@ export function createMcpServer(ctx: AppContext, session: McpSession): McpServer
     },
     (args) =>
       guard(() => {
-        const card = s.addLink(writableCardId(args.id), { kind: args.kind, value: args.value, title: args.title }, 'claude');
+        const card = s.addLink(resolveCardId(args.id), { kind: args.kind, value: args.value, title: args.title }, 'claude');
         return ok({ links: card.links });
       }),
   );
@@ -477,7 +493,7 @@ export function createMcpServer(ctx: AppContext, session: McpSession): McpServer
     },
     (args) =>
       guard(() => {
-        const id = writableCardId(args.id);
+        const id = resolveCardId(args.id);
         const unread = inboxBeforeEnding(id, 'card_ask_user');
         if (unread) return unread;
         const exec = ownExecution(id);
@@ -494,7 +510,7 @@ export function createMcpServer(ctx: AppContext, session: McpSession): McpServer
     },
     (args) =>
       guard(() => {
-        const id = writableCardId(args.id);
+        const id = resolveCardId(args.id);
         const unread = inboxBeforeEnding(id, 'card_wait_third_party');
         if (unread) return unread;
         s.addComment(id, { author: 'claude', bodyMd: `Aguardando terceiro: ${args.reason}`, kind: 'comment', executionId: ownExecution(id)?.id ?? null });
@@ -528,7 +544,7 @@ export function createMcpServer(ctx: AppContext, session: McpSession): McpServer
     },
     (args) =>
       guard(() => {
-        const id = writableCardId(args.id);
+        const id = resolveCardId(args.id);
         // An execution may only split the card it was started for (D34).
         if (session.executionId && id !== session.cardId) {
           throw new RuleError('not_own_card', 'Uma execução só divide o próprio card.', 403);
@@ -653,7 +669,7 @@ export function createMcpServer(ctx: AppContext, session: McpSession): McpServer
     },
     (args) =>
       guard(() => {
-        const id = writableCardId(args.id);
+        const id = resolveCardId(args.id);
         const unread = inboxBeforeEnding(id, 'card_submit_for_review');
         if (unread) return unread;
         const exec = ownExecution(id);

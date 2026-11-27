@@ -1,13 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { AGENTS, AGENT_LABELS, EFFORT_LABELS, EFFORT_LEVELS, PERMISSION_MODES, REOPEN_ON_COMMENT, RESUME_MODES, STATUSES, UNSEEN_STATUSES, agentLabel, effortLabel, isAgentId, modelFitsAgent, modelLabel, modelOptionsFor, resumeCommand, type AgentId, type App, type Card, type Label, type LinkKind, type Repository, type ResumeMode } from '../shared/domain';
+import { jiraKeyList } from '../shared/jira';
 import { resolvePluginRules } from '../shared/plugins';
 import { ActionButton, ActionGroup, useBusy } from './ActionButton';
 import { ApiError, api, fmtDate, useServerEvents, type CardDetailResponse } from './api';
-import { ConnectorPicker } from './ConnectorPicker';
-import { parseConnectorList } from '../shared/connectors';
 import { latestDelivery } from './delivery';
 import { statusLabel, statusShortLabel, t } from './i18n';
-import { renderMarkdown } from './markdown';
+import { renderMarkdown, setLinkContext } from './markdown';
 import { useImagePaste } from './paste-image';
 import { Timeline } from './Timeline';
 
@@ -20,10 +19,12 @@ interface ConfigDefaults {
   defaultAgent?: string;
   resumeMode?: string;
   antigravityModel?: string;
+  antigravityEffort?: string;
   codexModel?: string;
+  codexEffort?: string;
   jiraBaseUrl?: string;
+  jiraProjectKeys?: string;
   runPlugins?: string;
-  defaultConnectors?: string;
 }
 
 interface Props {
@@ -57,6 +58,8 @@ const linkKinds = (): { value: LinkKind; label: string }[] => [
 function linkHref(kind: LinkKind, value: string, jiraBaseUrl?: string): string | undefined {
   if (/^https?:\/\//.test(value)) return value;
   if (kind === 'jira' && jiraBaseUrl && /^[A-Z][A-Z0-9]+-\d+$/.test(value)) return `${jiraBaseUrl.replace(/\/+$/, '')}/browse/${value}`;
+  // A "file" link opens through the server, like a path in the texts (card #309).
+  if (kind === 'file' || /^file:\/\//i.test(value)) return '#';
   return undefined;
 }
 
@@ -76,8 +79,9 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
   const [adjust, setAdjust] = useState('');
   const [showAdjust, setShowAdjust] = useState(false);
   const [newItem, setNewItem] = useState('');
-  // The side panel (Lista, Dono, Projeto, Labels...) opens folded on every modal; d or the strip unfolds it (card #166).
-  const [sideOpen, setSideOpen] = useState(false);
+  // The side panel (Lista, Dono, Projeto, Labels...) opens unfolded on every modal (card #349, reverting #166's default);
+  // d or "Detalhes ›" folds it.
+  const [sideOpen, setSideOpen] = useState(true);
   const [link, setLink] = useState({ kind: 'url' as LinkKind, value: '', title: '' });
   const [live, setLive] = useState<string[]>([]);
   const activityRef = useRef<HTMLDivElement>(null);
@@ -95,9 +99,33 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
   useEffect(() => {
     void api
       .get<ConfigDefaults>('/api/config')
-      .then(setDefaults)
+      .then((d) => {
+        // Before the state change, so the render it triggers already links the Jira keys (card #309).
+        setLinkContext({ jiraBaseUrl: d.jiraBaseUrl, jiraProjectKeys: jiraKeyList(d.jiraProjectKeys) });
+        setDefaults(d);
+      })
       .catch(() => undefined);
   }, []);
+
+  /**
+   * Clicks on the links the card texts gained in card #309: a local path asks the server to open
+   * it (the browser will not open file:// from this page), and #N opens that card here.
+   */
+  const onTextLink = (e: ReactMouseEvent) => {
+    const a = (e.target as HTMLElement).closest?.('a[data-local-path], a[data-card-id]') as HTMLAnchorElement | null;
+    if (!a) return;
+    e.preventDefault();
+    if (a.dataset.cardId) {
+      const id = Number(a.dataset.cardId);
+      if (id && id !== cardId) onOpenCard(id);
+      return;
+    }
+    const target = a.dataset.localPath ?? '';
+    api
+      .post('/api/open-path', { path: target, cardId })
+      .then(() => notify(t('card.openingPath', { path: target })))
+      .catch((err) => notify(err instanceof ApiError ? err.message : String(err), true));
+  };
 
   const load = useCallback(async () => {
     try {
@@ -273,7 +301,7 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
 
   return (
     <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="modal" role="dialog" aria-modal="true" aria-label={card.title}>
+      <div className="modal" role="dialog" aria-modal="true" aria-label={card.title} onClick={onTextLink}>
         <button className="btn link modal-close" onClick={onClose} aria-label={t('card.close')}>
           ✕
         </button>
@@ -918,39 +946,30 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
                   id="f-effort"
                   className="input"
                   value={card.effort ?? ''}
-                  // Antigravity CLI takes no effort (card #191): the select would have no effect.
-                  disabled={agent === 'antigravity'}
-                  title={agent === 'antigravity' ? t('card.effortClaudeOnly') : undefined}
+                  // Antigravity CLI takes the effort as the suffix of the model id (card #308).
+                  title={agent === 'antigravity' ? t('card.effortAntigravity') : undefined}
                   onChange={(e) => void patch({ effort: e.target.value || null })}
                 >
-                  <option value="">{t('card.fromSettingsWith', { value: effortLabel(defaults.defaultEffort) })}</option>
+                  <option value="">
+                    {t('card.fromSettingsWith', {
+                      value:
+                        agent === 'antigravity'
+                          ? defaults.antigravityEffort
+                            ? effortLabel(defaults.antigravityEffort)
+                            : t('card.effortOfModel')
+                          : agent === 'codex'
+                            ? defaults.codexEffort
+                              ? effortLabel(defaults.codexEffort)
+                              : AGENT_LABELS.codex
+                            : effortLabel(defaults.defaultEffort),
+                    })}
+                  </option>
                   {EFFORT_LEVELS.map((l) => (
                     <option key={l} value={l}>
                       {EFFORT_LABELS[l]}
                     </option>
                   ))}
                 </select>
-              </div>
-              <div className="field">
-                <label>{t('card.connectors')}</label>
-                {(() => {
-                  // The card's list, else its project's, else the settings' (D124).
-                  const project = apps.find((a) => a.id === card.appId);
-                  const inherited = project?.connectors
-                    ? { from: t('card.connectorsFromProject'), list: project.connectors }
-                    : { from: t('card.connectorsFromSettings'), list: parseConnectorList(defaults.defaultConnectors) };
-                  return (
-                    <ConnectorPicker
-                      label={t('card.connectors')}
-                      value={card.connectors ?? null}
-                      inherited={inherited}
-                      // Antigravity CLI loads MCP servers its own way (D93): the field would have no effect.
-                      disabled={agent === 'antigravity'}
-                      onChange={(next) => void patch({ connectors: next })}
-                    />
-                  );
-                })()}
-                <span className="muted small">{t('card.connectorsHint')}</span>
               </div>
               <div className="field">
                 <label htmlFor="f-turns">{t('card.maxTurns')}</label>
@@ -1005,7 +1024,13 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
                     <div key={i} className="small" style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
                       <span className="pill">{l.kind}</span>
                       {href ? (
-                        <a href={href} target="_blank" rel="noreferrer" style={{ overflowWrap: 'anywhere' }}>
+                        <a
+                          href={href}
+                          target="_blank"
+                          rel="noreferrer"
+                          style={{ overflowWrap: 'anywhere' }}
+                          {...(href === '#' ? { 'data-local-path': l.value, title: l.value } : {})}
+                        >
                           {l.title || l.value}
                         </a>
                       ) : (

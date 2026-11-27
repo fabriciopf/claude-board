@@ -1,11 +1,11 @@
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { checkBind, isLoopbackHost } from '../src/server/bind-guard.js';
 import { main } from '../src/cli.js';
 import { runDoctor } from '../src/doctor.js';
 import { loadConfig } from '../src/config.js';
+import { tempDir } from './temp-dirs.js';
 
 describe('isLoopbackHost (card #223)', () => {
   it('accepts only addresses of this machine', () => {
@@ -53,7 +53,7 @@ describe('start and doctor with a host outside the loopback (card #223)', () => 
   let saved: string | undefined;
 
   beforeEach(() => {
-    home = fs.mkdtempSync(path.join(os.tmpdir(), 'dexm-bind-'));
+    home = tempDir('dexm-bind-');
     saved = process.env.DEXM_HOME;
     process.env.DEXM_HOME = home;
   });

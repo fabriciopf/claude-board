@@ -31,9 +31,9 @@ function protectedProse(config: Config): string {
   return list.length > 1 ? `${list.slice(0, -1).join(', ')} e ${list[list.length - 1]}` : list[0];
 }
 
-/** The worktree's pre-push hook (D96): the second push lock, only where the Board made the worktree. */
-const HOOK_LOCK = 'O worktree tem um hook pre-push do Board que aplica essa mesma regra no próprio git; não o pule (`--no-verify`) nem troque o `core.hooksPath`.';
-const NO_HOOK_LOCK = 'Este card roda sem worktree, então o git daqui não tem a trava de push do Board (o hook pre-push): a regra acima depende só de você e das permissões do agente. Não troque a branch de um checkout principal: crie a branch do card num worktree próprio (`git worktree add --no-track -b cb/<id>-<tema> <pasta> <base>`) e deixe o checkout principal na branch em que estava.';
+/** The pre-push hook (D96, D112): the second push lock, in every run through the environment. */
+const HOOK_LOCK = 'O git desta execução tem um hook pre-push do Board (pelo `core.hooksPath` do ambiente) que aplica essa mesma regra; não o pule (`--no-verify`, `-c core.hooksPath=`) nem mexa nas variáveis `GIT_CONFIG_*`. Mensagem de commit com a palavra "push" solta é negada pela regra de push do agente: use `git commit -F <arquivo>`.';
+const NO_HOOK_LOCK = HOOK_LOCK + ' Este card roda sem worktree: não troque a branch de um checkout principal; crie a branch do card num worktree próprio (`git worktree add --no-track -b cb/<id>-<tema> <pasta> <base>`) e deixe o checkout principal na branch em que estava.';
 
 const prRules = (PROTECTED: string): Record<Config['prPolicy'], string> => ({
   none: 'Não faça push nem abra PR. Deixe os commits na branch local do card; o usuário decide o que sobe.',

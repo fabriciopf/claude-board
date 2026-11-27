@@ -11,11 +11,15 @@ describe('server shutdown', () => {
     const app = await buildApp(makeContext(), { serveUi: false });
     await app.listen({ port: 0, host: '127.0.0.1' });
     const { port } = app.server.address() as AddressInfo;
+    // The server ends the stream by destroying the socket, which the client can see as ECONNRESET.
+    // Unhandled, that error failed a whole publication with every test green (card #342).
     const streamClosed = new Promise<void>((resolve) => {
-      http.get({ host: '127.0.0.1', port, path: '/api/events' }, (res) => {
+      const req = http.get({ host: '127.0.0.1', port, path: '/api/events' }, (res) => {
         res.on('data', () => undefined);
+        res.on('error', () => resolve());
         res.on('close', () => resolve());
       });
+      req.on('error', () => resolve());
     });
     // Wait for the stream to be connected before closing.
     await new Promise((r) => setTimeout(r, 200));

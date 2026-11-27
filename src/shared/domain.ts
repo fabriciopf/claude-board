@@ -308,11 +308,39 @@ export function modelOptionsFor(agent: AgentId): { id: string; label: string }[]
   return agent === 'antigravity' ? ANTIGRAVITY_MODEL_OPTIONS : MODEL_OPTIONS;
 }
 
+/** Codex CLI's `model_reasoning_effort` levels the settings offer (card #308). */
+export const CODEX_EFFORT_LEVELS: EffortLevel[] = ['low', 'medium', 'high', 'xhigh'];
+
 /** Codex CLI's `model_reasoning_effort`: the Board's levels above high map to its top one (D125). */
 export function codexEffort(level: string | null | undefined): string | null {
   if (!level) return null;
   if (level === 'xhigh' || level === 'max') return 'xhigh';
   return isEffortLevel(level) ? level : null;
+}
+
+/**
+ * Antigravity CLI takes no effort flag: the thinking level is the suffix of the model id
+ * (`gemini-3.8-flash-high`). These are the suffixes the settings offer (card #308, D132).
+ */
+export const ANTIGRAVITY_EFFORT_LEVELS: EffortLevel[] = ['low', 'medium', 'high'];
+
+/** The Board's effort as an Antigravity suffix: the levels above high map to high. */
+export function antigravityEffort(level: string | null | undefined): string | null {
+  if (!level) return null;
+  if (level === 'xhigh' || level === 'max') return 'high';
+  return (ANTIGRAVITY_EFFORT_LEVELS as string[]).includes(level) ? level : null;
+}
+
+const AGY_EFFORT_SUFFIX = /-(low|medium|high)$/;
+
+/**
+ * The Antigravity model with the effort applied: the `-low/-medium/-high` suffix swapped for the
+ * effort's. A model without that suffix (`claude-opus-4-6-thinking`, or none) is left as it is, and
+ * `applied` says whether the effort took effect.
+ */
+export function applyAntigravityEffort(model: string | null, effort: string | null): { model: string | null; applied: boolean } {
+  if (!model || !effort || !AGY_EFFORT_SUFFIX.test(model)) return { model, applied: false };
+  return { model: model.replace(AGY_EFFORT_SUFFIX, `-${effort}`), applied: true };
 }
 
 /**
@@ -354,8 +382,6 @@ export interface App {
   archived: boolean;
   /** Plugin rules of the runs of this project's cards (D128), e.g. `+ignite`; '' = the settings decide. */
   plugins: string;
-  /** MCP connectors of this project's runs (D124); null = the settings' default. */
-  connectors: string[] | null;
 }
 
 /** A folder of the workspace that looks like an app and is not registered yet. */
@@ -411,8 +437,6 @@ export interface Card {
   agent: AgentId | null;
   /** Plugin rules of this card's runs (D128), e.g. `+vercel`; null = the project and the settings decide. */
   plugins: string | null;
-  /** MCP connectors of this card's runs (D124); null = the project's, else the settings'. [] = none. */
-  connectors: string[] | null;
   /** How the card goes back to the agent after a delivery; null = the default in the settings (D129). */
   resumeMode: ResumeMode | null;
   dangerousAllowed: boolean;

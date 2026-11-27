@@ -93,6 +93,15 @@ export function usageRows(usage: UsageSnapshot | null, now: number, agents?: Usa
   return [...(claudeOn ? claudeRows(usage, now) : []), ...(agyOn ? antigravityRows(agents.antigravity!.window, now) : [])];
 }
 
+/**
+ * Whether the ticker lines carry their agent's mark (card #352). The runs part of the pill already shows
+ * the mark before "x de y", so a ticker whose lines are all one agent's repeats it: the mark goes. It
+ * stays only while the lines mix agents (Claude Code and Antigravity), where it tells whose plan each is.
+ */
+export function usageRowsNeedMark(rows: readonly Pick<UsageRow, 'agent'>[]): boolean {
+  return new Set(rows.map((r) => r.agent)).size > 1;
+}
+
 /** Tooltip of the ticker: every line at once, so hovering never depends on which line is showing. */
 export function usageTitle(usage: UsageSnapshot | null, now: number, agents?: UsageAgents | null): string {
   const rows = usageRows(usage, now, agents);
