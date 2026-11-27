@@ -8,6 +8,7 @@ describe('settings tabs', () => {
         'agendaRefreshMinutes',
         'antigravityBin',
         'antigravityConcurrency',
+        'antigravityEffort',
         'antigravityModel',
         'autoSplit',
         'claudeBin',
@@ -15,16 +16,17 @@ describe('settings tabs', () => {
         'classificationModel',
         'codexBin',
         'codexConcurrency',
+        'codexEffort',
         'codexModel',
         'codexNetworkAccess',
         'defaultAgent',
         'defaultBaseBranch',
-        'defaultConnectors',
         'defaultEffort',
         'defaultModel',
         'defaultPermissionMode',
         'heartbeatSeconds',
         'jiraBaseUrl',
+        'jiraProjectKeys',
         'maxConcurrency',
         'mirrorAutoMerge',
         'mirrorBaseBranch',
@@ -72,8 +74,8 @@ describe('settings tabs', () => {
     const runs = FIELDS.filter((f) => f.tab === 'runs').map((f) => f.key);
     // The concurrency limits come first, Claude Code, Antigravity CLI (D99) and Codex CLI (D125).
     expect(runs.slice(0, 4)).toEqual(['maxConcurrency', 'antigravityConcurrency', 'codexConcurrency', 'defaultAgent']);
-    for (const key of ['antigravityModel', 'antigravityBin']) expect(tabOf(key)).toBe('antigravity');
-    for (const key of ['codexModel', 'codexBin', 'codexNetworkAccess']) expect(tabOf(key)).toBe('codex');
+    for (const key of ['antigravityModel', 'antigravityEffort', 'antigravityBin']) expect(tabOf(key)).toBe('antigravity');
+    for (const key of ['codexModel', 'codexEffort', 'codexBin', 'codexNetworkAccess']) expect(tabOf(key)).toBe('codex');
   });
 });
 

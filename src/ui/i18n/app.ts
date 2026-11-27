@@ -19,6 +19,7 @@ export const app = defineMessages(
     'notification.thirdParty': 'Aguardando terceiro',
     'notification.needsYou': 'O agente precisa de você',
     'notification.enable': 'Ativar notificações',
+    'toast.cardMoved': 'Card foi para "{list}":',
 
     'banner.paused': 'O runner está pausado: nada sai da fila "{ready}" até você retomar.',
     'banner.zero': 'Execuções simultâneas em 0: nada sai da fila "{ready}" ({count}) até você escolher outro valor no contador de execuções do cabeçalho.',
@@ -85,6 +86,11 @@ export const app = defineMessages(
     'agenda.ongoing': '{title} ({start}–{end}), termina {until}.',
     'agenda.join': 'Entrar na reunião',
     'agenda.open': 'Abrir na agenda',
+
+    'unseen.one': '1 card não lido',
+    'unseen.many': '{n} cards não lidos',
+    'unseen.title': 'Cards que chegaram a "{review}" ou "{waiting}" e ainda não foram abertos, de todo o quadro (os filtros não se aplicam). Clique para ver a lista.',
+    'unseen.close': 'Fechar a lista de não lidos',
 
     'until.minutes': 'em {n} min',
     'until.hours': 'em {h}h{m}',
@@ -191,6 +197,7 @@ export const app = defineMessages(
       'notification.thirdParty': 'Waiting on others',
       'notification.needsYou': 'The agent needs you',
       'notification.enable': 'Enable notifications',
+      'toast.cardMoved': 'Card moved to "{list}":',
 
       'banner.paused': 'The runner is paused: nothing leaves the "{ready}" queue until you resume it.',
       'banner.zero': 'Concurrent runs set to 0: nothing leaves the "{ready}" queue ({count}) until you pick another value in the runs counter in the header.',
@@ -257,6 +264,11 @@ export const app = defineMessages(
       'agenda.ongoing': '{title} ({start}–{end}), ends {until}.',
       'agenda.join': 'Join the meeting',
       'agenda.open': 'Open in calendar',
+
+      'unseen.one': '1 unread card',
+      'unseen.many': '{n} unread cards',
+      'unseen.title': 'Cards that reached "{review}" or "{waiting}" and were not opened yet, across the whole board (filters do not apply). Click to see the list.',
+      'unseen.close': 'Close the unread list',
 
       'until.minutes': 'in {n} min',
       'until.hours': 'in {h}h{m}',
@@ -362,6 +374,7 @@ export const app = defineMessages(
       'notification.thirdParty': 'Esperando a terceros',
       'notification.needsYou': 'El agente te necesita',
       'notification.enable': 'Activar notificaciones',
+      'toast.cardMoved': 'La tarjeta pasó a "{list}":',
 
       'banner.paused': 'El runner está en pausa: nada sale de la cola "{ready}" hasta que lo reanudes.',
       'banner.zero': 'Ejecuciones simultáneas en 0: nada sale de la cola "{ready}" ({count}) hasta que elijas otro valor en el contador de ejecuciones del encabezado.',
@@ -428,6 +441,11 @@ export const app = defineMessages(
       'agenda.ongoing': '{title} ({start}–{end}), termina {until}.',
       'agenda.join': 'Unirse a la reunión',
       'agenda.open': 'Abrir en la agenda',
+
+      'unseen.one': '1 tarjeta sin leer',
+      'unseen.many': '{n} tarjetas sin leer',
+      'unseen.title': 'Tarjetas que llegaron a "{review}" o "{waiting}" y aún no se abrieron, de todo el tablero (los filtros no se aplican). Haz clic para ver la lista.',
+      'unseen.close': 'Cerrar la lista de sin leer',
 
       'until.minutes': 'en {n} min',
       'until.hours': 'en {h}h{m}',

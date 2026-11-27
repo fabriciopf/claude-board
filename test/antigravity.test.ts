@@ -4,11 +4,11 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { DEFAULT_CONFIG, loadConfig, paths, saveConfig } from '../src/config.js';
 import { migrate } from '../src/db/index.js';
-import { pushDenyPatterns, resolveAgent, resolveModel } from '../src/runner/agents.js';
+import { defaultAntigravityModel, pushDenyPatterns, resolveAgent, resolveEffort, resolveModel } from '../src/runner/agents.js';
 import { launchEnv, Runner } from '../src/runner/runner.js';
 import { transcriptItems } from '../src/runner/stream.js';
 import { buildApp } from '../src/server/app.js';
-import { agentLabel, modelFitsAgent, resumeCommand } from '../src/shared/domain.js';
+import { agentLabel, applyAntigravityEffort, modelFitsAgent, resumeCommand } from '../src/shared/domain.js';
 import { makeContext } from './helpers.js';
 
 // Card #159 (D93): the Board drives Antigravity CLI (`agy`) through its ACP mode, with bin/agy-acp.mjs
@@ -37,6 +37,23 @@ describe('agent and model choice', () => {
     expect(resolveModel({ model: 'claude-opus-4-6-thinking' }, config, 'antigravity')).toBe('claude-opus-4-6-thinking');
   });
 
+  it('the effort swaps the suffix of the model id: the card first, then antigravityEffort (card #308)', () => {
+    expect(resolveEffort({ effort: null }, { ...config, antigravityEffort: 'low' }, 'antigravity')).toBe('low');
+    expect(resolveEffort({ effort: 'medium' }, { ...config, antigravityEffort: 'low' }, 'antigravity')).toBe('medium');
+    // Above high there is no suffix: Extra high and Max become high.
+    expect(resolveEffort({ effort: 'max' }, config, 'antigravity')).toBe('high');
+    // Claude Code's default effort does not reach Antigravity.
+    expect(resolveEffort({ effort: null }, { ...config, defaultEffort: 'low', antigravityEffort: '' }, 'antigravity')).toBeNull();
+    expect(applyAntigravityEffort('gemini-3.8-flash-high', 'low')).toEqual({ model: 'gemini-3.8-flash-low', applied: true });
+    // A model without the suffix, or agy's own default, runs as it is.
+    expect(applyAntigravityEffort('claude-opus-4-6-thinking', 'low')).toEqual({ model: 'claude-opus-4-6-thinking', applied: false });
+    expect(applyAntigravityEffort(null, 'low')).toEqual({ model: null, applied: false });
+    expect(applyAntigravityEffort('gemini-3.8-flash-high', null)).toEqual({ model: 'gemini-3.8-flash-high', applied: false });
+    // The quota follows the model the default runs use.
+    expect(defaultAntigravityModel({ ...config, antigravityEffort: 'medium' })).toBe('gemini-3.8-flash-medium');
+    expect(defaultAntigravityModel({ ...config, antigravityModel: '' , antigravityEffort: 'medium' })).toBeNull();
+  });
+
   it('names and resume commands, including the Gemini runs of D92', () => {
     expect(agentLabel('antigravity')).toBe('Antigravity CLI');
     expect(agentLabel('gemini')).toBe('Gemini CLI');
@@ -48,8 +65,9 @@ describe('agent and model choice', () => {
   it('settings validate the agent and turn a saved "gemini" default into Antigravity', () => {
     const ctx = makeContext();
     expect(() => saveConfig(ctx.config, { defaultAgent: 'gemini' as never })).toThrow(/claude, antigravity ou codex/);
-    const saved = saveConfig(ctx.config, { defaultAgent: 'antigravity', antigravityModel: ' gemini-4-neon-high ' });
-    expect(saved).toMatchObject({ defaultAgent: 'antigravity', antigravityModel: 'gemini-4-neon-high' });
+    const saved = saveConfig(ctx.config, { defaultAgent: 'antigravity', antigravityModel: ' gemini-4-neon-high ', antigravityEffort: ' low ' });
+    expect(saved).toMatchObject({ defaultAgent: 'antigravity', antigravityModel: 'gemini-4-neon-high', antigravityEffort: 'low' });
+    expect(() => saveConfig(ctx.config, { antigravityEffort: 'max' })).toThrow(/low, medium ou high/);
     fs.writeFileSync(paths.config(), JSON.stringify({ defaultAgent: 'gemini', geminiBin: 'gemini', geminiApprovalMode: 'yolo' }));
     const loaded = loadConfig();
     expect(loaded.defaultAgent).toBe('antigravity');
@@ -173,7 +191,7 @@ describe('runner with the fake agy (ACP)', () => {
   });
 
   it('an Antigravity card runs over ACP, reports through the Board MCP and lands in review', async () => {
-    const card = queue('Doc pelo Antigravity', 'Escreva o doc. [fake:success]', { agent: 'antigravity', model: 'gemini-4-neon-high', effort: 'high' });
+    const card = queue('Doc pelo Antigravity', 'Escreva o doc. [fake:success]', { agent: 'antigravity', model: 'gemini-4-neon-high', effort: 'low' });
     await runOnce();
 
     const d = ctx.service.getCardDetail(card.id);
@@ -181,16 +199,16 @@ describe('runner with the fake agy (ACP)', () => {
     expect(d.card.title).toBe('Documento pelo Antigravity');
     expect(d.comments.map((c) => c.bodyMd)).toEqual(expect.arrayContaining(['Antigravity trabalhando.', 'O Antigravity escreveu o documento.']));
     const x = d.executions[0];
-    // Effort is Claude Code's alone: agy is not given it, so the run does not claim one (card #191).
+    // The effort swaps the suffix of the model id (card #308): the card's low turns -high into -low.
     // agy's inputTokens leave the cache out, as Claude Code's input_tokens do: 400 + 300 read from cache.
-    expect(x).toMatchObject({ status: 'success', agent: 'antigravity', model: 'gemini-4-neon-high', effort: null, tokensIn: 700, tokensOut: 100 });
+    expect(x).toMatchObject({ status: 'success', agent: 'antigravity', model: 'gemini-4-neon-low', effort: 'low', tokensIn: 700, tokensOut: 100 });
     // The session id is agy's own, learned from the stream.
     const call = prompts().at(-1);
     expect(d.card.claudeSessionId).toBe(call.sessionId);
     expect(x.claudeSessionId).toBe(call.sessionId);
     // `agy acp` takes no --model, --effort nor --mode (card #191): the model goes over ACP.
     expect(call.args).toEqual(['acp']);
-    expect(call.model).toBe('gemini-4-neon-high');
+    expect(call.model).toBe('gemini-4-neon-low');
     expect(call.mode).toBeNull();
     expect(call.entrypoint).toBeNull();
     // The Board's rules ride at the top of the prompt; the MCP server is the card's, over HTTP.

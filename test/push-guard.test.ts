@@ -1,27 +1,23 @@
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import { DEFAULT_CONFIG, type Config } from '../src/config.js';
 import { pushDenyPatterns } from '../src/runner/agents.js';
 import { buildSystemPrompt } from '../src/runner/prompt.js';
 import { HOOKS_FOLDER, protectedBranchPattern } from '../src/runner/push-guard.js';
 import { ensureWorkdir } from '../src/runner/worktree.js';
+import { tempDir } from './temp-dirs.js';
 import type { AgentId, Card, CardDetail } from '../src/shared/domain.js';
 
 // Card #194 (D96): the push lock in git itself. A pre-push hook in the card's worktree refuses what
 // the agent rules refuse, whatever agent runs the card and however it runs the command.
 
-const tmpDirs: string[] = [];
-const tempDir = (prefix: string) => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
-  tmpDirs.push(dir);
-  return dir;
-};
 
+// Without GIT_CONFIG_* inherited from a Board run (D112), which would replace the worktree's hooks folder.
+const INHERITED = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('GIT_CONFIG')));
 const ENV = {
-  ...process.env,
+  ...INHERITED,
   GIT_AUTHOR_NAME: 'Test',
   GIT_AUTHOR_EMAIL: 'test@example.com',
   GIT_COMMITTER_NAME: 'Test',
@@ -61,10 +57,6 @@ beforeAll(() => {
   const hooks = path.join(repo, '.git', 'hooks');
   fs.writeFileSync(path.join(hooks, 'pre-push'), `#!/bin/sh\ncat > /dev/null\necho "$1" >> '${marker.replace(/\\/g, '/')}'\nexit 0\n`, { mode: 0o755 });
   fs.writeFileSync(path.join(hooks, 'commit-msg'), '#!/bin/sh\nif grep -q bad "$1"; then echo "repo hook: bad message" >&2; exit 1; fi\n', { mode: 0o755 });
-});
-
-afterAll(() => {
-  for (const dir of tmpDirs) fs.rmSync(dir, { recursive: true, force: true });
 });
 
 let nextId = 9400;
@@ -185,14 +177,14 @@ describe('the hook lives in the worktree only (card #194)', () => {
     expect(main.ok, main.out).toBe(true);
   });
 
-  it('a card without a repository runs without the hook, and the prompt says so', () => {
+  it('a card without a repository has no worktree hook; the prompt names the run hook and the worktree advice', () => {
     const work = tempDir('cb-guard-ws-');
     const wd = ensureWorkdir(card('claude', { repoPath: null }), { ...config('open_pr', work), workspaceDir: work });
     expect(wd.worktreePath).toBeNull();
     expect(wd.guardNote).toBeNull();
     const detail = { card: { id: 1, title: 'x', sessionName: 'x' } } as unknown as CardDetail;
     const without = buildSystemPrompt({ config: DEFAULT_CONFIG, detail, cwd: work, branch: null } as Parameters<typeof buildSystemPrompt>[0]);
-    expect(without).toMatch(/sem worktree[\s\S]*não tem a trava de push do Board/);
+    expect(without).toMatch(/hook pre-push do Board[\s\S]*GIT_CONFIG_\*[\s\S]*sem worktree[\s\S]*worktree próprio/);
     const withWt = buildSystemPrompt({ config: DEFAULT_CONFIG, detail, cwd: work, branch: 'cb/1-x' } as Parameters<typeof buildSystemPrompt>[0]);
     expect(withWt).toMatch(/hook pre-push do Board[\s\S]*--no-verify/);
   });

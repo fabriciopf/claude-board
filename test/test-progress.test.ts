@@ -1,10 +1,10 @@
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_COMMANDS } from '../src/publish/publisher.js';
-import { countTestFiles, progressDetail, testProgress } from '../src/publish/test-progress.js';
+import { countTestFiles, failedTestFiles, progressDetail, testProgress } from '../src/publish/test-progress.js';
 import { runCommand } from '../src/publish/git.js';
+import { tempDir } from './temp-dirs.js';
 
 describe('test progress of a publication (card #213)', () => {
   it('counts finished files from the verbose reporter, once each, across split chunks', () => {
@@ -22,6 +22,20 @@ describe('test progress of a publication (card #213)', () => {
       [50, 2],
       [75, 3],
       [100, 4],
+    ]);
+  });
+
+  it('reads lines with the vitest project label (card #321)', () => {
+    const seen: [number, number][] = [];
+    const feed = testProgress(3, (p, d) => seen.push([p, d]));
+    // Captured from vitest 5.1 with the unit/integration projects of vitest.config.ts.
+    feed(' ✓ |unit| test/a.test.ts > suite > case 80ms\n');
+    feed(' \u001b[32m✓\u001b[39m \u001b[30;46m|integration|\u001b[39;49m test/b.test.ts > suite > case 53ms\n');
+    feed(' × |unit| test/c.test.ts > suite > case 9ms\n');
+    expect(seen).toEqual([
+      [33, 1],
+      [66, 2],
+      [100, 3],
     ]);
   });
 
@@ -43,7 +57,7 @@ describe('test progress of a publication (card #213)', () => {
   });
 
   it('counts the test files under test/, outside fixtures', () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cb-progress-'));
+    const dir = tempDir('cb-progress-');
     fs.mkdirSync(path.join(dir, 'test', 'sub'), { recursive: true });
     fs.mkdirSync(path.join(dir, 'test', 'fixtures'), { recursive: true });
     for (const f of ['a.test.ts', 'sub/b.test.ts', 'helpers.ts', 'fixtures/c.test.ts']) fs.writeFileSync(path.join(dir, 'test', f), '');
@@ -66,5 +80,33 @@ describe('test progress of a publication (card #213)', () => {
     const r = await runCommand(process.execPath, ['-e', "process.stdout.write('✓ test/a.test.ts\\n')"], process.cwd(), process.env, (c) => chunks.push(c));
     expect(r.ok).toBe(true);
     expect(chunks.join('')).toContain('test/a.test.ts');
+  });
+});
+
+describe('files a failed run names (card #342)', () => {
+  it('collects failed tests, failed files and the file of an unhandled error, once each', () => {
+    const out = [
+      ' FAIL  |integration| test/self-update.test.ts > automatic mode > applies (initial run)',
+      ' FAIL  |integration| test/self-update.test.ts > automatic mode > applies (1st retry)',
+      '\x1b[31m×\x1b[39m |unit| test\\board.test.ts (3 tests | 1 failed)',
+      ' ✓ |unit| test/ok.test.ts (2 tests)',
+      'This error originated in "test/shutdown.test.ts" test file. It does not mean',
+    ].join('\n');
+    expect(failedTestFiles(out)).toEqual(['test/board.test.ts', 'test/self-update.test.ts', 'test/shutdown.test.ts']);
+  });
+
+  it('returns null when the output names no file, so the caller repeats everything', () => {
+    expect(failedTestFiles('Error: Cannot find module vitest/config\n')).toBeNull();
+  });
+});
+
+describe('vitest projects (card #342)', () => {
+  it('runs each test file in exactly one project', async () => {
+    const r = await runCommand(process.execPath, ['node_modules/vitest/vitest.mjs', 'list', '--filesOnly', '--json'], process.cwd(), { ...process.env, NODE_NO_WARNINGS: '1' });
+    expect(r.ok).toBe(true);
+    const list = JSON.parse(r.out.slice(r.out.indexOf('['))) as { file: string }[];
+    const files = list.map((x) => x.file);
+    expect(new Set(files).size).toBe(files.length);
+    expect(files.length).toBe(countTestFiles(process.cwd()));
   });
 });

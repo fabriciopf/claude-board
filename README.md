@@ -101,7 +101,7 @@ claude -p --output-format stream-json --verbose [--max-turns N] [--model M] [--e
 - **Session name:** on the first run, Claude gives the task a short name (`card_rename`), which becomes the card title and the Claude Code session name. The original title and description stay on the card.
 - **Sound:** when the agent or the runner moves a card to "Waiting for you", "Waiting for a third party" or "In review", the Board plays a short chime. Moves you make yourself are silent. The header toggle turns it off for that browser; with several tabs open, only one plays.
 - **No automatic retry:** whatever fails comes back to you.
-- **Git remotes:** by default the agent neither pushes nor opens PRs (`prPolicy = "none"`). Settings can allow pushing the `cb/*` branch, or pushing and opening a draft PR, when the card asks for it. Force pushes and pushes to the branches in `protectedBranches` are always blocked, by the agent's rules and by a `pre-push` hook the Board installs in each card's worktree.
+- **Git remotes:** by default the agent neither pushes nor opens PRs (`prPolicy = "none"`). Settings can allow pushing the `cb/*` branch, or pushing and opening a draft PR, when the card asks for it. Force pushes and pushes to the branches in `protectedBranches` are always blocked, by the agent's rules and by a `pre-push` hook the Board sets for every run (through `core.hooksPath` in the run's environment) and in each card's worktree.
 - **Dangerous mode:** only with the "Perigoso: rodar sem permissões" checkbox ticked on the card, which asks for confirmation.
 
 Runs use the same Claude Code login you use interactively, so they draw on the same plan quota.
@@ -172,7 +172,7 @@ You can also turn each automation on and off, or run it now. An automation stays
 | `board_list_cards` | List by status, project (`app`), label, owner or text |
 | `card_get` | Full card: comments, checklist, links, runs |
 | `card_create` | Create a card ("turn this into a card") |
-| `card_update` | Edit title, description, priority, due date, project, repository, owner |
+| `card_update` | Edit title, description, priority, due date, project, repository, labels (`labels` replaces; `addLabels`/`removeLabels` adjust) |
 | `card_rename` | Give the task the session name (keeps the original request) |
 | `card_move` | Change list; never to "Done" |
 | `card_comment` | Progress comment |
@@ -268,8 +268,10 @@ Stored in `~/.dexm/config.json` and editable in Settings.
 | `defaultAgent` | `claude` | Agent of runs when the card does not choose: `claude` (Claude Code), `antigravity` (Antigravity CLI) or `codex` (Codex CLI) |
 | `antigravityBin` | `agy` | Antigravity CLI executable |
 | `antigravityModel` | empty | Model of Antigravity runs when the card does not choose; empty = Antigravity CLI's default (`agy models` lists them) |
+| `antigravityEffort` | empty | Effort of Antigravity runs when the card does not choose: `low`, `medium` or `high`, swapped into the `-low/-medium/-high` suffix of the model id; empty = the model's own suffix |
 | `codexBin` | `codex` | Codex CLI executable |
 | `codexModel` | empty | Model of Codex runs when the card does not choose; empty = Codex CLI's default |
+| `codexEffort` | `high` | Effort of Codex runs (`model_reasoning_effort`) when the card does not choose: `low`, `medium`, `high` or `xhigh`; empty = Codex CLI's default |
 | `codexNetworkAccess` | `true` | Whether Codex commands reach the network inside its `workspace-write` sandbox |
 | `codexConcurrency` | 2 | Concurrent Codex CLI runs, apart from the other agents: 0 to 20 or `"unlimited"` |
 | `heartbeatSeconds` | 30 | Runner interval |
@@ -284,9 +286,10 @@ Stored in `~/.dexm/config.json` and editable in Settings.
 | `worktreeRoot` | empty | Worktree folder; empty = next to the repo |
 | `prPolicy` | `none` | `none`, `push_branch` or `open_pr` |
 | `protectedBranches` | `main, master, production, preproduction*` | Branches no run ever pushes to; comma-separated, a trailing `*` matches any suffix |
-| `jiraBaseUrl` | empty | Jira site (e.g. `https://acme.atlassian.net`); a Jira link holding an issue key opens there |
+| `jiraBaseUrl` | empty | Jira site (e.g. `https://acme.atlassian.net`); a Jira link holding an issue key opens there, and a key written in a card text becomes a link |
+| `jiraProjectKeys` | empty | Jira project keys that become links in card texts (e.g. `PROD, STAYS2`); empty = any `ABC-123` key |
 | `defaultModel` | `claude-opus-5-5` | Model of runs (`--model`) when the card does not choose; empty = Claude Code's default |
-| `defaultEffort` | `high` | Effort of runs (`--effort`) when the card does not choose; empty = Claude Code's default |
+| `defaultEffort` | `high` | Effort of Claude Code runs (`--effort`) when the card does not choose; empty = Claude Code's default |
 | `classificationModel` | `haiku` | Model used by the import and by the agenda reading |
 | `agendaRefreshMinutes` | 30 | Interval of the agenda reading shown in the header; 0 = off |
 | `transcriptRetentionDays` | 90 | Retention of the Board's transcripts |
@@ -304,7 +307,7 @@ The Board's folder is `~/.dexm`; `DEXM_HOME` changes it.
 - The Board listens only on `127.0.0.1` and refuses any other host (`0.0.0.0`, a LAN address) unless started with `--insecure-lan`, which prints a warning on every start; the old `--allow-remote` still works as an alias. `dexm doctor` warns when `host` is not loopback. Requests whose `Host` header is not local get a 403, which blocks DNS rebinding.
 - There is no login: any process on your machine can call the API.
 - Transcripts may contain sensitive data. They live in `~/.dexm/transcripts` and are deleted after `transcriptRetentionDays`.
-- The push rules are best effort: they block the common `git push` forms through `--disallowedTools`, not every way a shell could reach a remote. A card with a repository also gets a `pre-push` hook in its worktree (set through the worktree's own `core.hooksPath`, the repository's hooks still run), which checks what the push actually sends. `git push --no-verify` skips it, and the agent rules refuse that form; a card without a repository runs without the hook.
+- The push rules are best effort: they block the common `git push` forms (also behind `git -C`, `git -c`, `sh -c`, and `gh pr merge` or `gh api` writes that merge or move a branch), not every way a shell could reach a remote. Every run also gets a `pre-push` hook through `GIT_CONFIG_COUNT`/`GIT_CONFIG_KEY_0`/`GIT_CONFIG_VALUE_0` in its environment, with or without a worktree (the repository's own hooks still run), which checks what the push actually sends. `git push --no-verify` and `git -c core.hooksPath=…` skip it, and the agent rules refuse those forms. Neither lock is the real one: protect `main` and the other release branches on GitHub (required PR, no force push, no bypass for admins) and give the agents a credential without push to them.
 
 ## Renamed from the previous name
 

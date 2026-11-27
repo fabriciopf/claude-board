@@ -46,7 +46,6 @@ import {
   type Status,
 } from '../shared/domain.js';
 import { appForText } from './apps.js';
-import { isConnectorId } from '../shared/connectors.js';
 import { assertStatus, checkMove, RuleError } from './rules.js';
 import { sharedContext } from './split.js';
 
@@ -94,7 +93,6 @@ export function rowToCard(r: Row, labelIds: number[] = [], repositoryIds: number
     effort: r.effort ?? null,
     agent: r.agent ?? null,
     plugins: r.plugins ?? null,
-    connectors: json<string[] | null>(r.connectors_json, null),
     resumeMode: isResumeMode(r.resume_mode) ? r.resume_mode : null,
     dangerousAllowed: bool(r.dangerous_allowed),
     claudeSessionId: r.claude_session_id ?? null,
@@ -228,18 +226,6 @@ function checkPlugins(v: string | null | undefined): string | null {
   }
 }
 
-/**
- * Connectors of a card or project (D124): a list of ids, or null to inherit. Stored as JSON, so the
- * value returned here is what goes into the column.
- */
-function checkConnectors(v: unknown): string | null {
-  if (v === null || v === undefined) return null;
-  if (!Array.isArray(v) || v.some((x) => !isConnectorId(x))) {
-    throw new RuleError('invalid_connectors', 'Conectores: uma lista de nomes (letras, números, hífen e sublinhado), ou null para herdar.', 400);
-  }
-  return JSON.stringify([...new Set(v as string[])]);
-}
-
 /** Card resume mode (D129): handoff or resume, or null/'' for the settings default. */
 function checkResumeMode(v: string | null | undefined): ResumeMode | null {
   if (!v) return null;
@@ -270,7 +256,6 @@ export interface CardInput {
   effort?: EffortLevel | null;
   agent?: AgentId | null;
   plugins?: string | null;
-  connectors?: string[] | null;
   labelIds?: number[];
   repositoryIds?: number[];
   links?: CardLink[];
@@ -296,7 +281,6 @@ export interface CardPatch {
   effort?: EffortLevel | null;
   agent?: AgentId | null;
   plugins?: string | null;
-  connectors?: string[] | null;
   resumeMode?: ResumeMode | null;
   dangerousAllowed?: boolean;
   suggestedStatus?: Status | null;
@@ -319,7 +303,6 @@ const PATCH_COLUMNS: Record<keyof CardPatch, string> = {
   effort: 'effort',
   agent: 'agent',
   plugins: 'plugins',
-  connectors: 'connectors_json',
   resumeMode: 'resume_mode',
   dangerousAllowed: 'dangerous_allowed',
   suggestedStatus: 'suggested_status',
@@ -417,7 +400,6 @@ export class BoardService {
       description: r.description,
       archived: bool(r.archived),
       plugins: r.plugins ?? '',
-      connectors: json<string[] | null>(r.connectors_json, null),
     }));
   }
 
@@ -454,7 +436,7 @@ export class BoardService {
     return this.listApps(true).find((a) => a.id === Number(r.lastInsertRowid))!;
   }
 
-  updateApp(id: number, patch: { name?: string; path?: string | null; color?: string; description?: string; archived?: boolean; plugins?: string; connectors?: string[] | null }): App {
+  updateApp(id: number, patch: { name?: string; path?: string | null; color?: string; description?: string; archived?: boolean; plugins?: string }): App {
     const current = this.listApps(true).find((a) => a.id === id);
     if (!current) throw new RuleError('not_found', `Projeto ${id} não existe.`, 404);
     const name = patch.name === undefined ? current.name : patch.name.trim();
@@ -463,7 +445,7 @@ export class BoardService {
       throw new RuleError('invalid_app', `Já existe um projeto chamado "${name}".`, 400);
     }
     this.db
-      .prepare('UPDATE apps SET name = ?, path = ?, color = ?, description = ?, archived = ?, plugins = ?, connectors_json = ? WHERE id = ?')
+      .prepare('UPDATE apps SET name = ?, path = ?, color = ?, description = ?, archived = ?, plugins = ? WHERE id = ?')
       .run(
         name,
         patch.path === undefined ? current.path : this.normalizeAppPath(patch.path),
@@ -471,7 +453,6 @@ export class BoardService {
         patch.description ?? current.description,
         (patch.archived ?? current.archived) ? 1 : 0,
         patch.plugins === undefined ? current.plugins : (checkPlugins(patch.plugins) ?? ''),
-        patch.connectors === undefined ? (current.connectors ? JSON.stringify(current.connectors) : null) : checkConnectors(patch.connectors),
         id,
       );
     this.bus.publish({ type: 'apps.changed' });
@@ -838,8 +819,8 @@ export class BoardService {
         `INSERT INTO cards (title, description_md, status, position, owner, app_id, priority, due_date, origin,
            repo_path, base_branch, permission_mode, max_turns, model, effort, agent, plugins, links_json,
            suggested_status, suggestion_confidence, suggestion_evidence, created_at, updated_at, completed_at,
-           parent_id, dangerous_allowed, automation_id, connectors_json)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           parent_id, dangerous_allowed, automation_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         title,
@@ -869,7 +850,6 @@ export class BoardService {
         extra.parentId ?? null,
         extra.dangerousAllowed ? 1 : 0,
         input.automationId ?? null,
-        checkConnectors(input.connectors),
       );
     const cardId = Number(r.lastInsertRowid);
     for (const labelId of input.labelIds ?? []) {
@@ -917,7 +897,6 @@ export class BoardService {
             effort: parent.effort,
             agent: parent.agent,
             plugins: parent.plugins,
-            connectors: parent.connectors,
             labelIds: parent.labelIds,
             repositoryIds: parent.repositoryIds,
             links: parent.links,
@@ -979,7 +958,6 @@ export class BoardService {
       if (key === 'effort') value = checkEffort(value as string | null);
       if (key === 'agent') value = checkAgent(value as string | null);
       if (key === 'plugins') value = checkPlugins(value as string | null);
-      if (key === 'connectors') value = checkConnectors(value);
       if (key === 'resumeMode') value = checkResumeMode(value as string | null);
       if (key === 'dangerousAllowed') {
         if (actor !== 'user') throw new RuleError('target_not_allowed', 'Só o usuário libera o modo sem permissões.', 403);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { duration, elapsedPct, usageRows, usageTitle, type UsageAgents } from '../src/ui/usage-rows.js';
+import { duration, elapsedPct, usageRows, usageRowsNeedMark, usageTitle, type UsageAgents } from '../src/ui/usage-rows.js';
 import type { UsageSnapshot } from '../src/shared/domain.js';
 
 const NOW = Date.parse('2026-11-21T15:00:00Z');
@@ -65,6 +65,15 @@ describe('usage ticker of the runner pill (D83)', () => {
       expect(show(usageRows(snap(0.38, 0.12), NOW, agents(1, 0)))).toEqual(['claude 5 horas 38%', 'claude Semana 12%']);
       expect(show(usageRows(snap(0.38, 0.12), NOW, agents(0, 2)))).toEqual(['antigravity Semana 57%']);
       expect(show(usageRows(snap(0.38, 0.12), NOW, agents(1, 1)))).toEqual(['claude 5 horas 38%', 'claude Semana 12%', 'antigravity Semana 57%']);
+    });
+
+    it('a line carries its mark only while the lines mix agents (card #352)', () => {
+      // One agent: the mark before "x de y" already says whose plan it is.
+      expect(usageRowsNeedMark(usageRows(snap(0.38, 0.12), NOW, agents(1, 0)))).toBe(false);
+      expect(usageRowsNeedMark(usageRows(snap(0.38, 0.12), NOW, agents(0, 2)))).toBe(false);
+      expect(usageRowsNeedMark(usageRows(snap(0.38, 0.12), NOW))).toBe(false);
+      // Both agents: the mark tells the Claude lines from the Antigravity one.
+      expect(usageRowsNeedMark(usageRows(snap(0.38, 0.12), NOW, agents(1, 1)))).toBe(true);
     });
 
     it('with no run going, the default agent, so the pill never goes blank', () => {

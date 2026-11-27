@@ -5,8 +5,7 @@ import { paths } from '../config.js';
 import type { AppContext, RunnerControl } from '../context.js';
 import { nowIso } from '../db/index.js';
 import { AUTO_CONCURRENCY, STATUS_LABELS, UNLIMITED_CONCURRENCY, runLane, type AgentId, type AgentQuotaNote, type Card, type ConcurrencyInfo, type ExecutionStatus, type Status, type UsageSnapshot } from '../shared/domain.js';
-import { agentName, buildLaunch, isQuotaError, resolveAgent, type Launch } from './agents.js';
-import { resolveConnectors } from '../shared/connectors.js';
+import { agentName, buildLaunch, defaultAntigravityModel, isQuotaError, resolveAgent, type Launch } from './agents.js';
 import { AGY_RATE_LOOKBACK_MINUTES, AgyQuotaTracker, decideAgyAuto, limitingWindow, quotaFor } from './agy-quota.js';
 import { BurnMeter, decideAuto, typicalRunMinutes, type RunTiming } from './auto-concurrency.js';
 import { antigravityInUse } from '../service/runner-state.js';
@@ -16,6 +15,7 @@ import { applyEvent, emptyState, parseLine, type StreamState } from './stream.js
 import { FileTail, readTail } from './tail.js';
 import { gitHandoff, useHandoff, type HandoffInfo } from './handoff.js';
 import { ensureWorkdir } from './worktree.js';
+import { installRunHooks } from './push-guard.js';
 import { boardEnvVars, CLI_NAME } from '../shared/brand.js';
 
 interface ActiveRun {
@@ -121,7 +121,7 @@ export class Runner implements RunnerControl {
 
   constructor(private ctx: AppContext) {
     this.agyQuota = new AgyQuotaTracker(ctx.service, ctx.bus, () => this.ctx.config, path.join(paths.runs(), 'agy-quota'), (reading) => {
-      const q = quotaFor(reading, this.ctx.config.antigravityModel || null);
+      const q = quotaFor(reading, defaultAntigravityModel(this.ctx.config));
       if (q) this.agyMeter.sampleWindow(1 - q.quota.remaining, q.quota.resetsAt, Date.parse(reading.observedAt));
     });
   }
@@ -223,7 +223,7 @@ export class Runner implements RunnerControl {
     if (setting !== AUTO_CONCURRENCY) return { mode: 'fixed', limit: Math.max(0, Math.floor(Number(setting)) || 0), reason: '' };
     return decideAgyAuto({
       reading: this.agyQuota.get(),
-      model: this.ctx.config.antigravityModel || null,
+      model: defaultAntigravityModel(this.ctx.config),
       now,
       rate: this.agyMeter.measure(now),
       runs: this.runTiming(now, 'antigravity'),
@@ -248,7 +248,7 @@ export class Runner implements RunnerControl {
 
   /** The quota that limits the Antigravity runs, as one window for the header (card #198 review). */
   antigravityWindow(now = Date.now()) {
-    return limitingWindow(this.agyQuota.get(), this.ctx.config.antigravityModel || null, now);
+    return limitingWindow(this.agyQuota.get(), defaultAntigravityModel(this.ctx.config), now);
   }
 
   /**
@@ -502,6 +502,9 @@ export class Runner implements RunnerControl {
 
     const runDir = path.join(paths.runs(), String(run.executionId));
     fs.mkdirSync(runDir, { recursive: true });
+    // The push lock in git for this run, with or without a worktree (D112): core.hooksPath through the environment.
+    const runHooks = installRunHooks(runDir, card.id, config);
+    if (runHooks.note) service.addComment(card.id, { author: 'system', kind: 'comment', executionId: run.executionId, bodyMd: runHooks.note });
     const boardUrl = `http://127.0.0.1:${config.port}`;
     const sessionId = resumeId ?? randomUUID();
     const launch = buildLaunch(agent, {
@@ -519,8 +522,6 @@ export class Runner implements RunnerControl {
       sessionName: service.getCard(card.id).sessionName,
       addDirs: workdir.addDirs,
       app: card.appId ? (service.listApps(true).find((a) => a.id === card.appId) ?? null) : null,
-      // The card's connectors, else the project's, else the settings' (D124).
-      connectors: resolveConnectors(service.getCard(card.id), promptInput.apps.find((a) => a.id === card.appId), config.defaultConnectors),
     });
     db.prepare('UPDATE executions SET model = ?, effort = ? WHERE id = ?').run(launch.model, launch.effort, run.executionId);
 
@@ -533,6 +534,7 @@ export class Runner implements RunnerControl {
     service.setRunFields(card.id, { claudeSessionId: knownSession });
 
     const env = launchEnv(process.env, launch, {
+      ...runHooks.env,
       ...boardEnvVars({ CARD_ID: String(card.id), EXECUTION_ID: String(run.executionId), URL: boardUrl }),
     });
 

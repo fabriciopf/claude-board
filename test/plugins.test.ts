@@ -179,20 +179,18 @@ describe('runs get --settings with the resolved plugins', () => {
     expect(fs.readFileSync(path.join(claudeHome, 'settings.json'), 'utf8')).toBe(before);
   });
 
-  it('with connectors on (D124), plugins go into the same --settings file: Claude Code reads only one', async () => {
-    const args = await run({ connectors: ['slack'] });
-    expect(args.filter((a) => a === '--settings')).toHaveLength(1);
-    const s = settingsOf(args);
-    expect(path.basename(flag(args, '--settings')!)).toBe('mcp-settings.json');
-    expect(Array.isArray(s.allowedMcpServers)).toBe(true);
-    expect(s.enabledPlugins).toMatchObject({ 'ignite@synced': false, 'vercel@claude-plugins-official': false });
-  });
-
-  it('with connectors on and no plugin rule, the connectors file stays as it was', async () => {
-    ctx.config.runPlugins = '';
-    const args = await run({ connectors: ['slack'] });
-    expect(args.filter((a) => a === '--settings')).toHaveLength(1);
-    expect(settingsOf(args).enabledPlugins).toBeUndefined();
+  it('every run reaches every active connector (D131): no strict MCP config, no allowlist', async () => {
+    const app2 = ctx.service.createApp({ name: 'Projeto' });
+    for (const args of [await run(), await run({ appId: app2.id, plugins: '+vercel' })]) {
+      expect(args).toContain('--mcp-config');
+      expect(args).not.toContain('--strict-mcp-config');
+      const settings = flag(args, '--settings');
+      if (settings) {
+        const s = JSON.parse(fs.readFileSync(settings, 'utf8'));
+        expect(s.allowedMcpServers).toBeUndefined();
+        expect(s.deniedMcpServers).toBeUndefined();
+      }
+    }
   });
 });
 

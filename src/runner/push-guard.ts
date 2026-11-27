@@ -9,7 +9,10 @@ import { protectedBranchList, type Config } from '../config.js';
  * the agent runs and however it runs it. The first lock stays with each agent (`disallowedTools` for
  * Claude Code, `pushDenyPatterns` in the Antigravity ACP client).
  *
- * Only the card's worktree gets it: `core.hooksPath` is set in the worktree's own config
+ * Since D112 every run also gets it through its environment (`installRunHooks`, below), so a card
+ * without a worktree, or a push from another repository, is covered too.
+ *
+ * In the card's worktree, `core.hooksPath` is set in the worktree's own config
  * (`extensions.worktreeConfig`), never in the repository's. The repository's own hooks keep running
  * there: the Board's hook folder forwards every hook the repository has to the original one.
  */
@@ -102,6 +105,110 @@ function forwardHook(target: string): string {
 [ -f ${t} ] && [ -x ${t} ] || exit 0
 exec ${t} "$@"
 `;
+}
+
+// ---------- the hook for every run, through the environment (D112) ----------
+
+/** The folder, inside the run's own folder (`~/.dexm/runs/<id>`), that the run's core.hooksPath points to. */
+export const RUN_HOOKS_FOLDER = 'git-hooks';
+
+/**
+ * Client-side hooks the run's folder forwards to the repository's own. Left out: reference-transaction
+ * (runs on every ref update, so a forwarder there would slow every git command) and fsmonitor-watchman
+ * (configured by core.fsmonitor, not looked up in the hooks folder).
+ */
+const FORWARDED_HOOKS = [
+  'applypatch-msg',
+  'pre-applypatch',
+  'post-applypatch',
+  'pre-commit',
+  'pre-merge-commit',
+  'prepare-commit-msg',
+  'commit-msg',
+  'post-commit',
+  'pre-rebase',
+  'post-checkout',
+  'post-merge',
+  'post-rewrite',
+  'pre-auto-gc',
+  'push-to-checkout',
+  'sendemail-validate',
+  'post-index-change',
+];
+
+/**
+ * Sets `orig` to the hooks folder the repository uses without the Board, read when the hook runs
+ * (the run's hook serves any repository the agent works in): the last core.hooksPath that neither
+ * comes from the environment or `-c` (scope "command") nor is a worktree's Board folder, else
+ * `<common git dir>/hooks`. Relative paths are relative to where git runs the hook.
+ */
+const RESOLVE_ORIGINAL = `orig=$(git config --show-scope --get-all core.hooksPath 2>/dev/null | grep -v '^command' | grep -v '${HOOKS_FOLDER}' | tail -n 1 | cut -f 2-)
+if [ -z "$orig" ]; then
+  common=$(git rev-parse --git-common-dir 2>/dev/null) || exit 0
+  orig="$common/hooks"
+fi
+case "$orig" in "~/"*) orig="$HOME/\${orig#\\~/}" ;; esac`;
+
+function runPrePushHook(rulesFile: string): string {
+  return `#!/bin/sh
+# Deus Ex Machina (D112): push lock of this run, set by core.hooksPath in the run's environment, so it
+# holds in any repository the agent pushes from, with or without the card's worktree. The Board
+# writes this file at the start of the run. Then it runs the repository's own pre-push hook, if any.
+updates=$(cat)
+[ -n "$updates" ] && updates="$updates
+"
+printf '%s' "$updates" | ${sq(slash(process.execPath))} ${sq(slash(guardScript()))} ${sq(slash(rulesFile))} "$@" || exit 1
+${RESOLVE_ORIGINAL}
+if [ -f "$orig/pre-push" ] && [ -x "$orig/pre-push" ]; then
+  printf '%s' "$updates" | "$orig/pre-push" "$@"
+  exit $?
+fi
+exit 0
+`;
+}
+
+function runForwardHook(name: string): string {
+  return `#!/bin/sh
+# Deus Ex Machina (D112): forwards to the repository's own hook; this run's hooks folder is the Board's.
+${RESOLVE_ORIGINAL}
+[ -f "$orig/${name}" ] && [ -x "$orig/${name}" ] || exit 0
+exec "$orig/${name}" "$@"
+`;
+}
+
+/**
+ * The variables that point core.hooksPath at `dir`, after any GIT_CONFIG_* pairs already in `base`.
+ * They take precedence over every config file, the worktree's included; only `git -c` and
+ * GIT_CONFIG_PARAMETERS take precedence over them (measured on card #219), and the agent rules deny both.
+ */
+export function hooksPathEnv(base: NodeJS.ProcessEnv, dir: string): Record<string, string> {
+  const n = /^\d+$/.test(base.GIT_CONFIG_COUNT ?? '') ? Number(base.GIT_CONFIG_COUNT) : 0;
+  return { GIT_CONFIG_COUNT: String(n + 1), [`GIT_CONFIG_KEY_${n}`]: 'core.hooksPath', [`GIT_CONFIG_VALUE_${n}`]: slash(dir) };
+}
+
+/**
+ * Writes the run's hooks folder and returns the variables that make git use it, for every run, with
+ * or without a worktree (D112). `note` says why it could not be written: the run goes on with the
+ * agent rules (and the worktree's hook, when there is one), and the caller says so on the card.
+ */
+export function installRunHooks(
+  runDir: string,
+  cardId: number,
+  config: Pick<Config, 'prPolicy' | 'protectedBranches'>,
+  base: NodeJS.ProcessEnv = process.env,
+): { env: Record<string, string>; note: string | null } {
+  const dir = path.join(runDir, RUN_HOOKS_FOLDER);
+  try {
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.mkdirSync(dir, { recursive: true });
+    const rulesFile = path.join(dir, 'push-rules.json');
+    fs.writeFileSync(rulesFile, JSON.stringify(pushRules(cardId, config), null, 2) + '\n');
+    fs.writeFileSync(path.join(dir, 'pre-push'), runPrePushHook(rulesFile), { mode: 0o755 });
+    for (const name of FORWARDED_HOOKS) fs.writeFileSync(path.join(dir, name), runForwardHook(name), { mode: 0o755 });
+  } catch (err) {
+    return { env: {}, note: `A trava de push no git desta execução (hook pre-push pelo ambiente) não foi instalada: não consegui gravar \`${dir}\`: ${(err as Error).message}.` };
+  }
+  return { env: hooksPathEnv(base, dir), note: null };
 }
 
 /**

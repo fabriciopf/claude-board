@@ -1,7 +1,9 @@
 import fs from 'node:fs';
+import path from 'node:path';
 import spawn from 'cross-spawn';
 import type { FastifyInstance, FastifyReply } from 'fastify';
-import { saveConfig, tokenWeightsOf } from '../config.js';
+import { expandHome, saveConfig, tokenWeightsOf } from '../config.js';
+import { openCommand, resolveOpenTarget } from '../service/open-path.js';
 import type { AppContext } from '../context.js';
 import { runDoctor } from '../doctor.js';
 import { transcriptItems } from '../runner/stream.js';
@@ -9,8 +11,6 @@ import { handleHook, type HookInput } from '../hooks/handler.js';
 import type { Importer } from '../importer/importer.js';
 import { hooksStatus, installHooks, setCleanupPeriodDays, uninstallHooks } from '../hooks/install.js';
 import { discoverApps } from '../service/apps.js';
-import { connectableUserServers, readUserMcpServers } from '../runner/user-mcp.js';
-import { CLAUDE_AI_CONNECTORS } from '../shared/connectors.js';
 import { interpretRequest } from '../service/automation-nl.js';
 import { automationsOf } from '../service/automations.js';
 import { registerImages } from './images.js';
@@ -220,6 +220,28 @@ export async function registerApi(app: FastifyInstance, ctx: AppContext): Promis
     return { ok: true, dir };
   });
 
+  // A local path written in a card's text (card #309): a file opens in VS Code, a folder in the file
+  // manager. A relative path is looked up in the card's folders, then in the workspace.
+  app.post('/api/open-path', async (req) => {
+    const body = (req.body ?? {}) as Body;
+    const raw = String(body.path ?? '');
+    const dirs: (string | null | undefined)[] = [];
+    if (body.cardId !== undefined && body.cardId !== null) {
+      const detail = s.getCardDetail(num(body.cardId));
+      const card = detail.card;
+      dirs.push(card.worktreePath, detail.executions.at(-1)?.cwd, card.repoPath);
+      if (card.appId) dirs.push(s.listApps(true).find((a) => a.id === card.appId)?.path);
+    }
+    dirs.push(ctx.config.workspaceDir ? path.resolve(expandHome(ctx.config.workspaceDir)) : null);
+    const target = resolveOpenTarget(raw, dirs);
+    if (!target) throw new RuleError('path_not_found', `Caminho não encontrado: ${raw}`, 404);
+    const { cmd, args } = openCommand(target);
+    const child = spawn(cmd, args, { detached: true, stdio: 'ignore', windowsHide: true });
+    child.on('error', () => undefined);
+    child.unref();
+    return { ok: true, path: target.path, kind: target.kind };
+  });
+
   app.get<{ Params: Params }>('/api/executions/:id/transcript', async (req) => {
     const row = ctx.db.prepare('SELECT transcript_path FROM executions WHERE id = ?').get(num(req.params.id)) as { transcript_path: string | null } | undefined;
     if (!row) throw new RuleError('not_found', 'Execução não existe.', 404);
@@ -232,11 +254,6 @@ export async function registerApi(app: FastifyInstance, ctx: AppContext): Promis
   // ---------- apps & labels ----------
 
   app.get('/api/apps', async () => s.listApps(true));
-  // Connectors a card or project can turn on (D124): the claude.ai catalog and the user's own servers.
-  app.get('/api/connectors', async () => ({
-    catalog: CLAUDE_AI_CONNECTORS.map((c) => ({ id: c.id, label: c.label })),
-    userServers: connectableUserServers(readUserMcpServers(), `http://127.0.0.1:${ctx.config.port}`),
-  }));
   app.get('/api/apps/discover', async () => discoverApps(ctx.config.workspaceDir, s.listApps(true)));
   app.post('/api/apps', async (req) => s.createApp((req.body ?? {}) as any));
   app.patch<{ Params: Params }>('/api/apps/:id', async (req) => s.updateApp(num(req.params.id), (req.body ?? {}) as Body));

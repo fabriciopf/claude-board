@@ -9,7 +9,8 @@ import { mergeDecisions } from './decisions.js';
 import { Mirror, type MirrorOptions } from './mirror.js';
 import { canonicalDir, git, gitShow, linkDir, runCommand, samePath, spawnDetached, syncDir, unlinkJunction, type CmdResult } from './git.js';
 import { CLI_NAME, isBoardEnvKey } from '../shared/brand.js';
-import { countTestFiles, progressDetail, testProgress } from './test-progress.js';
+import { countTestFiles, failedTestFiles, progressDetail, testProgress } from './test-progress.js';
+import { INTEGRATION_TESTS, testScope, UNIT_ONLY_ARGS, type TestScope } from './test-scope.js';
 
 /**
  * Publication of the Board's own improvements (D42). A delivered card of the Board's repo enters the
@@ -515,11 +516,13 @@ export class Publisher {
       // Classify each branch by what it changes relative to the publish branch.
       let kind: PublishKind = 'ui';
       let needsInstall = false;
+      const changed = new Set<string>();
       for (const e of batch) {
         if (!git(repo, ['rev-parse', '--verify', '--quiet', `refs/heads/${e.branch}`]).ok) throw new PublishError(`A branch \`${e.branch}\` não existe.`, e.id);
         const diff = git(repo, ['diff', '--name-only', `${target}...${e.branch}`]);
         if (!diff.ok) throw new PublishError(`Não consegui comparar \`${e.branch}\` com \`${target}\`: ${diff.out}`, e.id);
         const files = diff.out.split('\n').filter(Boolean);
+        for (const f of files) changed.add(f);
         const k: PublishKind = isScreenOnly(files) ? 'ui' : 'server';
         if (k === 'server') kind = 'server';
         if (files.some((f) => PACKAGE_FILES.includes(f))) needsInstall = true;
@@ -562,7 +565,10 @@ export class Publisher {
       const env = { ...process.env };
       for (const k of Object.keys(env)) if (isBoardEnvKey(k) || k.startsWith('FAKE_CLAUDE')) delete env[k];
       if (needsInstall) await this.step(tmp, 'Instalando dependências', this.commands.install, env);
-      await this.testStep(tmp, env);
+      // Card #347: a screen-only batch runs only the unit project; anything else runs the whole suite.
+      const scope = testScope([...changed]);
+      this.log(`escopo dos testes: ${scope.scope === 'unit' ? 'só unitários (--project unit)' : 'suíte completa'}; ${scope.reason}`);
+      await this.testStep(tmp, env, scope);
       await this.step(tmp, kind === 'ui' ? 'Compilando a tela' : 'Compilando', kind === 'ui' ? this.commands.buildUi : this.commands.build, env);
       const builtUi = path.join(tmp, 'dist', 'ui');
       if (!fs.existsSync(path.join(builtUi, 'index.html'))) throw new PublishError('O build não gerou `dist/ui/index.html`.');
@@ -648,17 +654,25 @@ export class Publisher {
   }
 
   /** Tests, with one serial rerun before blaming the batch (card #110). */
-  private async testStep(cwd: string, env: NodeJS.ProcessEnv): Promise<void> {
-    const label = 'Rodando os testes';
+  private async testStep(cwd: string, env: NodeJS.ProcessEnv, scope: TestScope): Promise<void> {
+    const unit = scope.scope === 'unit';
+    const label = unit ? 'Rodando os testes unitários (lote só de tela)' : 'Rodando os testes';
     this.setPhase('preparing', label);
-    const [cmd, args] = this.commands.test;
-    const first = await this.run(cmd, args, cwd, env, this.progress(cwd, label));
+    const [cmd, baseArgs] = this.commands.test;
+    const args = unit ? [...baseArgs, ...UNIT_ONLY_ARGS] : baseArgs;
+    const total = unit ? countTestFiles(cwd) - INTEGRATION_TESTS.filter((f) => fs.existsSync(path.join(cwd, f))).length : undefined;
+    const first = await this.run(cmd, args, cwd, env, this.progress(cwd, label, total));
     if (first.ok) return;
-    this.log(`testes falharam na primeira rodada; repetindo um arquivo por vez.${fence(first.out)}`);
-    const [retryCmd, retryArgs] = this.commands.testRetry;
-    const retryLabel = 'Repetindo os testes, um arquivo por vez';
+    // Card #342: repeat only the files that failed; the whole suite again took 11 to 55 minutes.
+    const failed = failedTestFiles(first.out);
+    const which = failed ? `${failed.length} arquivo(s) que falharam` : 'todos os arquivos';
+    this.log(`testes falharam na primeira rodada; repetindo ${which}, um por vez.${fence(first.out)}`);
+    const [retryCmd, baseRetryArgs] = this.commands.testRetry;
+    const scopedRetry = unit ? [...baseRetryArgs, ...UNIT_ONLY_ARGS] : baseRetryArgs;
+    const retryArgs = failed ? [...scopedRetry, ...failed] : scopedRetry;
+    const retryLabel = failed ? `Repetindo ${which}, um por vez` : 'Repetindo os testes, um arquivo por vez';
     this.setPhase('preparing', retryLabel);
-    const second = await this.run(retryCmd, retryArgs, cwd, env, this.progress(cwd, retryLabel));
+    const second = await this.run(retryCmd, retryArgs, cwd, env, this.progress(cwd, retryLabel, failed?.length ?? total));
     if (second.ok) return;
     const shown = [retryCmd, ...retryArgs].join(' ');
     throw new PublishError(`Rodando os testes: \`${shown}\` falhou também na segunda rodada, um arquivo por vez.${fence(second.out)}`);
@@ -668,8 +682,8 @@ export class Publisher {
    * Follows the test output and shows the share of finished files in the step ("Rodando os testes:
    * 42% (33 de 79 arquivos)", card #213). Only the detail changes: no log line per percent.
    */
-  private progress(cwd: string, label: string): (chunk: string) => void {
-    const total = countTestFiles(cwd);
+  private progress(cwd: string, label: string, files?: number): (chunk: string) => void {
+    const total = files ?? countTestFiles(cwd);
     return testProgress(total, (percent, done) => {
       this.detail = progressDetail(label, percent, done, total);
       this.changed();

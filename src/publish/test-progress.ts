@@ -10,8 +10,13 @@ import path from 'node:path';
  */
 
 const TEST_FILE = /\.test\.[cm]?[jt]sx?$/;
-/** A finished-file line: a result mark, then the file path ("✓ test/a.test.ts", "❯ test/b.test.ts", "× test/c.test.ts"). */
-const RESULT_LINE = /(?:^|\s)[✓✔×✗❯↓]\s+(\S+\.test\.[cm]?[jt]sx?)\b/;
+/**
+ * A finished-file line: a result mark, an optional vitest project label, then the file path
+ * ("✓ test/a.test.ts", "❯ |unit| test/b.test.ts", "× test/c.test.ts"). Since vitest.config.ts split the
+ * suite into the `unit` and `integration` projects (card #228), every line carries the label; the old
+ * pattern did not expect it and the step stayed at 0% for the whole run (card #321).
+ */
+const RESULT_LINE = /(?:^|\s)[✓✔×✗❯↓]\s+(?:\|[^|\s]+\|\s+)?(\S+\.test\.[cm]?[jt]sx?)\b/;
 // eslint-disable-next-line no-control-regex
 const ANSI = /\x1b\[[0-9;]*m/g;
 
@@ -59,6 +64,27 @@ export function testProgress(total: number, onPercent: (percent: number, done: n
       onPercent(percent, done);
     }
   };
+}
+
+/** A failed test ("FAIL  |integration| test/a.test.ts > suite > case") or a failed file ("× test/a.test.ts"). */
+const FAILED_LINE = /(?:^|\s)(?:FAIL|[×✗])\s+(?:\|[^|\s]+\|\s+)?(\S+\.test\.[cm]?[jt]sx?)\b/;
+/** An unhandled error vitest attributes to a file: it fails the run with every test green. */
+const ORIGIN_LINE = /originated in "(\S+\.test\.[cm]?[jt]sx?)" test file/;
+
+/**
+ * The test files a failed run names (card #342): the second run of a publication repeats only these,
+ * instead of the whole suite one file at a time, which took 11 to 55 minutes for a single failed
+ * test. Returns null when the output names no file (a crash, a config error), and the caller then
+ * repeats everything.
+ */
+export function failedTestFiles(out: string): string[] | null {
+  const files = new Set<string>();
+  for (const raw of out.split(/\r?\n/)) {
+    const line = raw.replace(ANSI, '');
+    const m = FAILED_LINE.exec(line) ?? ORIGIN_LINE.exec(line);
+    if (m) files.add(m[1].replace(/\\/g, '/'));
+  }
+  return files.size ? [...files].sort() : null;
 }
 
 /** "Rodando os testes: 42% (33 de 79 arquivos)". */

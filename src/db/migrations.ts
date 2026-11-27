@@ -360,7 +360,7 @@ UPDATE cards SET agent = 'antigravity' WHERE agent = 'gemini';
 `,
   },
   {
-    // MCP connectors per card and per project (D124), as a JSON list; null = inherit.
+    // MCP connectors per card and per project (D124). Unused since D131 (card #246): every run loads every active connector.
     version: 17,
     sql: `
 ALTER TABLE cards ADD COLUMN connectors_json TEXT;

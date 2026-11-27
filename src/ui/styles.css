@@ -711,15 +711,13 @@ pre {
   overflow: hidden;
 }
 
-/* Time gone by since the last reset (card #206): a white tick, outlined so it shows on the light theme too. */
+/* Time gone by since the last reset (card #206): a thin white tick with no outline (comment on card #206). */
 .usage-bar > .usage-elapsed {
   position: absolute;
   top: 0;
   bottom: 0;
-  width: 2px;
-  margin-left: -1px;
+  width: 1px;
   background: #fff;
-  box-shadow: 0 0 0 0.5px rgb(0 0 0 / 0.35);
 }
 
 .usage-bar > .usage-fill {
@@ -2429,6 +2427,22 @@ html[data-busy] body::before {
   color: #fff;
 }
 
+/* Card the system moved into a list that needs the user (card #335): message, then the card as a link. */
+.toast.with-card {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.toast-card {
+  color: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .kbd {
   font-family: ui-monospace, Consolas, monospace;
   font-size: 11px;
@@ -3101,19 +3115,62 @@ html[data-busy] body::before {
   flex-wrap: wrap;
 }
 
-/* Connectors of a card or project (D124). */
-.linklike {
-  background: none;
-  border: 0;
-  padding: 0;
-  color: var(--accent);
-  cursor: pointer;
-  font: inherit;
-  text-decoration: underline;
-}
-.app-connectors {
-  flex-basis: 100%;
-}
 .app-row {
   flex-wrap: wrap;
+}
+
+/* ---------- unread cards in the header (card #350) ---------- */
+
+.counter.unseen-chip {
+  flex: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.counter.unseen-chip svg {
+  color: var(--accent);
+}
+
+.counter.unseen-chip:hover,
+.counter.unseen-chip.active {
+  box-shadow: inset 0 0 0 1px var(--text-muted);
+}
+
+.unseen-panel {
+  right: auto;
+  width: min(420px, calc(100vw - 32px));
+}
+
+.unseen-list {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.unseen-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.unseen-item:hover,
+.unseen-item:focus-visible {
+  background: var(--surface-2);
+}
+
+.unseen-item-title {
+  overflow-wrap: anywhere;
 }

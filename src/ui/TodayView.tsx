@@ -18,6 +18,14 @@ export function showPendingTab(count: number | null): count is number {
   return count !== null && count > 0;
 }
 
+/**
+ * Count in the header badge. With a search or filter on and fewer items shown than exist (card #322),
+ * it reads "6 de 67", so a small number is not taken for everything pending.
+ */
+export function pendingBadgeText(shown: number, total: number, filtered: boolean): string {
+  return filtered && shown !== total ? t('board.today.badgeOf', { shown, total }) : String(total);
+}
+
 interface Item {
   card: CardSummary;
   reason: string;

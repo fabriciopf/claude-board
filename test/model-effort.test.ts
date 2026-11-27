@@ -119,6 +119,9 @@ describe('model and effort of the runs', () => {
     const card = ctx.service.createCard({ title: 'Dividir', model: 'claude-sonnet-5-5', effort: 'xhigh' }, 'user', 'manual');
     const { children } = ctx.service.splitCard(card.id, { tasks: [{ title: 'Um' }, { title: 'Dois' }] }, 'claude');
     for (const child of children) expect(child).toMatchObject({ model: 'claude-sonnet-5-5', effort: 'xhigh' });
+    // Card #237: the tasks land in "ready"; left there, a later tick ran them as fake agents that kept
+    // writing into the temp home after this file ended and removed it.
+    for (const child of children) ctx.service.moveCard(child.id, { status: 'backlog' }, 'user');
   });
 
   it('the MCP sets and shows the model and effort of a card', async () => {

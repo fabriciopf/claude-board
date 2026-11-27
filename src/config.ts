@@ -1,10 +1,10 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { AUTO_CONCURRENCY, DEFAULT_TOKEN_WEIGHTS, type TokenWeights, DEFAULT_ANTIGRAVITY_CONCURRENCY, SELF_UPDATE_MODES, UNLIMITED_CONCURRENCY, DEFAULT_RUN_EFFORT, DEFAULT_RUN_MODEL, MAX_CONCURRENCY, isAgentId, isEffortLevel, isResumeMode, isValidModelId, type AgentConcurrencySetting, type AgentId, type ConcurrencySetting, type ResumeMode, type SelfUpdateMode } from './shared/domain.js';
+import { AUTO_CONCURRENCY, DEFAULT_TOKEN_WEIGHTS, type TokenWeights, DEFAULT_ANTIGRAVITY_CONCURRENCY, SELF_UPDATE_MODES, UNLIMITED_CONCURRENCY, DEFAULT_RUN_EFFORT, DEFAULT_RUN_MODEL, MAX_CONCURRENCY, ANTIGRAVITY_EFFORT_LEVELS, CODEX_EFFORT_LEVELS, codexEffort, isAgentId, isEffortLevel, isResumeMode, isValidModelId, type AgentConcurrencySetting, type AgentId, type ConcurrencySetting, type ResumeMode, type SelfUpdateMode } from './shared/domain.js';
 import { boardEnv, HOME_DIR_NAME, LEGACY_HOME_DIR_NAME } from './shared/brand.js';
+import { jiraKeyList } from './shared/jira.js';
 import { normalizePluginRules } from './shared/plugins.js';
-import { parseConnectorList } from './shared/connectors.js';
 
 export interface Config {
   port: number;
@@ -20,12 +20,19 @@ export interface Config {
   antigravityArgsPrefix: string[];
   /** Model of every Antigravity run whose card does not choose one; '' = Antigravity CLI's own default. */
   antigravityModel: string;
+  /**
+   * Effort of every Antigravity run whose card does not choose one (card #308): swaps the
+   * `-low/-medium/-high` suffix of the model id; '' = the model's own suffix.
+   */
+  antigravityEffort: string;
   /** Codex CLI executable (D125). */
   codexBin: string;
   /** Extra arguments placed before every Codex CLI argument (used by the fake codex in tests). */
   codexArgsPrefix: string[];
   /** Model of every Codex run whose card does not choose one; '' = Codex CLI's own default. */
   codexModel: string;
+  /** Effort of every Codex run whose card does not choose one, as `model_reasoning_effort` (card #308); '' = Codex CLI's own default. */
+  codexEffort: string;
   /**
    * Whether the commands of a Codex run reach the network inside its workspace-write sandbox (D125).
    * Off, `git push`, `gh` and `npm install` fail there; on, the push lock is the worktree hook plus
@@ -81,6 +88,8 @@ export interface Config {
   protectedBranches: string;
   /** Base URL of the Jira site, e.g. https://acme.atlassian.net; a "jira" link with an issue key opens there. '' = plain text. */
   jiraBaseUrl: string;
+  /** Jira project keys that link in the card texts ("PROD, STAYS2"); '' = any KEY-123 (card #309). */
+  jiraProjectKeys: string;
   /** CLAUDE_CODE_ENTRYPOINT of every run; 'claude-vscode' unlocks the Artifact tool (D60); '' = inherit the Board's own. */
   runnerEntrypoint: string;
   /** Minutes between reads of the calendar for the header (D62); 0 = off. */
@@ -111,8 +120,6 @@ export interface Config {
    * own on top. '' = the user's settings.json decides alone.
    */
   runPlugins: string;
-  /** MCP connectors of every run whose card and project do not choose (D124), comma-separated; '' = only the Board's server. */
-  defaultConnectors: string;
 }
 
 export const DEFAULT_CONFIG: Config = {
@@ -124,9 +131,12 @@ export const DEFAULT_CONFIG: Config = {
   antigravityBin: 'agy',
   antigravityArgsPrefix: [],
   antigravityModel: '',
+  antigravityEffort: '',
   codexBin: 'codex',
   codexArgsPrefix: [],
   codexModel: '',
+  // Before card #308 Codex took the Claude Code effort; 'high' is that default.
+  codexEffort: DEFAULT_RUN_EFFORT,
   codexNetworkAccess: true,
   codexConcurrency: 2,
   claudeHome: '~/.claude',
@@ -159,6 +169,7 @@ export const DEFAULT_CONFIG: Config = {
   publishRestartMode: '',
   protectedBranches: 'main, master, production, preproduction*',
   jiraBaseUrl: '',
+  jiraProjectKeys: '',
   runnerEntrypoint: 'claude-vscode',
   agendaRefreshMinutes: 30,
   mirrorRepoPath: '',
@@ -171,7 +182,6 @@ export const DEFAULT_CONFIG: Config = {
   selfUpdateSource: '',
   selfUpdateAuthors: '',
   runPlugins: '',
-  defaultConnectors: '',
 };
 
 /** The author e-mails of selfUpdateAuthors as a lowercase list. */
@@ -256,6 +266,9 @@ export function loadConfig(): Config {
   if (!('defaultModel' in known) && typeof legacyModel === 'string' && legacyModel.trim()) known.defaultModel = legacyModel.trim();
   // Gemini CLI (D92) gave way to Antigravity CLI (D93): a saved "gemini" default becomes Antigravity; the gemini* keys drop out above.
   if ((known as { defaultAgent?: unknown }).defaultAgent === 'gemini') known.defaultAgent = 'antigravity';
+  // Before card #308 Codex ran with the Claude Code effort: a saved one carries over to Codex.
+  const legacyEffort = (known as { defaultEffort?: unknown }).defaultEffort;
+  if (!('codexEffort' in known) && typeof legacyEffort === 'string') known.codexEffort = codexEffort(legacyEffort) ?? '';
   return { ...DEFAULT_CONFIG, ...known };
 }
 
@@ -305,9 +318,13 @@ export function saveConfig(current: Config, patch: Partial<Config>): Config {
   next.antigravityBin = String(next.antigravityBin ?? '').trim() || DEFAULT_CONFIG.antigravityBin;
   next.antigravityModel = String(next.antigravityModel ?? '').trim();
   if (next.antigravityModel && !isValidModelId(next.antigravityModel)) throw new Error(`Modelo do Antigravity inválido: ${next.antigravityModel}`);
+  next.antigravityEffort = String(next.antigravityEffort ?? '').trim();
+  if (next.antigravityEffort && !(ANTIGRAVITY_EFFORT_LEVELS as string[]).includes(next.antigravityEffort)) throw new Error('Effort do Antigravity: use low, medium ou high.');
   next.codexBin = String(next.codexBin ?? '').trim() || DEFAULT_CONFIG.codexBin;
   next.codexModel = String(next.codexModel ?? '').trim();
   if (next.codexModel && !isValidModelId(next.codexModel)) throw new Error(`Modelo do Codex inválido: ${next.codexModel}`);
+  next.codexEffort = String(next.codexEffort ?? '').trim();
+  if (next.codexEffort && !(CODEX_EFFORT_LEVELS as string[]).includes(next.codexEffort)) throw new Error('Effort do Codex: use low, medium, high ou xhigh.');
   if (!['', 'window', 'background'].includes(next.publishRestartMode)) throw new Error('publishRestartMode: use "", "window" ou "background".');
   next.publishBranch = String(next.publishBranch ?? '').trim() || DEFAULT_CONFIG.publishBranch;
   next.runnerEntrypoint = String(next.runnerEntrypoint ?? '').trim();
@@ -323,9 +340,12 @@ export function saveConfig(current: Config, patch: Partial<Config>): Config {
   if (authorList(next.selfUpdateAuthors).some((a) => !/^[^\s@,]+@[^\s@,]+$/.test(a))) throw new Error('selfUpdateAuthors: use e-mails separados por vírgula.');
   next.protectedBranches = protectedBranchList(next.protectedBranches).join(', ');
   next.runPlugins = normalizePluginRules(next.runPlugins);
-  next.defaultConnectors = parseConnectorList(next.defaultConnectors).join(', ');
   next.jiraBaseUrl = String(next.jiraBaseUrl ?? '').trim().replace(/\/+$/, '');
   if (next.jiraBaseUrl && !/^https?:\/\//.test(next.jiraBaseUrl)) throw new Error('jiraBaseUrl: use uma URL http(s), como https://empresa.atlassian.net.');
+  next.jiraProjectKeys = jiraKeyList(next.jiraProjectKeys).join(', ');
+  if (jiraKeyList(next.jiraProjectKeys).some((k) => !/^[A-Z]{2}[A-Z0-9]{0,8}$/.test(k))) {
+    throw new Error('jiraProjectKeys: use chaves de projeto separadas por vírgula, como PROD, STAYS2.');
+  }
   if (!next.selfRepoPath) next.selfRepoPath = null;
   if (!next.workspaceDir) next.workspaceDir = null;
   else if (!fs.existsSync(path.resolve(expandHome(next.workspaceDir)))) throw new Error(`A pasta do workspace ${next.workspaceDir} não existe.`);

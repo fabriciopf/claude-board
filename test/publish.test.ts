@@ -346,7 +346,58 @@ describe('publication (D42)', () => {
     await publisher.whenIdle();
     expect(entry(card.id).status).toBe('published');
     expect(fs.readFileSync(path.join(repo, 'src', 'ui', 'App.tsx'), 'utf8')).toMatch(/slow/);
-    expect(fs.readFileSync(path.join(boardHome(), 'publish.log'), 'utf8')).toMatch(/repetindo um arquivo por vez[\s\S]*Test timed out/);
+    expect(fs.readFileSync(path.join(boardHome(), 'publish.log'), 'utf8')).toMatch(/repetindo 1 arquivo\(s\) que falharam, um por vez[\s\S]*Test timed out/);
+  });
+
+  describe('scope of the test step (card #347)', () => {
+    const argsLog = () => path.join(boardHome(), 'fake-build-args.log');
+    const testRuns = () =>
+      fs.existsSync(argsLog())
+        ? fs.readFileSync(argsLog(), 'utf8').trim().split('\n').map((l) => JSON.parse(l) as string[]).filter((a) => a[0] === 'test')
+        : [];
+    const publishLog = () => fs.readFileSync(path.join(boardHome(), 'publish.log'), 'utf8');
+    beforeEach(() => {
+      process.env.FAKE_BUILD_ARGS = argsLog();
+      return () => {
+        delete process.env.FAKE_BUILD_ARGS;
+      };
+    });
+
+    it('a screen-only batch runs only the unit project and says why in publish.log', async () => {
+      const { card } = cardWithBranch('Só tela', { 'src/ui/App.tsx': 'export const title = "tela";\n', 'test/next-card.test.ts': '// x\n' });
+      publisher.onDelivered(card.id);
+      await publisher.whenIdle();
+      expect(entry(card.id).status).toBe('published');
+      expect(testRuns()).toEqual([['test', '--project', 'unit']]);
+      expect(publishLog()).toMatch(/escopo dos testes: só unitários \(--project unit\); só tela: 2 arquivo\(s\)/);
+    });
+
+    it('a mixed batch runs the whole suite and names the file outside the screen', async () => {
+      const ui = cardWithBranch('Tela', { 'src/ui/App.tsx': 'export const title = "misto";\n' }, 'backlog');
+      const server = cardWithBranch('Servidor', { 'src/server.ts': 'export const port = 4319;\n' }, 'backlog');
+      publisher.onDelivered(ui.card.id);
+      publisher.onDelivered(server.card.id);
+      ctx.service.moveCard(ui.card.id, { status: 'review' }, 'system');
+      ctx.service.moveCard(server.card.id, { status: 'review' }, 'system');
+      publisher.kick();
+      await publisher.whenIdle();
+      expect(entry(ui.card.id).status).toBe('published');
+      expect(entry(server.card.id).status).toBe('published');
+      expect(testRuns().length).toBeGreaterThan(0);
+      for (const args of testRuns()) expect(args).not.toContain('--project');
+      expect(publishLog()).toMatch(/escopo dos testes: suíte completa; arquivo\(s\) fora da tela: src\/server\.ts/);
+    });
+
+    it('the serial rerun keeps the unit scope (card #347)', async () => {
+      const { card } = cardWithBranch('Tela lenta', { 'src/ui/App.tsx': 'export const title = "lenta";\n', 'docs/FLAKY_TESTS': '1' });
+      publisher.onDelivered(card.id);
+      await publisher.whenIdle();
+      expect(entry(card.id).status).toBe('published');
+      expect(testRuns()).toEqual([
+        ['test', '--project', 'unit'],
+        ['test', '--project', 'unit', 'test/slow.test.ts'],
+      ]);
+    });
   });
 
   it('the default test commands are tolerant to a loaded machine (card #110)', () => {

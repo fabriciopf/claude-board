@@ -1,5 +1,4 @@
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { DEFAULT_CONFIG, tokenWeightsOf, type Config } from '../src/config.js';
 import type { AppContext } from '../src/context.js';
@@ -7,10 +6,9 @@ import { openDb } from '../src/db/index.js';
 import { EventBus } from '../src/server/bus.js';
 import { BoardService } from '../src/service/board.js';
 import { UsageTracker } from '../src/service/usage.js';
+import { tempDir } from './temp-dirs.js';
 
-export function tempDir(prefix = 'cb-test-'): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
-}
+export { tempDir };
 
 /** In-memory board with a throwaway CLAUDE_BOARD_HOME. */
 export function makeContext(overrides: Partial<Config> = {}): AppContext & { home: string } {
