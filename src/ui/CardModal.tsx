@@ -6,7 +6,7 @@ import { ActionButton, ActionGroup, useBusy } from './ActionButton';
 import { ApiError, api, fmtDate, useServerEvents, type CardDetailResponse } from './api';
 import { latestDelivery } from './delivery';
 import { statusLabel, statusShortLabel, t } from './i18n';
-import { renderMarkdown, setLinkContext } from './markdown';
+import { renderMarkdown, setCardLinks, setLinkContext } from './markdown';
 import { useImagePaste } from './paste-image';
 import { Timeline } from './Timeline';
 
@@ -130,6 +130,8 @@ export function CardModal({ cardId, apps, labels, repositories = [], onClose, on
   const load = useCallback(async () => {
     try {
       const d = await api.get<CardDetailResponse>(`/api/cards/${cardId}`);
+      // Before the state change: a #N that matches one of the card's PR links opens the PR (card #309).
+      setCardLinks(d.card.links.map((l) => l.value));
       setDetail(d);
       setTitle(d.card.title);
       if (!editingDesc) setDesc(d.card.descriptionMd);

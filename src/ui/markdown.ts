@@ -18,6 +18,27 @@ export function setLinkContext(next: LinkContext): void {
   linkContext = { ...next };
 }
 
+/**
+ * Issue and PR numbers of the open card's links (GitHub /pull/N or /issues/N): a bare #N with one of
+ * these numbers is that PR, not card N (card #309, "#1005" in card #373). Set by the card modal
+ * from the card's links, apart from setLinkContext, which the config load overwrites.
+ */
+let numberedLinks = new Map<number, string>();
+
+const GITHUB_NUMBERED = /^https?:\/\/github\.com\/[^/\s]+\/[^/\s]+\/(?:pull|issues)\/(\d+)(?:[/?#]|$)/i;
+
+export function setCardLinks(urls: string[]): void {
+  const next = new Map<number, string>();
+  for (const url of urls) {
+    const m = GITHUB_NUMBERED.exec(url?.trim() ?? '');
+    if (!m) continue;
+    const n = Number(m[1]);
+    // Two repos with the same number leave #N ambiguous: it keeps opening the card.
+    next.set(n, next.has(n) && next.get(n) !== url.trim() ? '' : url.trim());
+  }
+  numberedLinks = new Map([...next].filter(([, url]) => url));
+}
+
 /** Prefixes that look like a Jira key but are standards (UTF-8, ISO-8601, SHA-256, CVE-2024-...); a key starts with two letters, so H2-2026 and Q3-2026 stay text. */
 const NOT_JIRA_KEYS = new Set(['UTF', 'ISO', 'SHA', 'MD', 'RFC', 'CVE', 'ES', 'HTTP', 'TLS', 'SSL', 'IEC', 'IEEE', 'ECMA', 'WCAG', 'COVID', 'PEP']);
 
@@ -103,7 +124,10 @@ const autoref: TokenizerAndRendererExtension = {
     if (base && (m = JIRA_KEY.exec(src)) && jiraAllowed(m[1]!)) {
       return { type: 'autoref', raw: m[0], text: m[0], href: `${base}/browse/${m[0]}` };
     }
-    if ((m = CARD_REF.exec(src))) return { type: 'autoref', raw: m[0], text: m[0], cardId: Number(m[1]) };
+    if ((m = CARD_REF.exec(src))) {
+      const pr = numberedLinks.get(Number(m[1]));
+      return pr ? { type: 'autoref', raw: m[0], text: m[0], href: pr } : { type: 'autoref', raw: m[0], text: m[0], cardId: Number(m[1]) };
+    }
     // A key-shaped word that is not a key (UTF-8, GOV-04) is consumed whole: left to the text
     // tokenizer, it would give up one letter and "TF-8" would then match.
     if ((m = /^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)+/.exec(src))) return { type: 'autoref', raw: m[0], text: m[0] };
