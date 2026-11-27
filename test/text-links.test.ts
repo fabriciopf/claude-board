@@ -1,12 +1,15 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { codePath, hrefPath, markdownToHtml, setLinkContext } from '../src/ui/markdown.js';
+import { codePath, hrefPath, markdownToHtml, setCardLinks, setLinkContext } from '../src/ui/markdown.js';
 
 // Card #309: links inside the card texts (description, comments, summaries, questions).
 
 const html = (md: string) => markdownToHtml(md);
 
 describe('links in card texts', () => {
-  afterEach(() => setLinkContext({}));
+  afterEach(() => {
+    setLinkContext({});
+    setCardLinks([]);
+  });
 
   it('keeps plain URLs as links', () => {
     expect(html('veja https://example.com/a?b=1')).toContain('<a href="https://example.com/a?b=1">');
@@ -45,6 +48,23 @@ describe('links in card texts', () => {
     const out = html('veio do card #305, não de x#1');
     expect(out).toContain('<a href="#" class="card-ref" data-card-id="305">#305</a>');
     expect(out.match(/data-card-id/g)).toHaveLength(1);
+  });
+
+  it('links #N to the PR when the card has a GitHub link with that number', () => {
+    setCardLinks(['https://github.com/acme/app/pull/1005', 'https://github.com/acme/app/issues/7', 'https://example.com/x/1']);
+    const out = html('#1005 (Barueri), #7 e o card #305');
+    expect(out).toContain('<a href="https://github.com/acme/app/pull/1005">#1005</a>');
+    expect(out).toContain('<a href="https://github.com/acme/app/issues/7">#7</a>');
+    expect(out).toContain('data-card-id="305"');
+    expect(out).not.toContain('data-card-id="1005"');
+  });
+
+  it('keeps #N as a card when two repos share that number, and after the links change', () => {
+    setCardLinks(['https://github.com/acme/app/pull/12', 'https://github.com/acme/api/pull/12']);
+    expect(html('#12')).toContain('data-card-id="12"');
+    setCardLinks(['https://github.com/acme/app/pull/1005']);
+    setCardLinks([]);
+    expect(html('#1005')).toContain('data-card-id="1005"');
   });
 
   it('links a Windows path in prose, without the final punctuation', () => {
