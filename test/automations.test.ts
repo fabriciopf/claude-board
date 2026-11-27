@@ -291,6 +291,26 @@ describe('automations API and MCP', () => {
     await app.close();
   });
 
+  it('edits the when and the current instruction as two fields (card #380)', async () => {
+    const ctx = makeContext({ claudeBin: process.execPath, claudeArgsPrefix: [FAKE] });
+    process.env.FAKE_AUTOMATION_FAIL = '1';
+    const app = await buildApp(ctx, { serveUi: false });
+    const id = (await app.inject({ method: 'POST', url: '/api/automations', payload: { request: 'Todo dia às 8h, resuma a fila do Claude.' } })).json().automation.id;
+    // Only the instruction: taken as written, the schedule stays.
+    const a = (await app.inject({ method: 'PATCH', url: `/api/automations/${id}`, payload: { instruction: 'Liste os cards parados há 3 dias.' } })).json();
+    expect(a.by).toBe('given');
+    expect(a.automation.instruction).toBe('Liste os cards parados há 3 dias.');
+    expect(a.automation.trigger.cron).toBe('0 8 * * *');
+    // A new when in plain text: read again, the instruction kept as written.
+    const b = (await app.inject({ method: 'PATCH', url: `/api/automations/${id}`, payload: { when: 'dias úteis às 18h', instruction: 'Liste os cards parados há 3 dias.' } })).json();
+    expect(b.automation.trigger.cron).toBe('0 18 * * 1-5');
+    expect(b.automation.instruction).toBe('Liste os cards parados há 3 dias.');
+    const bad = await app.inject({ method: 'PATCH', url: `/api/automations/${id}`, payload: { when: 'qualquer hora', instruction: 'x x x x x x x x' } });
+    expect(bad.statusCode).toBe(422);
+    expect((await app.inject({ method: 'GET', url: '/api/automations' })).json().automations[0].trigger.cron).toBe('0 18 * * 1-5');
+    await app.close();
+  });
+
   it('Claude creates and lists automations through MCP', async () => {
     const ctx = makeContext();
     const app = await buildApp(ctx, { serveUi: false });
