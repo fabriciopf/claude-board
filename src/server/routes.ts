@@ -291,6 +291,20 @@ export async function registerApi(app: FastifyInstance, ctx: AppContext): Promis
     const b = (req.body ?? {}) as Body;
     let draft = b.draft;
     let by = draft ? 'given' : null;
+    // Edit in two fields (card #380): the instruction is taken as written; only a new "when" is read again.
+    if (!draft && (typeof b.when === 'string' || typeof b.instruction === 'string')) {
+      const cur = automations().get(id);
+      const instruction = typeof b.instruction === 'string' && b.instruction.trim() ? b.instruction.trim() : cur.instruction;
+      const when = typeof b.when === 'string' ? b.when.trim() : '';
+      if (when) {
+        const read = await interpretRequest(ctx.config, `${when}, ${instruction}`, s.listApps());
+        draft = { ...read.draft, instruction, appId: cur.appId, priority: cur.priority };
+        by = read.by;
+      } else {
+        draft = { name: cur.name, instruction, trigger: cur.trigger, appId: cur.appId, priority: cur.priority };
+        by = 'given';
+      }
+    }
     // New words without a draft: read them again.
     if (!draft && typeof b.request === 'string' && b.request.trim() !== automations().get(id).request) {
       ({ draft, by } = await interpretRequest(ctx.config, b.request, s.listApps()));

@@ -2949,6 +2949,19 @@ html[data-busy] body::before {
   margin-top: 8px;
 }
 
+/* Edit in two fields (card #380): when, then what. */
+.automation-edit-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.automation-edit-field input {
+  width: 100%;
+  font: inherit;
+}
+
 /* On/off switch: a styled checkbox, so the keyboard and screen readers get a real control. */
 .switch {
   position: relative;

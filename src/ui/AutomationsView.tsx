@@ -59,6 +59,21 @@ export function savedMessage(r: SaveResponse, kind: 'created' | 'updated'): stri
   return r.by === 'local' ? t('automations.saved.local', { head }) : head;
 }
 
+/**
+ * What the edit sends (card #380): the instruction as written, and the "when" only if it changed, so an
+ * untouched schedule is kept as is. Null when nothing changed.
+ */
+export function editPayload(
+  a: Pick<Automation, 'instruction' | 'trigger'>,
+  when: string,
+  what: string,
+): { instruction: string; when?: string; request: string } | null {
+  const whenChanged = when.trim() !== triggerText(a.trigger).trim();
+  const whatChanged = what.trim() !== a.instruction.trim();
+  if (!whenChanged && !whatChanged) return null;
+  return { instruction: what.trim(), ...(whenChanged ? { when: when.trim() } : {}), request: `${when.trim()}, ${what.trim()}` };
+}
+
 export function AutomationsView({ tick, onOpen, notify }: { tick: number; onOpen: (cardId: number) => void; notify: (msg: string, error?: boolean) => void }) {
   const [data, setData] = useState<ListResponse | null>(null);
   const [text, setText] = useState('');
@@ -175,6 +190,7 @@ function AutomationRow({
   notify: (msg: string, error?: boolean) => void;
 }) {
   const [editing, setEditing] = useState(false);
+  const [whenDraft, setWhenDraft] = useState('');
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState<null | 'save' | 'run' | 'toggle' | 'delete'>(null);
 
@@ -192,7 +208,9 @@ function AutomationRow({
 
   const save = () =>
     act('save', async () => {
-      const r = await api.patch<SaveResponse>(`/api/automations/${a.id}`, { request: draft });
+      const body = editPayload(a, whenDraft, draft);
+      if (!body) return setEditing(false);
+      const r = await api.patch<SaveResponse>(`/api/automations/${a.id}`, body);
       setEditing(false);
       notify(savedMessage(r, 'updated'));
     });
@@ -241,7 +259,8 @@ function AutomationRow({
         <button
           className="btn small"
           onClick={() => {
-            setDraft(a.request || a.instruction);
+            setWhenDraft(triggerText(a.trigger));
+            setDraft(a.instruction);
             setEditing(true);
           }}
           disabled={busy !== null || editing}
@@ -255,20 +274,27 @@ function AutomationRow({
 
       {editing ? (
         <div className="automation-edit">
-          <textarea
-            className="input"
-            rows={3}
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            aria-label={t('automations.edit.aria')}
-            disabled={busy === 'save'}
-            autoFocus
-          />
+          <label className="automation-edit-field">
+            <span className="muted small">{t('automations.edit.when')}</span>
+            <input
+              className="input"
+              value={whenDraft}
+              onChange={(e) => setWhenDraft(e.target.value)}
+              placeholder={t('automations.edit.whenHint')}
+              title={t('automations.edit.whenHint')}
+              disabled={busy === 'save'}
+              autoFocus
+            />
+          </label>
+          <label className="automation-edit-field">
+            <span className="muted small">{t('automations.edit.what')}</span>
+            <textarea className="input" rows={3} value={draft} onChange={(e) => setDraft(e.target.value)} disabled={busy === 'save'} />
+          </label>
           <div className="automation-edit-foot">
             <button className="btn" onClick={() => setEditing(false)} disabled={busy === 'save'}>
               {t('automations.cancel')}
             </button>
-            <ActionButton className="btn primary" onAction={save} busy={busy === 'save'} disabled={!draft.trim()} busyLabel={t('automations.busy.interpreting')}>
+            <ActionButton className="btn primary" onAction={save} busy={busy === 'save'} disabled={!draft.trim() || !whenDraft.trim()} busyLabel={t('automations.busy.interpreting')}>
               {t('automations.save')}
             </ActionButton>
           </div>

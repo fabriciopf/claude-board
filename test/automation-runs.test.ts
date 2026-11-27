@@ -109,3 +109,18 @@ describe('history of runs', () => {
     expect(runCardState({ outcome: 'nothing', cardId: null, cardStatus: null, cardArchived: false })).toBe('');
   });
 });
+
+describe('editing in two fields (card #380)', () => {
+  it('sends the instruction as written and the when only when it changed', async () => {
+    const { editPayload } = await import('../src/ui/AutomationsView.js');
+    const { triggerText } = await import('../src/ui/automation-labels.js');
+    const when = triggerText(schedule.trigger);
+    expect(editPayload(schedule, when, schedule.instruction)).toBeNull();
+    expect(editPayload(schedule, when, 'Outra coisa.')).toEqual({ instruction: 'Outra coisa.', request: `${when}, Outra coisa.` });
+    expect(editPayload(schedule, 'dias úteis às 18h', schedule.instruction)).toEqual({
+      instruction: schedule.instruction,
+      when: 'dias úteis às 18h',
+      request: `dias úteis às 18h, ${schedule.instruction}`,
+    });
+  });
+});
